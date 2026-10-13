@@ -179,11 +179,16 @@ jobs:
           fi
           ls -lh dist/
 
-      - name: Upload artifact
+      # 制品只随 tag 构建上传，且 7 天后自动过期。
+      # 此前每次 push main 都上传 APK，8 天堆积 167 个 / 3.1 GB，撑爆配额。
+      # 面向用户的分发走下面的 Release（永久保留，不计入 Actions 存储）。
+      - name: Upload artifact (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: mistakebook-apk
           path: dist/*.apk
+          retention-days: 7
           if-no-files-found: error
 
       - name: Attach APK to Release (tag builds only)
