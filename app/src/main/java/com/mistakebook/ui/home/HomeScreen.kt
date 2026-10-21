@@ -75,6 +75,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -147,6 +149,11 @@ fun HomeScreen(
     val displayQuestions = remember(state.questions, arrangedQuestionIds) {
         arrangedQuestionIds?.let { orderByIds(state.questions, it) { question -> question.id } }
             ?: state.questions
+    }
+    // 学科名查表：列表每一项都要显示学科名，原来是每项都对 subjects 做一次
+    // firstOrNull 线性扫描，几十项 × 每次重组。建一次 Map，之后 O(1)。
+    val subjectNames = remember(state.subjects) {
+        state.subjects.associate { it.id to it.name }
     }
 
     fun beginQuestionDrag(id: Long) {
@@ -357,7 +364,9 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(displayQuestions, key = { it.id }) { question ->
-                        val subjectName = state.subjects.firstOrNull { it.id == question.subjectId }?.name
+                        // 原来这里对每道题都 firstOrNull 线性扫一遍 subjects。
+                        // 列表几十项、每次重组都扫，改成外面建好的 Map 直接查。
+                        val subjectName = subjectNames[question.subjectId]
                         SwipeableQuestionCard(
                             // animateItem：拖动换位时其他卡片平滑滑到新位置，
                             // 没有它就是「瞬移」，排序体感很生硬
@@ -385,9 +394,24 @@ fun HomeScreen(
                             }
                         )
                     }
+                    // 触底加载。
+                    //
+                    // 原来是 LaunchedEffect(state.questions.size)：**列表长度一变就触发**，
+                    // 删一条题也会触发一次加载；加载到底之后 size 不再变，
+                    // 于是再也触发不了，要靠别的路径补。
+                    // 改成监听「可见的最后一项」，只在真的快滚到底时才拉下一页。
                     item {
-                        LaunchedEffect(state.questions.size) {
-                            viewModel.loadMore()
+                        LaunchedEffect(questionListState) {
+                            snapshotFlow {
+                                val last =
+                                    questionListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+                                        ?: -1
+                                last to state.questions.size
+                            }.distinctUntilChanged().collect { (lastVisible, size) ->
+                                if (size > 0 && lastVisible >= size - LOAD_MORE_THRESHOLD) {
+                                    viewModel.loadMore()
+                                }
+                            }
                         }
                     }
                 }
@@ -951,3 +975,6 @@ private fun NotebookDropdown(
  * 拇指能点中，又不至于把整张卡都推走（推太多用户会失去「这是同一张卡」的感觉）。
  */
 private val SwipeDeleteRevealWidth = 88.dp
+
+/** 距列表末尾还剩几项时开始拉下一页。留一点余量，滚到底前数据就位。 */
+private const val LOAD_MORE_THRESHOLD = 5

@@ -31,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -40,6 +41,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.mistakebook.domain.ErrorReason
 import com.mistakebook.ui.theme.SurfaceCard
 
@@ -138,6 +140,15 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     )
 }
 
+/**
+ * 缩略图的解码边长（像素）。
+ *
+ * 不指定 size 时 Coil 会**按原图尺寸解码**：手机拍的题图动辄 3000~4000px，
+ * 一张解码出来就是几十 MB 的 Bitmap，列表里挂着十几张足以把界面拖垮
+ * （首页、详情页、编辑页全是这个组件）。512px 足够覆盖最大的缩略图显示尺寸。
+ */
+private const val THUMB_DECODE_PX = 512
+
 // 原图预览：点击看大图，支持缩放
 @Composable
 fun QuestionThumb(
@@ -146,13 +157,22 @@ fun QuestionThumb(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    // request 也 remember：否则每次重组都新建 ImageRequest，Coil 会认为
+    // 是不同的请求而重新走一遍加载判定。
+    val request = remember(imagePath) {
+        ImageRequest.Builder(context)
+            .data(imagePath)
+            .size(THUMB_DECODE_PX)
+            .build()
+    }
     Surface(
         modifier = modifier.then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant
     ) {
         AsyncImage(
-            model = imagePath,
+            model = request,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()

@@ -245,5 +245,8 @@ private fun DoneContent(onEdit: () -> Unit) {
     }
 }
 
+// 顶层常量：这个正则原本写在函数体里，每次调用（即每次重组）都要重新编译一次
+private val RE_STAGE_PERCENT = Regex("(\\d{1,3})\\s*%")
+
 private fun extractPercent(stage: String): Int? =
-    Regex("(\\d{1,3})\\s*%").find(stage)?.groupValues?.get(1)?.toIntOrNull()
+    RE_STAGE_PERCENT.find(stage)?.groupValues?.get(1)?.toIntOrNull()
