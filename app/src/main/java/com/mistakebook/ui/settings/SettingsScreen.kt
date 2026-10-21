@@ -133,6 +133,11 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 onShowModelsClick = { showModels = true }
             )
 
+            // 用量概览放在大模型配置之后、MinerU 参数之前——
+            // 两类调用（LLM 对话 / MinerU 解析）的计数都在这儿，
+            // 挨着各自的配置区，换 Key 后顺手就能清零对比。
+            UsageOverviewSection(container = container)
+
             ThemeModeSection(
                 state = state,
                 viewModel = viewModel

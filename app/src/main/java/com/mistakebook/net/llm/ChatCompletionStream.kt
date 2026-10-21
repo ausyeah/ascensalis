@@ -49,7 +49,9 @@ sealed interface ChatStreamEvent {
     data class Done(
         val promptTokens: Int = 0,
         val completionTokens: Int = 0,
-        val finishReason: String? = null
+        val finishReason: String? = null,
+        /** 命中提示词缓存的 token 数（DeepSeek `prompt_cache_hit_tokens`），服务端没给就是 0。 */
+        val cachedTokens: Int = 0
     ) : ChatStreamEvent
 
     data class Failed(val error: ApiError) : ChatStreamEvent
@@ -157,7 +159,14 @@ class ChatCompletionStream(
 
                     is RawEvent.Ended -> {
                         ended = true
-                        emit(ChatStreamEvent.Done(event.promptTokens, event.completionTokens, event.finishReason))
+                        emit(
+                            ChatStreamEvent.Done(
+                                event.promptTokens,
+                                event.completionTokens,
+                                event.finishReason,
+                                event.cachedTokens
+                            )
+                        )
                     }
 
                     is RawEvent.Failed -> failure = event.error
@@ -192,7 +201,12 @@ class ChatCompletionStream(
     private sealed interface RawEvent {
         data class Delta(val text: String) : RawEvent
         data class Thinking(val text: String) : RawEvent
-        data class Ended(val promptTokens: Int, val completionTokens: Int, val finishReason: String?) : RawEvent
+        data class Ended(
+            val promptTokens: Int,
+            val completionTokens: Int,
+            val finishReason: String?,
+            val cachedTokens: Int = 0
+        ) : RawEvent
         data class Failed(val error: ApiError) : RawEvent
     }
 
@@ -263,7 +277,14 @@ class ChatCompletionStream(
         )
         // 无论是怎么结束的（[DONE] / EOF / finish_reason），都发一次 Ended。
         // 上层靠它把消息状态从「生成中」翻成完成。
-        emit(RawEvent.Ended(result.promptTokens, result.completionTokens, result.finishReason))
+        emit(
+            RawEvent.Ended(
+                promptTokens = result.promptTokens,
+                completionTokens = result.completionTokens,
+                finishReason = result.finishReason,
+                cachedTokens = result.cachedTokens
+            )
+        )
     }
 
     /** 服务端忽略 stream、直接给 JSON 时走这里。 */
@@ -286,7 +307,8 @@ class ChatCompletionStream(
             RawEvent.Ended(
                 promptTokens = parsed.usage?.promptTokens ?: 0,
                 completionTokens = parsed.usage?.completionTokens ?: 0,
-                finishReason = choice.finishReason
+                finishReason = choice.finishReason,
+                cachedTokens = parsed.usage?.promptCacheHitTokens ?: 0
             )
         )
     }
@@ -333,7 +355,8 @@ class ChatCompletionStream(
             ChatStreamEvent.Done(
                 promptTokens = parsed.usage?.promptTokens ?: 0,
                 completionTokens = parsed.usage?.completionTokens ?: 0,
-                finishReason = choice.finishReason
+                finishReason = choice.finishReason,
+                cachedTokens = parsed.usage?.promptCacheHitTokens ?: 0
             )
         )
     }
@@ -422,6 +445,9 @@ data class SseStreamResult(
     val completionTokens: Int = 0,
     val finishReason: String? = null,
 
+    /** 命中提示词缓存的 token 数累计（DeepSeek `prompt_cache_hit_tokens`）。 */
+    val cachedTokens: Int = 0,
+
     /** 因什么而结束的：`done` 哨兵 / `eof` 连接关闭 / `finish_reason` 已到齐。 */
     val endedBy: String = ""
 )
@@ -461,10 +487,11 @@ fun drainSse(
     var finishReason: String? = null
     var promptTokens = 0
     var completionTokens = 0
+    var cachedTokens = 0
 
     while (true) {
         val line = readLine() ?: return SseStreamResult(
-            promptTokens, completionTokens, finishReason, endedBy = "eof"
+            promptTokens, completionTokens, finishReason, cachedTokens, endedBy = "eof"
         )
         val event = parser.accept(line) ?: continue
         when (event) {
@@ -475,17 +502,19 @@ fun drainSse(
                 event.finishReason?.let { finishReason = it }
                 if (event.promptTokens > 0) promptTokens = event.promptTokens
                 if (event.completionTokens > 0) completionTokens = event.completionTokens
+                if (event.cachedTokens > 0) cachedTokens = event.cachedTokens
 
                 // 到了就不再多读一行——多读那一下可能就是永远。
                 if (isTerminalFinish(event.finishReason)) {
                     return SseStreamResult(
-                        promptTokens, completionTokens, finishReason, endedBy = "finish_reason"
+                        promptTokens, completionTokens, finishReason, cachedTokens,
+                        endedBy = "finish_reason"
                     )
                 }
             }
 
             SseEvent.Done -> return SseStreamResult(
-                promptTokens, completionTokens, finishReason, endedBy = "done"
+                promptTokens, completionTokens, finishReason, cachedTokens, endedBy = "done"
             )
 
             // 坏帧不中断：可能只是某一行被代理改坏了。累计数量交给上层判断。

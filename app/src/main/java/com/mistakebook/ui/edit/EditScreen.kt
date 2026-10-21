@@ -136,7 +136,12 @@ fun EditScreen(
                             )
 
                             else -> stringResource(R.string.edit_title)
-                        }
+                        },
+                        // 标题槽和右侧的「查看 / 体检 / 左右箭头」共享一行宽度，
+                        // 不限行数时「确认题目 1/2」会被挤成三行换行。
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                 },
                 navigationIcon = {

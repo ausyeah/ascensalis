@@ -1,6 +1,7 @@
 package com.mistakebook.pipeline
 
 import com.mistakebook.data.AppFiles
+import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.net.ApiError
 import com.mistakebook.net.ApiErrorKind
 import com.mistakebook.net.ApiResult
@@ -36,7 +37,8 @@ data class MineruOutcome(
  */
 class MineruClient(
     private val api: MineruApi,
-    private val files: AppFiles
+    private val files: AppFiles,
+    private val usageStatsStore: UsageStatsStore
 ) {
 
     suspend fun recognize(
@@ -87,7 +89,11 @@ class MineruClient(
             )
         }
 
-        pollResults(auth, batch.batch_id, fileName, taskId, onStage)
+        // 一次 recognize 成功 = 一次 MinerU 用量。放在这里而不是 downloadAndExtract：
+        // 只有服务端真的解析完（state=done）才算数，上传/轮询阶段的失败不烧额度口径。
+        val outcome = pollResults(auth, batch.batch_id, fileName, taskId, onStage)
+        if (outcome is ApiResult.Success) usageStatsStore.recordMineru()
+        outcome
     }
 
     private suspend fun requestUploadUrl(

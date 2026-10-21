@@ -134,6 +134,7 @@ fun ChatScreen(
             repository = c.chatRepository,
             stream = c.chatCompletionStream,
             settingsStore = c.settingsStore,
+            usageStatsStore = c.usageStatsStore,
             preparer = c.chatAttachmentPreparer,
             questionId = questionId,
             sessionId = sessionId
@@ -622,7 +623,9 @@ private fun MessageBubble(
                         color = if (isUser) {
                             MaterialTheme.colorScheme.onPrimaryContainer
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            // AI 回复正文用 onSurface：气泡底是 surfaceVariant（浅灰），
+                            // 再用 onSurfaceVariant 会糊成一片，用户实测「字太淡看不清」
+                            MaterialTheme.colorScheme.onSurface
                         }
                     )
                 }
@@ -821,7 +824,8 @@ private fun ThinkingBlock(text: String, streaming: Boolean) {
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                // 思考过程同样加深：onSurfaceVariant 在浅色主题下对比度不足
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }

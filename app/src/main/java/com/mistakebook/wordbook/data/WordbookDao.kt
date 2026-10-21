@@ -36,6 +36,10 @@ interface WordbookDao {
     @Query("SELECT COUNT(DISTINCT word) FROM word_study_log WHERE answeredAt >= :startOfDayMs")
     fun observeStudiedTodayCount(startOfDayMs: Long): Flow<Int>
 
+    /** 近 N 天的作答流水。聚合（按天分组、正确率）在 Kotlin 侧做，避免 SQL 方言差异。 */
+    @Query("SELECT * FROM word_study_log WHERE answeredAt >= :sinceMs ORDER BY answeredAt ASC")
+    suspend fun logsSince(sinceMs: Long): List<WordStudyLog>
+
     @Query("SELECT COUNT(*) FROM word_progress WHERE level >= 2")
     fun observeMasteredCount(): Flow<Int>
 

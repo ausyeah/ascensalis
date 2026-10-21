@@ -9,6 +9,7 @@ import com.mistakebook.data.local.entities.ChatAttachment
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.SettingsStore
+import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.data.repos.ChatRepository
 import com.mistakebook.domain.AttachmentKind
 import com.mistakebook.domain.AttachmentStatus
@@ -143,6 +144,7 @@ class ChatViewModel(
     private val repository: ChatRepository,
     private val stream: ChatCompletionStream,
     private val settingsStore: SettingsStore,
+    private val usageStatsStore: UsageStatsStore,
     private val preparer: ChatAttachmentPreparer,
     private val questionId: Long?,
 
@@ -439,6 +441,14 @@ class ChatViewModel(
                     is ChatStreamEvent.Done -> {
                         promptTokens = event.promptTokens
                         completionTokens = event.completionTokens
+                        // 用量记账放在这里而不是 Done 事件的发送方：一次对话
+                        // （无论流式还是降级非流式）收到且仅收到一次 Done，
+                        // 天然就是「一次调用」的口径。失败 / 取消不会到这儿。
+                        usageStatsStore.recordLlm(
+                            promptTokens = event.promptTokens,
+                            completionTokens = event.completionTokens,
+                            cachedTokens = event.cachedTokens
+                        )
                         // length = 被 max_tokens 截断。它和「模型胡乱输出」在下游一样，
                         // 但处理方式不同：要提示用户换个更大的模型或分次问。
                         wasTruncated = event.finishReason == FINISH_REASON_LENGTH

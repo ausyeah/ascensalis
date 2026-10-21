@@ -42,6 +42,23 @@ enum class WrongSubTab {
 }
 
 /**
+ * 单日学习统计。用于学习统计页的「近 7 天波动」图表。
+ */
+data class DayStat(
+    /** 当天 00:00 的时间戳（毫秒） */
+    val dayMs: Long,
+    /** 当天学习过的去重单词数 */
+    val studiedCount: Int,
+    /** 当天答对次数 */
+    val correctCount: Int,
+    /** 当天作答总次数 */
+    val totalCount: Int
+) {
+    /** 当天正确率；没有作答时为 null（图表上显示空柱而不是 0%） */
+    val accuracy: Float? get() = if (totalCount <= 0) null else correctCount.toFloat() / totalCount
+}
+
+/**
  * 单词书整屏 UI 状态。
  */
 data class WordbookUiState(
@@ -63,6 +80,12 @@ data class WordbookUiState(
     val masteredCount: Int = 0,
     val wrongBookCount: Int = 0,
     val totalVocabCount: Int = 4356,
+
+    // 学习统计页：近 7 天每日学习量与正确率（顺序为从早到晚）
+    val weeklyDayStats: List<DayStat> = emptyList(),
+
+    // 是否有可回退的「上一题」（按钮置灰用）
+    val hasPrevious: Boolean = false,
 
     // 错题本子页
     val wrongSubTab: WrongSubTab = WrongSubTab.WRONG_BOOK,

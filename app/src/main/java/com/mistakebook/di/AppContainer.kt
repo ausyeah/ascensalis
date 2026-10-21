@@ -6,6 +6,7 @@ import com.mistakebook.data.ImageImporter
 import com.mistakebook.data.backup.BackupManager
 import com.mistakebook.data.local.MistakeBookDatabase
 import com.mistakebook.data.prefs.SettingsStore
+import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.data.repos.CaptureTaskRepository
 import com.mistakebook.data.repos.NotebookRepository
 import com.mistakebook.data.repos.QuestionRepository
@@ -42,6 +43,9 @@ class AppContainer(context: Context) {
     val files: AppFiles = AppFiles(appContext)
 
     val settingsStore: SettingsStore = SettingsStore(appContext)
+
+    /** 大模型 / MinerU 用量累计（SharedPreferences 计数器）。 */
+    val usageStatsStore: UsageStatsStore by lazy { UsageStatsStore(appContext) }
 
     private val httpClient = HttpFactory.createClient()
 
@@ -148,7 +152,7 @@ class AppContainer(context: Context) {
         com.mistakebook.wordbook.data.VocabRepository(appContext)
     }
 
-    val mineruClient: MineruClient by lazy { MineruClient(mineruApi, files) }
+    val mineruClient: MineruClient by lazy { MineruClient(mineruApi, files, usageStatsStore) }
 
     val llmClient: LlmClient by lazy { LlmClient(llmApi) }
 

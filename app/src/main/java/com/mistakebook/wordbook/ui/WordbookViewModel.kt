@@ -39,6 +39,14 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     private val recentWords = ArrayDeque<String>()
     private val COOL_DOWN_WINDOW = 8
 
+    // 「上一题」历史栈：每离开一题就把刚做的词压栈，回退时弹出重放。
+    // 限长防止无限增长——回看 30 题足够，再往前的没有记忆价值。
+    private val questionHistory = ArrayDeque<Word>()
+    private val HISTORY_LIMIT = 30
+
+    // 近 7 天统计（正确率 + 每日学习量），切到统计页时按需加载
+    private val weeklyStats = MutableStateFlow<List<DayStat>>(emptyList())
+
     // 快速连击与防重入原子状态锁
     private val isActionInProgress = AtomicBoolean(false)
     private val isTogglingMaster = AtomicBoolean(false)
@@ -52,12 +60,29 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    private fun pushHistory(word: Word?) {
+        if (word == null) return
+        // 连着同一个词不重复入栈（自动切题与手动下一题可能快速连点）
+        if (questionHistory.lastOrNull()?.word == word.word) return
+        questionHistory.addLast(word)
+        while (questionHistory.size > HISTORY_LIMIT) {
+            questionHistory.removeFirst()
+        }
+        _uiState.update { it.copy(hasPrevious = questionHistory.isNotEmpty()) }
+    }
+
     init {
         viewModelScope.launch {
             vocabRepo.ensureLoaded()
             observeDatabaseStats()
             prepareNextQuestion()
             _uiState.update { it.copy(isLoading = false) }
+        }
+        // 周统计刷新后实时同步到 UI 状态（切到统计页或答完题都会触发）
+        viewModelScope.launch {
+            weeklyStats.collect { stats ->
+                _uiState.update { it.copy(weeklyDayStats = stats) }
+            }
         }
     }
 
@@ -97,6 +122,60 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             refreshWrongSubTabList(_uiState.value.wrongSubTab)
         } else if (tab == WordbookTab.LIBRARY) {
             refreshLibraryList()
+        } else if (tab == WordbookTab.STATS) {
+            refreshWeeklyStats()
+        }
+    }
+
+    /**
+     * 近 7 天统计：每日学习量与正确率，按天聚合后放入 weeklyStats。
+     *
+     * 聚合放在 Kotlin 侧而不是 SQL：近 7 天的流水最多几千行，
+     * groupBy 一次的成本远低于给 SQLite 方言差异（strftime 的
+     * 'localtime' 修饰符在各 ROM 上行为不一）交的学费。
+     */
+    private fun refreshWeeklyStats() {
+        viewModelScope.launch {
+            val calendar = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+                add(Calendar.DAY_OF_YEAR, -6)
+            }
+            val sinceMs = calendar.timeInMillis
+            val logs = withContext(Dispatchers.IO) { dao.logsSince(sinceMs) }
+            val dayMsOf: (Long) -> Long = { ts ->
+                Calendar.getInstance().apply {
+                    timeInMillis = ts
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            }
+            // 近 7 天一个不少地铺满，没有学习的日期补 0，图表上才是完整的一周
+            val dayStarts = (0..6).map { offset ->
+                Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                    add(Calendar.DAY_OF_YEAR, -6 + offset)
+                }.timeInMillis
+            }
+            val grouped = logs.groupBy { dayMsOf(it.answeredAt) }
+            val stats = dayStarts.map { dayMs ->
+                val dayLogs = grouped[dayMs].orEmpty()
+                val correct = dayLogs.count { it.isCorrect }
+                DayStat(
+                    dayMs = dayMs,
+                    studiedCount = dayLogs.map { it.word }.distinct().size,
+                    correctCount = correct,
+                    totalCount = dayLogs.size
+                )
+            }
+            weeklyStats.value = stats
         }
     }
 
@@ -142,10 +221,21 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             }
             return
         }
+        // 离开当前题：把刚做的词压入「上一题」历史栈
+        pushHistory(_uiState.value.currentWord)
+        presentWord(nextWord)
+    }
 
+    /**
+     * 把指定单词构造成一道题并推到界面上。
+     *
+     * 从 loadNextQuestionInternal 抽出来：正常刷题与「上一题」回退
+     * 共用同一套构题逻辑（四选一 / 义项辨析两种模式）。
+     */
+    private suspend fun presentWord(word: Word) {
         if (_uiState.value.studyMode == StudyMode.SENSE) {
             var senseQ: SenseQuestion? = null
-            var candidate: Word? = nextWord
+            var candidate: Word? = word
             var retryCount = 0
             val maxRetries = 10
 
@@ -203,24 +293,24 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
 
-        val progress = dao.getProgress(nextWord.word) ?: WordProgress(word = nextWord.word)
-        val distractors = vocabRepo.pickDistractors(nextWord, 3)
+        val progress = dao.getProgress(word.word) ?: WordProgress(word = word.word)
+        val distractors = vocabRepo.pickDistractors(word, 3)
 
         // 构造四选一并打乱
         val labels = listOf("A", "B", "C", "D")
-        val allCandidates = (listOf(nextWord) + distractors).shuffled(Random)
+        val allCandidates = (listOf(word) + distractors).shuffled(Random)
         val options = allCandidates.mapIndexed { index, candidateWord ->
             QuizOption(
                 label = labels.getOrElse(index) { "?" },
                 word = candidateWord,
-                isCorrect = candidateWord.word == nextWord.word,
+                isCorrect = candidateWord.word == word.word,
                 isSelected = false
             )
         }
 
         _uiState.update {
             it.copy(
-                currentWord = nextWord,
+                currentWord = word,
                 currentProgress = progress,
                 currentSense = null,
                 options = options,
@@ -231,6 +321,31 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
     }
+
+    /**
+     * 返回上一题。卡片模式与四选一 / 义项辨析都可用。
+     *
+     * 标准回退栈语义：弹掉栈顶（上一题）并展示，**当前词直接丢弃**。
+     * 不回压当前词——否则连按「上一题」只会在最近两题之间振荡
+     * （w3→w2→w3→w2…），永远回不到更早的题。
+     * 代价是回退后再按「下一题」会抽新题，往前走过的词不保留，
+     * 与浏览器「后退后再前进」丢弃 forward 历史的行为一致。
+     *
+     * 不走冷却队列与数据库调度——回看的是刚做过的题，
+     * 直接重放比重新抽题更符合「上一题」的直觉。
+     */
+    fun previousQuestion() {
+        if (isActionInProgress.get()) return
+        val prev = questionHistory.pollLast() ?: return
+        _uiState.update { it.copy(hasPrevious = questionHistory.isNotEmpty()) }
+        nextQuestionJob?.cancel()
+        nextQuestionJob = viewModelScope.launch {
+            presentWord(prev)
+        }
+    }
+
+    /** 历史栈里还有可回退的题时 UI 才显示「上一题」按钮。 */
+    fun hasPreviousQuestion(): Boolean = questionHistory.isNotEmpty()
 
     private suspend fun pickNextWord(): Word? = withContext(Dispatchers.IO) {
         val isSenseMode = _uiState.value.studyMode == StudyMode.SENSE

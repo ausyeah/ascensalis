@@ -211,6 +211,16 @@
 
     <string name="settings_llm_profiles">大模型接入配置</string>
 
+    <!-- 用量概览 -->
+    <string name="settings_usage_title">用量概览</string>
+    <string name="settings_usage_llm_calls">大模型调用</string>
+    <string name="settings_usage_prompt">输入 tokens</string>
+    <string name="settings_usage_completion">输出 tokens</string>
+    <string name="settings_usage_cached">缓存命中 tokens</string>
+    <string name="settings_usage_mineru_calls">MinerU 解析</string>
+    <string name="settings_usage_reset">清零重算</string>
+    <string name="settings_usage_hint">仅统计本机，自上次清零起累计；缓存命中部分的单价低于普通输入</string>
+
     <string name="settings_active_profile">当前使用</string>
     <string name="settings_add_profile">新增配置</string>
     <string name="settings_edit_profile">编辑配置</string>

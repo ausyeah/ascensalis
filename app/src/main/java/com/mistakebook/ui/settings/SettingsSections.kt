@@ -46,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +54,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +65,8 @@ import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.ThemeMode
+import com.mistakebook.data.prefs.UsageSnapshot
+import com.mistakebook.data.prefs.formatCount
 import com.mistakebook.domain.ErrorReason
 
 @Composable
@@ -698,6 +702,101 @@ internal fun LlmProfilesSection(
             Spacer(Modifier.height(8.dp))
             FirstRunHint(R.string.settings_hint_llm_key)
         }
+    }
+}
+
+/**
+ * 用量概览：大模型调用次数 + 输入 / 输出 / 缓存命中 token，MinerU 解析次数。
+ *
+ * 刻意不做成图表——这是**计数器**而不是趋势：用户关心的是
+ * 「这把 Key 到现在烧了多少」。一行一个数，扫一眼就完。
+ *
+ * 计数存在 SharedPreferences（[com.mistakebook.data.prefs.UsageStatsStore]），
+ * 没有 Flow，所以进页面时读一次、重置后重读一次；读取走 IO 不卡合成。
+ * 口径是「一次 Done 事件 = 一次调用」：失败与取消不计，
+ * 流式降级非流式重发的那一次会照常计入（服务端确实又收了一次钱）。
+ */
+@Composable
+internal fun UsageOverviewSection(container: com.mistakebook.di.AppContainer) {
+    val scope = rememberCoroutineScope()
+    var snapshot by remember { mutableStateOf<UsageSnapshot?>(null) }
+
+    LaunchedEffect(Unit) {
+        snapshot = withContext(Dispatchers.IO) { container.usageStatsStore.snapshot() }
+    }
+
+    SettingsGroup(title = stringResource(R.string.settings_usage_title)) {
+        val snap = snapshot
+        if (snap == null) {
+            Text(
+                text = "…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            UsageRow(
+                label = stringResource(R.string.settings_usage_llm_calls),
+                value = "${formatCount(snap.llmCalls)} 次"
+            )
+            UsageRow(
+                label = stringResource(R.string.settings_usage_prompt),
+                value = formatCount(snap.llmPromptTokens)
+            )
+            UsageRow(
+                label = stringResource(R.string.settings_usage_completion),
+                value = formatCount(snap.llmCompletionTokens)
+            )
+            UsageRow(
+                label = stringResource(R.string.settings_usage_cached),
+                value = formatCount(snap.llmCachedTokens)
+            )
+            Spacer(Modifier.height(4.dp))
+            UsageRow(
+                label = stringResource(R.string.settings_usage_mineru_calls),
+                value = "${formatCount(snap.mineruCalls)} 次"
+            )
+            Text(
+                text = stringResource(R.string.settings_usage_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) { container.usageStatsStore.reset() }
+                        snapshot = container.usageStatsStore.snapshot()
+                    }
+                }
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.settings_usage_reset))
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 

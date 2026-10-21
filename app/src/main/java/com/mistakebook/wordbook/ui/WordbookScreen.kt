@@ -1,9 +1,9 @@
 package com.mistakebook.wordbook.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +26,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Bookmark
@@ -66,6 +67,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -417,6 +419,29 @@ private fun StudyView(
             }
         }
 
+        // 「上一题」：回看刚做过的词。历史栈为空时置灰。
+        // 放在题干卡片上方——先看到入口，再看到内容，符合回看的操作顺序。
+        if (state.hasPrevious) {
+            item(key = "prev_question") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    TextButton(onClick = viewModel::previousQuestion) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("上一题", fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+
         // 单词主纸质卡片
         if (currentWord != null) {
             item {
@@ -478,14 +503,22 @@ private fun StudyView(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
-                            // 作答后展示原词与全部释义
-                            AnimatedVisibility(
-                                visible = state.isAnswered,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
+                            // 作答后展示原词与全部释义。
+                            //
+                            // 不用 AnimatedVisibility：它的 exit 渐隐期间 content
+                            // 仍会组合渲染——切题时新词的释义会先闪一下再消失
+                            // （用户实测「还没选就出现了」）。改为显式 alpha：
+                            // 隐藏时 snap() 瞬间归零立即停止渲染，显示时才渐显。
+                            val senseAlpha by animateFloatAsState(
+                                targetValue = if (state.isAnswered) 1f else 0f,
+                                animationSpec = if (state.isAnswered) tween(220) else snap(),
+                                label = "senseAnswerAlpha"
+                            )
+                            if (senseAlpha > 0.01f) {
                                 Column(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .alpha(senseAlpha),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Spacer(Modifier.height(18.dp))
@@ -540,13 +573,20 @@ private fun StudyView(
                                 )
                             }
 
-                            // 作答后或卡片揭晓后展示完整中文释义
-                            AnimatedVisibility(
-                                visible = state.isAnswered || state.isCardRevealed,
-                                enter = fadeIn(),
-                                exit = fadeOut()
-                            ) {
-                                Column(modifier = Modifier.fillMaxWidth()) {
+                            // 作答后或卡片揭晓后展示完整中文释义。
+                            // 同 SENSE 分支：不用 AnimatedVisibility，避免 exit
+                            // 渐隐期间新词释义闪现；隐藏即时、显示渐显。
+                            val meaningAlpha by animateFloatAsState(
+                                targetValue = if (state.isAnswered || state.isCardRevealed) 1f else 0f,
+                                animationSpec = if (state.isAnswered || state.isCardRevealed) tween(220) else snap(),
+                                label = "meaningAlpha"
+                            )
+                            if (meaningAlpha > 0.01f) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .alpha(meaningAlpha)
+                                ) {
                                     Spacer(Modifier.height(18.dp))
                                     HorizontalDivider(
                                         modifier = Modifier.fillMaxWidth(),
@@ -570,7 +610,9 @@ private fun StudyView(
             // 模式分支交互
             if (state.studyMode == StudyMode.QUIZ || state.studyMode == StudyMode.SENSE) {
                 // 单选题列表（QUIZ 或 SENSE）
-                items(state.options) { option ->
+                // key 用单词本身：选项集合变化时 Compose 才能正确复用/重排
+                // item，而不是把四个选项整组扔掉重建（滚动卡顿的来源之一）。
+                items(state.options, key = { it.word.word }) { option ->
                     QuizOptionRow(
                         option = option,
                         isSenseMode = state.studyMode == StudyMode.SENSE,
@@ -1110,6 +1152,8 @@ private fun StatsView(
             }
         }
 
+        // 近 7 天学习量柱状图：一天一柱，没学习的日期留空柱，
+        // 一眼看出哪天学了多少、有没有断档。
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1117,19 +1161,129 @@ private fun StatsView(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                WeeklyStudyChart(stats = state.weeklyDayStats)
+            }
+        }
+
+        // 近 7 天正确率：总量 + 条形 + 百分比，替代原先的 Lv 分级规则卡。
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
+            ) {
+                WeeklyAccuracyCard(stats = state.weeklyDayStats)
+            }
+        }
+    }
+}
+
+/**
+ * 近 7 天学习量柱状图。
+ *
+ * 柱子用 Box 画而不是 Canvas：文字（日期/数量）交给 Text，
+ * 免掉 Canvas 里量字号、处理密度的麻烦，且深浅色主题自动适配。
+ */
+@Composable
+private fun WeeklyStudyChart(stats: List<DayStat>) {
+    val dateFormat = remember {
+        java.text.SimpleDateFormat("M/d", java.util.Locale.getDefault())
+    }
+    Column(modifier = Modifier.padding(20.dp)) {
+        Text(
+            text = "近 7 天学习量",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "柱高为当天去重学习词数，空档日期表示当天没有学习",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(132.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            stats.forEach { stat ->
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
+                ) {
                     Text(
-                        text = "四级掌握度体系规则",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = if (stat.studiedCount > 0) "${stat.studiedCount}" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp
                     )
-                    Spacer(Modifier.height(10.dp))
-                    RuleItem("Lv0 生词 / 未学", "尚未做过或刚刚答错的生词，优先安排练习", PaperLv0)
-                    RuleItem("Lv1 模糊 / 重现", "曾答错已稍后重现作答，正在短期记忆阶段", PaperLv1)
-                    RuleItem("Lv2 认识 / 熟练", "已连续答对，进入巩固队列", PaperLv2)
-                    RuleItem("Lv3 掌握 / 毕业", "错题连对 3 次或手动标记熟词，达成完全掌握", PaperLv3)
+                    Spacer(Modifier.height(2.dp))
+                    val maxCount = stats.maxOfOrNull { it.studiedCount }?.coerceAtLeast(1) ?: 1
+                    val barHeight = (78 * stat.studiedCount / maxCount).coerceAtLeast(2)
+                    Box(
+                        modifier = Modifier
+                            .width(22.dp)
+                            .height(barHeight.dp)
+                            .clip(RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp))
+                            .background(
+                                if (stat.studiedCount > 0) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                            )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = dateFormat.format(java.util.Date(stat.dayMs)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp
+                    )
                 }
             }
+        }
+    }
+}
+
+/** 近 7 天正确率总览。 */
+@Composable
+private fun WeeklyAccuracyCard(stats: List<DayStat>) {
+    val isDark = LocalDarkTheme.current
+    val total = stats.sumOf { it.totalCount }
+    val correct = stats.sumOf { it.correctCount }
+    val rate = if (total > 0) correct.toFloat() / total else null
+    Column(modifier = Modifier.padding(20.dp)) {
+        Text(
+            text = "近 7 天正确率",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(12.dp))
+        if (rate == null) {
+            Text(
+                text = "近 7 天还没有作答记录，学几个单词再来看看吧",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            LinearProgressIndicator(
+                progress = { rate },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(5.dp)),
+                color = if (isDark) com.mistakebook.ui.theme.PaperOkDark else PaperOk,
+                trackColor = if (isDark) Color(0xFF282D42) else PaperPrimaryTint
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "${(rate * 100).toInt()}% · 答对 $correct / 共 $total 次",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -1163,25 +1317,6 @@ private fun StatCard(
     }
 }
 
-@Composable
-private fun RuleItem(title: String, desc: String, color: Color) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(color)
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(110.dp))
-        Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
 
 @Composable
 private fun WordItemCard(

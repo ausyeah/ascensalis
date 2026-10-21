@@ -23,7 +23,10 @@ sealed interface SseEvent {
         val thinking: String = "",
         val finishReason: String? = null,
         val promptTokens: Int = 0,
-        val completionTokens: Int = 0
+        val completionTokens: Int = 0,
+
+        /** 命中提示词缓存的输入 token。中转站大多不给，为 0。 */
+        val cachedTokens: Int = 0
     ) : SseEvent
 
     /** `data: [DONE]` —— 服务端正常收尾。 */
@@ -91,7 +94,8 @@ class SseLineParser(private val json: Json = Json { ignoreUnknownKeys = true }) 
             thinking = choice?.delta?.reasoningOrNull().orEmpty(),
             finishReason = choice?.finishReason,
             promptTokens = usage?.promptTokens ?: 0,
-            completionTokens = usage?.completionTokens ?: 0
+            completionTokens = usage?.completionTokens ?: 0,
+            cachedTokens = usage?.promptCacheHitTokens ?: 0
         )
     }
 

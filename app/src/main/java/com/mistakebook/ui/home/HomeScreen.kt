@@ -359,6 +359,9 @@ fun HomeScreen(
                     items(displayQuestions, key = { it.id }) { question ->
                         val subjectName = state.subjects.firstOrNull { it.id == question.subjectId }?.name
                         SwipeableQuestionCard(
+                            // animateItem：拖动换位时其他卡片平滑滑到新位置，
+                            // 没有它就是「瞬移」，排序体感很生硬
+                            modifier = Modifier.animateItem(),
                             question = question,
                             subjectName = subjectName,
                             dueToday = state.dueCount > 0 && isDue(question),
@@ -574,6 +577,7 @@ private fun AddSheetItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeableQuestionCard(
+    modifier: Modifier = Modifier,
     question: Question,
     subjectName: String?,
     dueToday: Boolean,
@@ -608,7 +612,7 @@ private fun SwipeableQuestionCard(
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(MaterialTheme.shapes.medium)
             .background(DeleteReveal)
     ) {
