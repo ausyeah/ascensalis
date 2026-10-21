@@ -92,6 +92,10 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import java.io.File
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.provider.MediaStore
+import android.widget.Toast
 
 
 /**
@@ -173,12 +177,30 @@ fun ChatScreen(
 
     val context = LocalContext.current
     var tempCameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var tempCameraFile by remember { mutableStateOf<File?>(null) }
+
+    // 拍照结果回调。三个加固点：
+    //  1. success=true 也可能什么都没写——部分 ROM 的相机返回成功但不落
+    //     EXTRA_OUTPUT 的文件，不校验的话附件会永远停在「准备中」
+    //  2. 进程被系统回收后 remember 状态丢失，tempCameraUri 会是 null
+    //  3. 用完立刻清空，防止同一张旧图被误当成新一轮拍照的结果
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
-        if (success) {
-            tempCameraUri?.let(viewModel::onAttachmentPicked)
+        val uri = tempCameraUri
+        val file = tempCameraFile
+        tempCameraUri = null
+        tempCameraFile = null
+        if (!success || uri == null || file == null) return@rememberLauncherForActivityResult
+        if (!file.exists() || file.length() <= 0L) {
+            Toast.makeText(
+                context,
+                R.string.chat_attach_photo_empty,
+                Toast.LENGTH_SHORT
+            ).show()
+            return@rememberLauncherForActivityResult
         }
+        viewModel.onAttachmentPicked(uri)
     }
 
     // 首次进入题目会话时预填首问，**不自动发送**。
@@ -283,9 +305,55 @@ fun ChatScreen(
             onTakePhoto = {
                 val dir = File(context.cacheDir, "camera").apply { mkdirs() }
                 val file = File(dir, "chat_photo_${System.currentTimeMillis()}.jpg")
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                val uri = try {
+                    FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file
+                    )
+                } catch (e: IllegalArgumentException) {
+                    // file_paths.xml 没声明该路径 / authority 不匹配都会走到这
+                    Toast.makeText(
+                        context,
+                        R.string.chat_attach_photo_unavailable,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@onTakePhoto
+                }
                 tempCameraUri = uri
-                cameraLauncher.launch(uri)
+                tempCameraFile = file
+                // 没有 app 响应 ACTION_IMAGE_CAPTURE（相机被禁用/卸载/魔改 ROM）时
+                // launch 会抛 ActivityNotFoundException 直接闪退。
+                // manifest 里已声明 <queries>，resolveActivity 才能看见相机 app。
+                val capture = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                    putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                }
+                if (capture.resolveActivity(context.packageManager) == null) {
+                    tempCameraUri = null
+                    tempCameraFile = null
+                    Toast.makeText(
+                        context,
+                        R.string.chat_attach_no_camera,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@onTakePhoto
+                }
+                try {
+                    cameraLauncher.launch(uri)
+                } catch (e: ActivityNotFoundException) {
+                    tempCameraUri = null
+                    tempCameraFile = null
+                    Toast.makeText(
+                        context,
+                        R.string.chat_attach_no_camera,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@onTakePhoto
+                }
+                // 确认相机已经拉起来了再关面板——万一启动失败，面板留着，
+                // 用户还能改选「从相册选择」
+                showAttachSheet = false
             },
             onPickFile = { filePicker.launch(DOCUMENT_MIME_TYPES) },
             onDismiss = { showAttachSheet = false }
@@ -851,7 +919,8 @@ private fun AttachmentSourceSheet(
                 headlineContent = { Text(stringResource(R.string.chat_attach_camera)) },
                 leadingContent = { Icon(Icons.Default.PhotoCamera, contentDescription = null) },
                 modifier = Modifier.clickable {
-                    onDismiss()
+                    // onDismiss 在 onTakePhoto 内部相机拉起后才调：
+                    // 启动失败时面板留着，用户可以直接改选相册
                     onTakePhoto()
                 }
             )

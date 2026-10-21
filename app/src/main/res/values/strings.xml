@@ -382,6 +382,9 @@
     <string name="chat_attach_gallery">从相册选择</string>
     <string name="chat_attach_camera">拍照</string>
     <string name="chat_attach_files">浏览文件</string>
+    <string name="chat_attach_no_camera">没有找到可用的相机应用，请从相册选择图片</string>
+    <string name="chat_attach_photo_unavailable">拍照功能暂时不可用，请从相册选择图片</string>
+    <string name="chat_attach_photo_empty">相机没有返回照片，请重试或从相册选择</string>
     <string name="chat_attachment_preparing">准备中…</string>
     <string name="chat_attachment_ready">就绪</string>
     <string name="chat_attachment_failed">处理失败</string>
