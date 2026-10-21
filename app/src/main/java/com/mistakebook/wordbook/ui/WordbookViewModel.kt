@@ -336,7 +336,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun previousQuestion() {
         if (isActionInProgress.get()) return
-        val prev = questionHistory.pollLast() ?: return
+        // 用 removeLast 而不是 pollLast：这里是 kotlin.collections.ArrayDeque，
+        // pollLast 是 java.util.ArrayDeque 的方法名（混用会编译不过）。
+        if (questionHistory.isEmpty()) return
+        val prev = questionHistory.removeLast()
         _uiState.update { it.copy(hasPrevious = questionHistory.isNotEmpty()) }
         nextQuestionJob?.cancel()
         nextQuestionJob = viewModelScope.launch {
