@@ -27,6 +27,7 @@ class FakeWordbookDao(private val progressMap: Map<String, WordProgress>) : Word
     override fun observeStudiedTodayCount(startOfDayMs: Long): Flow<Int> = emptyFlow()
     override fun observeMasteredCount(): Flow<Int> = emptyFlow()
     override fun observeWrongBookCount(): Flow<Int> = emptyFlow()
+    override suspend fun logsSince(sinceMs: Long): List<WordStudyLog> = emptyList()
     override suspend fun clearLogs() {}
 }
 
