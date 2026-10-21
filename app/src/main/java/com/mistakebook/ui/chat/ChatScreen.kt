@@ -664,6 +664,36 @@ private fun MessageBubble(
 }
 
 /**
+ * 气泡图片的最大边长（像素）。
+ *
+ * 气泡的显示宽度撑死就是屏幕宽，而用户发的是原图——
+ * 一张 4000×3000 的照片解码出来占 48MB 堆内存，对话里挂三四张，
+ * 列表滚动时必然被 GC 拖住。降到 1280 上限，肉眼无损，内存差一个数量级。
+ */
+private const val BUBBLE_IMAGE_MAX_PX = 1280
+
+/**
+ * 按目标边长降采样解码。
+ *
+ * 关键在**先只解边界**（inJustDecodeBounds 不分配像素内存），
+ * 拿到尺寸算出 2 的幂次采样率后再真正解码。直接 decodeByteArray
+ * 会把整张原图完整分配一遍，省不掉。
+ */
+private fun decodeSampled(bytes: ByteArray, maxPx: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    val w = bounds.outWidth
+    val h = bounds.outHeight
+    if (w <= 0 || h <= 0) return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    var sample = 1
+    while (maxOf(w, h) / sample > maxPx) sample *= 2
+    return BitmapFactory.decodeByteArray(
+        bytes, 0, bytes.size,
+        BitmapFactory.Options().apply { inSampleSize = sample }
+    )
+}
+
+/**
  * 气泡里的图片。
  *
  * 直接把 data URL 喂给 `Image`，不引任何图片库（项目锁零新增依赖）。
@@ -675,7 +705,7 @@ private fun BubbleImage(dataUrl: String) {
     val bitmap = remember(dataUrl) {
         runCatching {
             val bytes = Base64.decode(dataUrl.substringAfter("base64,"), Base64.NO_WRAP)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            decodeSampled(bytes, BUBBLE_IMAGE_MAX_PX)
         }.getOrNull()
     }
     if (bitmap == null) {
