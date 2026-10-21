@@ -331,11 +331,21 @@ private fun TableBlock(block: MarkdownParser.Block.Table) {
  *
  * 纯函数，可单测。
  */
+// 表格单元格清洗用的正则**必须是顶层常量**。
+// 它们原本写在函数体里，于是每个单元格、每次重组都要重新编译 6 个 Regex——
+// 一个 5×8 的表格就是 240 次编译，而流式输出每来一块都要重算一遍整张表。
+private val RE_TABLE_DISPLAY_MATH = Regex("""\$\$([^$]+)\$\$""")
+private val RE_TABLE_INLINE_MATH = Regex("""\$([^$]+)\$""")
+private val RE_TABLE_CODE = Regex("""`+([^`]*)`+""")
+private val RE_TABLE_FRAC = Regex("""\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}""")
+private val RE_TABLE_COMMAND = Regex("""\\([a-zA-Z]+)""")
+private val RE_TABLE_BRACES = Regex("""\{([^}]*)\}""")
+
 internal fun tableCellToPlainText(raw: String): String {
     var text = raw.trim()
     // 先取公式内容（`$x$` / `$$x$$`），把美元符号丢掉
-    text = text.replace(Regex("""\$\$([^$]+)\$\$"""), "$1")
-    text = text.replace(Regex("""\$([^$]+)\$"""), "$1")
+    text = text.replace(RE_TABLE_DISPLAY_MATH, "$1")
+    text = text.replace(RE_TABLE_INLINE_MATH, "$1")
     // **落单的那个**也去掉。
     //
     // 流式输出到一半时表格单元格可能只收到 `$x^2`（闭合标记还没到），
@@ -345,16 +355,16 @@ internal fun tableCellToPlainText(raw: String): String {
         text = text.replace("$", "")
     }
     // 强调标记：表格里不需要斜体/粗体语义，去掉反引号与星号
-    text = text.replace(Regex("""`+([^`]*)`+"""), "$1")
+    text = text.replace(RE_TABLE_CODE, "$1")
     text = text.replace("**", "").replace("*", "")
 
     // **顺序要紧**：分式先转成可读形式，再剥剩下的命令反斜杠。
     // 反过来 `\frac{1}{2}` 会先变成 `frac{1}{2}`，那条规则就再也匹配不到了。
-    text = text.replace(Regex("""\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}"""), "$1/$2")
+    text = text.replace(RE_TABLE_FRAC, "$1/$2")
     // 剩下的是识别不出的命令名，去掉反斜杠：`\alpha` → `alpha`
-    text = text.replace(Regex("""\\([a-zA-Z]+)"""), "$1")
+    text = text.replace(RE_TABLE_COMMAND, "$1")
     // 剩下的花括号在纯文本里没有意义，去掉
-    text = text.replace(Regex("""\{([^}]*)\}"""), "$1")
+    text = text.replace(RE_TABLE_BRACES, "$1")
     return text.trim()
 }
 

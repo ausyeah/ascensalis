@@ -28,6 +28,12 @@ class VocabRepository(private val context: Context? = null) {
     private var synIdOf: Map<String, Int> = emptyMap()
     private var byPos: Map<String, List<String>> = emptyMap()
 
+    /**
+     * 加载标记必须 @Volatile：[ensureLoaded] 的热路径在锁外直接读它，
+     * 而真正的加载发生在 IO 线程。没有 volatile 的话，调用方线程可能一直
+     * 读到过期的 false，每次都去切线程抢锁。
+     */
+    @Volatile
     private var isLoaded = false
 
     /**
@@ -60,13 +66,18 @@ class VocabRepository(private val context: Context? = null) {
     /**
      * 确保词库与索引已载入内存。
      */
-    suspend fun ensureLoaded() = withContext(Dispatchers.IO) {
-        if (isLoaded) return@withContext
-        mutex.withLock {
-            if (isLoaded) return@withLock
-            loadVocabInternal()
-            loadIndexInternal()
-            isLoaded = true
+    suspend fun ensureLoaded() {
+        // 热路径 fast-path：抽一个词要调好几次（getAllWords / getWord /
+        // splitSenses / 干扰项），每次都 withContext(IO) + mutex 的话，
+        // 一轮答题就是几千次线程切换。已加载时**零 dispatch**直接返回。
+        if (isLoaded) return
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                if (isLoaded) return@withLock
+                loadVocabInternal()
+                loadIndexInternal()
+                isLoaded = true
+            }
         }
     }
 

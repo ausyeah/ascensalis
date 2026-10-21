@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -44,8 +45,27 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     private val questionHistory = ArrayDeque<Word>()
     private val HISTORY_LIMIT = 30
 
+    /** 错词本列表的刷新防抖：答题写库很密集，没必要每次都重建列表。 */
+    private val WRONG_LIST_DEBOUNCE_MS = 500L
+
     // 近 7 天统计（正确率 + 每日学习量），切到统计页时按需加载
     private val weeklyStats = MutableStateFlow<List<DayStat>>(emptyList())
+
+    /**
+     * 进度内存缓存。
+     *
+     * 抽词是**每答一题就跑一次**的热路径：原来每题都 `observeAllProgress().first()`
+     * 把整张 progress 表（词库有多大就有多少行）读出来现建 Map，再对全部词
+     * 做两轮 filter。改成进程内缓存 + 答题后增量 upsert，抽词不再碰数据库。
+     */
+    private val progressCache = java.util.concurrent.ConcurrentHashMap<String, WordProgress>()
+
+    /**
+     * 错词本单词集合（只存 word 字符串，抽词只需要判定「在不在错词本里」）。
+     * 与 [progressCache] 同样在答题后增量维护。
+     */
+    @Volatile
+    private var wrongWordsCache: Set<String> = emptySet()
 
     // 快速连击与防重入原子状态锁
     private val isActionInProgress = AtomicBoolean(false)
@@ -74,6 +94,12 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     init {
         viewModelScope.launch {
             vocabRepo.ensureLoaded()
+            // 抽词要用的两份数据先载入内存（只在启动时读一次全表），
+            // 之后靠答题增量维护，避免每题都全表扫描。
+            withContext(Dispatchers.IO) {
+                progressCache.putAll(dao.observeAllProgress().first().associateBy { it.word })
+                wrongWordsCache = dao.observeWrongBook().first().map { it.word }.toSet()
+            }
             observeDatabaseStats()
             prepareNextQuestion()
             _uiState.update { it.copy(isLoading = false) }
@@ -106,13 +132,22 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             }
         }
 
-        // 监听错词本数据变动
+        // 监听错词本数据变动。
+        //
+        // debounce 是必要的：答一题就 upsert 一次，Room 的 Flow 会立刻重发，
+        // 于是「每答一题就整表重查一次错词本 + 逐词 getWord」——
+        // 用户在刷题 Tab 上根本看不到这份列表，却一直在为它付代价。
+        // 再叠一层「必须真的停在错词本页」的判断，刷题时不刷新。
         viewModelScope.launch {
-            dao.observeWrongBook().collect { wrongProgressList ->
-                if (_uiState.value.wrongSubTab == WrongSubTab.WRONG_BOOK) {
-                    refreshWrongSubTabList(WrongSubTab.WRONG_BOOK)
+            dao.observeWrongBook()
+                .debounce(WRONG_LIST_DEBOUNCE_MS)
+                .collect {
+                    if (_uiState.value.currentTab == WordbookTab.WRONG_BOOK &&
+                        _uiState.value.wrongSubTab == WrongSubTab.WRONG_BOOK
+                    ) {
+                        refreshWrongSubTabList(WrongSubTab.WRONG_BOOK)
+                    }
                 }
-            }
         }
     }
 
@@ -350,6 +385,18 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     /** 历史栈里还有可回退的题时 UI 才显示「上一题」按钮。 */
     fun hasPreviousQuestion(): Boolean = questionHistory.isNotEmpty()
 
+    /**
+     * 写库后同步内存缓存。
+     *
+     * 抽词只读缓存，任何一处 upsert 漏掉同步，就会出现
+     * 「标记成熟词了却还在被抽到」「移出错词本了还按错词复习」这类
+     * 界面与数据库不一致的怪现象。所以统一走这一个入口。
+     */
+    private fun syncProgressCache(p: WordProgress) {
+        progressCache[p.word] = p
+        wrongWordsCache = if (p.isWrongBook) wrongWordsCache + p.word else wrongWordsCache - p.word
+    }
+
     private suspend fun pickNextWord(): Word? = withContext(Dispatchers.IO) {
         val isSenseMode = _uiState.value.studyMode == StudyMode.SENSE
         fun isEligibleSenseWord(w: Word): Boolean = !isSenseMode || vocabRepo.splitSenses(w.meaning).size >= 2
@@ -366,34 +413,52 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         // 2. 错词本温和复习机制：
         //    - 权重由原先过重的 70% 降低至 20%（平滑融入日常刷题节奏，不反客为主）；
         //    - 严格排除当前冷却窗口（recentWords）以及等待短期重现（deferQueue）中的词。
-        val wrongList = dao.observeWrongBook().first()
+        //    原来这里 `observeWrongBook().first()` 读全表、再逐词 `getWord`，
+        //    现在读内存里的错词集合（答题后增量维护），抽词不再碰数据库。
         val allWords = vocabRepo.getAllWords()
         if (allWords.isEmpty()) return@withContext null
 
-        val allProgress = dao.observeAllProgress().first().associateBy { it.word }
         val pendingDeferWords = deferQueue.map { it.word.word }.toSet()
 
-        val eligibleWrong = wrongList.filter {
-            it.word !in recentWords && it.word !in pendingDeferWords && run {
-                if (!isSenseMode) true else {
-                    val w = vocabRepo.getWord(it.word)
-                    w != null && isEligibleSenseWord(w)
-                }
-            }
-        }
-
-        if (eligibleWrong.isNotEmpty() && Random.nextFloat() < 0.20f) {
-            val candidate = eligibleWrong.random(Random)
-            val word = vocabRepo.getWord(candidate.word)
-            if (word != null) return@withContext word
+        if (Random.nextFloat() < 0.20f) {
+            val eligibleWrong = wrongWordsCache
+                .filter { it !in recentWords && it !in pendingDeferWords }
+                .mapNotNull { vocabRepo.getWord(it) }
+                .filter { isEligibleSenseWord(it) }
+            if (eligibleWrong.isNotEmpty()) return@withContext eligibleWrong.random(Random)
         }
 
         // 3. 抽取未掌握的新词/生词（排除熟词、冷却窗口以及排队中的重现词）
-        val unmastered = allWords.filter { w ->
-            w.word !in recentWords && w.word !in pendingDeferWords && isEligibleSenseWord(w) && run {
-                val p = allProgress[w.word]
-                p == null || (!p.isMastered && p.level < 3)
+        //
+        // **拒绝采样**替代全量 filter：原来每答一题都对全部四千多个词
+        // 建两个临时 List（两轮 O(N) 分配 + 每个元素跑一遍判定），
+        // 这是背单词页最直接的卡顿来源。改成随机抽有限次、命中即返回——
+        // 拒绝采样是无偏的，抽到的分布与「全量过滤后随机」完全一致，
+        // 代价从 O(N) 降到 O(尝试次数)。
+        fun isUnmastered(w: Word): Boolean {
+            val p = progressCache[w.word]
+            return p == null || (!p.isMastered && p.level < 3)
+        }
+
+        val attempts = (allWords.size * 0.2f).toInt().coerceIn(80, 400)
+        var picked: Word? = null
+        var tried = 0
+        while (tried < attempts && picked == null) {
+            tried++
+            val w = allWords.random(Random)
+            if (w.word !in recentWords && w.word !in pendingDeferWords &&
+                isEligibleSenseWord(w) && isUnmastered(w)
+            ) {
+                picked = w
             }
+        }
+        if (picked != null) return@withContext picked
+
+        // 采样一直没中，说明未掌握的词已经很少了——这时才付 O(N) 的代价
+        // 精确过滤，保证「还有未掌握词就绝不抽已掌握词」的语义不被采样近似破坏。
+        val unmastered = allWords.filter { w ->
+            w.word !in recentWords && w.word !in pendingDeferWords &&
+                isEligibleSenseWord(w) && isUnmastered(w)
         }
 
         if (unmastered.isNotEmpty()) {
@@ -473,6 +538,13 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 }
 
                 dao.upsertProgress(newProgress)
+                // 内存缓存同步增量：下一次抽词直接读缓存，不再全表读 progress
+                progressCache[current.word] = newProgress
+                wrongWordsCache = if (newProgress.isWrongBook) {
+                    wrongWordsCache + current.word
+                } else {
+                    wrongWordsCache - current.word
+                }
                 dao.insertStudyLog(
                     WordStudyLog(
                         word = current.word,
@@ -617,6 +689,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     updatedAt = System.currentTimeMillis()
                 )
                 dao.upsertProgress(updated)
+                syncProgressCache(updated)
                 _uiState.update {
                     it.copy(
                         currentProgress = updated,
@@ -654,6 +727,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             val p = dao.getProgress(wordStr) ?: return@launch
             val updated = p.copy(isWrongBook = false, updatedAt = System.currentTimeMillis())
             dao.upsertProgress(updated)
+            syncProgressCache(updated)
             refreshWrongSubTabList(_uiState.value.wrongSubTab)
             _uiState.update { it.copy(snackbarMessage = "已移出错题本") }
         }

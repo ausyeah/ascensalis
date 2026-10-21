@@ -167,18 +167,36 @@ class MathRenderer(context: Context) {
         repeat(count) { awaitFrame() }
     }
 
+    /**
+     * 「逼帧」用的临时画布，**复用一张**。
+     *
+     * 未挂载到窗口的 WebView 不会自己产出合成帧，必须先往一张画布上画一次，
+     * 后面 draw 才有内容——这一步本身省不掉。但原先每次都
+     * `createBitmap(3200×1600)` 再 `recycle()`：那是 20MB 的分配紧接着释放，
+     * 列表里滚过几十条公式就是几百 MB 的抖动，GC 一跑整个界面就顿一下。
+     * 它只是个一次性耗材（画完就丢），所以按最大尺寸复用一张即可。
+     */
+    private var scratchBitmap: Bitmap? = null
+
+    private fun scratchFor(view: WebView): Bitmap {
+        val w = maxOf(view.width, 1)
+        val h = maxOf(view.height, 1)
+        val existing = scratchBitmap
+        if (existing != null && existing.width >= w && existing.height >= h) return existing
+        existing?.recycle()
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { scratchBitmap = it }
+    }
+
     /** 抓取页面左上角 width×height 的设备像素区域。 */
     private suspend fun capture(view: WebView, width: Int, height: Int): Bitmap? {
         waitFrames(2)
         // 从未挂载到窗口的 WebView 不会自己产出合成帧，AwContents 里是空的，
         // 直接 draw 出来就是全透明。先往一张临时画布上画一次，逼它把帧做出来。
-        val scratchW = maxOf(view.width, 1)
-        val scratchH = maxOf(view.height, 1)
-        val scratch = Bitmap.createBitmap(scratchW, scratchH, Bitmap.Config.ARGB_8888)
+        val scratch = scratchFor(view)
         val scratchCanvas = Canvas(scratch)
         scratch.eraseColor(Color.MAGENTA)
         view.draw(scratchCanvas)
-        scratch.recycle()
+        // 不 recycle：这张是复用的，见 [scratchFor]
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
