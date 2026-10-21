@@ -92,11 +92,9 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import java.io.File
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.provider.MediaStore
 import android.widget.Toast
-
 
 /**
  * 选图片的 MIME 过滤。
@@ -305,55 +303,57 @@ fun ChatScreen(
             onTakePhoto = {
                 val dir = File(context.cacheDir, "camera").apply { mkdirs() }
                 val file = File(dir, "chat_photo_${System.currentTimeMillis()}.jpg")
-                val uri = try {
+                // FileProvider.getUriForFile 在路径未声明 / authority 不匹配时
+                // 抛 IllegalArgumentException，兜住并提示而不是闪退
+                val uri = runCatching {
                     FileProvider.getUriForFile(
                         context,
                         "${context.packageName}.fileprovider",
                         file
                     )
-                } catch (e: IllegalArgumentException) {
-                    // file_paths.xml 没声明该路径 / authority 不匹配都会走到这
+                }.getOrNull()
+                if (uri == null) {
                     Toast.makeText(
                         context,
                         R.string.chat_attach_photo_unavailable,
                         Toast.LENGTH_SHORT
                     ).show()
-                    return@onTakePhoto
+                } else {
+                    tempCameraUri = uri
+                    tempCameraFile = file
+                    // 没有 app 响应 ACTION_IMAGE_CAPTURE（相机被禁用/卸载/魔改 ROM）时
+                    // launch 会抛 ActivityNotFoundException 直接闪退。
+                    // manifest 里已声明 <queries>，resolveActivity 才能看见相机 app。
+                    val capture = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                        putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    }
+                    val hasCamera = capture.resolveActivity(context.packageManager) != null
+                    if (!hasCamera) {
+                        tempCameraUri = null
+                        tempCameraFile = null
+                        Toast.makeText(
+                            context,
+                            R.string.chat_attach_no_camera,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        val launched = runCatching { cameraLauncher.launch(uri) }.isSuccess
+                        if (launched) {
+                            // 相机拉起成功后才关面板——万一启动失败，面板留着，
+                            // 用户还能改选「从相册选择」
+                            showAttachSheet = false
+                        } else {
+                            tempCameraUri = null
+                            tempCameraFile = null
+                            Toast.makeText(
+                                context,
+                                R.string.chat_attach_no_camera,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
                 }
-                tempCameraUri = uri
-                tempCameraFile = file
-                // 没有 app 响应 ACTION_IMAGE_CAPTURE（相机被禁用/卸载/魔改 ROM）时
-                // launch 会抛 ActivityNotFoundException 直接闪退。
-                // manifest 里已声明 <queries>，resolveActivity 才能看见相机 app。
-                val capture = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
-                    putExtra(MediaStore.EXTRA_OUTPUT, uri)
-                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                }
-                if (capture.resolveActivity(context.packageManager) == null) {
-                    tempCameraUri = null
-                    tempCameraFile = null
-                    Toast.makeText(
-                        context,
-                        R.string.chat_attach_no_camera,
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@onTakePhoto
-                }
-                try {
-                    cameraLauncher.launch(uri)
-                } catch (e: ActivityNotFoundException) {
-                    tempCameraUri = null
-                    tempCameraFile = null
-                    Toast.makeText(
-                        context,
-                        R.string.chat_attach_no_camera,
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@onTakePhoto
-                }
-                // 确认相机已经拉起来了再关面板——万一启动失败，面板留着，
-                // 用户还能改选「从相册选择」
-                showAttachSheet = false
             },
             onPickFile = { filePicker.launch(DOCUMENT_MIME_TYPES) },
             onDismiss = { showAttachSheet = false }
