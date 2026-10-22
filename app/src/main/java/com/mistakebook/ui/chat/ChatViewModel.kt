@@ -622,7 +622,9 @@ class ChatViewModel(
         val sessionId = _state.value.sessionId
         // 流式进行中不重试：那一轮的请求早就带着现状发出去了，
         // 现在补识别只对下一轮有用，没理由和生成中的界面抢 attention。
-        if (sessionId == 0L || _state.value.isStreaming) return
+        // 已经有一轮 OCR 在跑也同样不重试——两个 ensureImageOcr 并发
+        // 会重复处理同一批图。
+        if (sessionId == 0L || _state.value.isStreaming || ocrJob?.isActive == true) return
         viewModelScope.launch {
             _state.value = _state.value.copy(ocrNotice = null)
             try {
