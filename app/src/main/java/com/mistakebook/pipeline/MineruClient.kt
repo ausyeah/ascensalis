@@ -59,6 +59,44 @@ class MineruClient(
         language: String,
         forceOcr: Boolean,
         onStage: suspend (String) -> Unit
+    ): ApiResult<MineruOutcome> = recognizeInto(
+        file = file,
+        fileName = fileName,
+        mineruKey = mineruKey,
+        modelVersion = modelVersion,
+        language = language,
+        forceOcr = forceOcr,
+        outDir = files.mineruDir(taskId),
+        imageDir = files.questionImageDir(taskId),
+        onStage = onStage
+    )
+
+    /**
+     * 识别一个文件，结果落到**指定目录**。
+     *
+     * ## 为什么要把目录变成参数
+     *
+     * 原先只有 [recognize] 一个入口，产物固定写到 `mineru/{taskId}` 与
+     * `questions/{taskId}/images`——那套目录是给「拍照识别成题」用的，
+     * 依赖 CaptureTask 的 id。
+     *
+     * 对话页的「拿图片里的文字」没有 CaptureTask，也**不该**占用
+     * `questions/` 目录：那里的图片是题目的封面，混进别的产物会让
+     * 备份/导出把聊天 OCR 的中间文件当成题目图片带走。
+     *
+     * @param imageDir 图片产物的落盘目录；**传 null 表示不要图片**——
+     *   对话场景只需要 markdown 文本，图片对它没有意义。
+     */
+    suspend fun recognizeInto(
+        file: File,
+        fileName: String,
+        mineruKey: String,
+        modelVersion: String,
+        language: String,
+        forceOcr: Boolean,
+        outDir: File,
+        imageDir: File?,
+        onStage: suspend (String) -> Unit
     ): ApiResult<MineruOutcome> = withContext(Dispatchers.IO) {
         if (mineruKey.isBlank()) {
             return@withContext fail(ApiErrorKind.NO_KEY)
@@ -101,7 +139,7 @@ class MineruClient(
         // 一次 recognize 成功 = 一次 MinerU 用量。放在这里而不是 downloadAndExtract：
         // 只有服务端真的解析完（state=done）才算数，上传/轮询阶段的失败不烧额度口径。
         // 页数（MinerU 的真实计费单位）随 outcome 一起传出，一并记账。
-        val outcome = pollResults(auth, batch.batch_id, fileName, taskId, onStage)
+        val outcome = pollResults(auth, batch.batch_id, fileName, outDir, imageDir, onStage)
         if (outcome is ApiResult.Success) usageStatsStore.recordMineru(outcome.data.pages)
         outcome
     }
@@ -137,7 +175,8 @@ class MineruClient(
         auth: String,
         batchId: String,
         fileName: String,
-        taskId: Long,
+        outDir: File,
+        imageDir: File?,
         onStage: suspend (String) -> Unit
     ): ApiResult<MineruOutcome> {
         val startedAt = System.currentTimeMillis()
@@ -245,7 +284,7 @@ class MineruClient(
                 "done" -> {
                     val zipUrl = item.fullZipUrl
                         ?: return fail(ApiErrorKind.BAD_RESPONSE, "解析完成但未返回结果包地址")
-                    return downloadAndExtract(zipUrl, taskId, batchId, lastTotalPages)
+                    return downloadAndExtract(zipUrl, outDir, imageDir, batchId, lastTotalPages)
                 }
                 "failed" -> {
                     return fail(ApiErrorKind.SERVER, item.errMsg.orEmpty().ifBlank { "MinerU 解析失败" })
@@ -274,7 +313,8 @@ class MineruClient(
 
     private suspend fun downloadAndExtract(
         zipUrl: String,
-        taskId: Long,
+        outDir: File,
+        imageDir: File?,
         batchId: String,
         pages: Int = 0
     ): ApiResult<MineruOutcome> {
@@ -284,7 +324,7 @@ class MineruClient(
         if (!response.isSuccessful || body == null) {
             return fail(HttpFactory.httpError(response.code(), response.errorBody()?.string().orEmpty()))
         }
-        val mineruDir = files.mineruDir(taskId).apply { mkdirs() }
+        val mineruDir = outDir.apply { mkdirs() }
         val zipFile = File(mineruDir, "result.zip")
         body.byteStream().use { input ->
             FileOutputStream(zipFile).use { output -> input.copyTo(output) }
@@ -292,17 +332,20 @@ class MineruClient(
         val markdownFile = unzip(zipFile, mineruDir)
             ?: return fail(ApiErrorKind.BAD_RESPONSE, "结果包中未找到 full.md")
         var markdown = markdownFile.readText()
-        val imageDir = files.questionImageDir(taskId)
-        imageDir.mkdirs()
-        val referenced = collectImageRefs(markdown)
         val absolutePaths = mutableListOf<String>()
-        referenced.forEach { ref ->
-            val source = resolveRef(mineruDir, ref) ?: return@forEach
-            val target = File(imageDir, source.name)
-            runCatching { source.copyTo(target, overwrite = true) }
-            if (target.exists()) {
-                absolutePaths.add(target.absolutePath)
-                markdown = markdown.replace(ref, target.absolutePath)
+        // imageDir 为 null 时**不抽图片**：对话页只要 markdown 文本，
+        // 抽出来的图既没人看，又会在聊天目录里堆垃圾。
+        if (imageDir != null) {
+            imageDir.mkdirs()
+            val referenced = collectImageRefs(markdown)
+            referenced.forEach { ref ->
+                val source = resolveRef(mineruDir, ref) ?: return@forEach
+                val target = File(imageDir, source.name)
+                runCatching { source.copyTo(target, overwrite = true) }
+                if (target.exists()) {
+                    absolutePaths.add(target.absolutePath)
+                    markdown = markdown.replace(ref, target.absolutePath)
+                }
             }
         }
         return ApiResult.Success(

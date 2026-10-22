@@ -244,6 +244,9 @@
     <string name="settings_api_key">API Key</string>
     <string name="settings_model">模型名称</string>
     <string name="settings_model_hint">点右侧按钮自动获取，也可手填</string>
+    <string name="settings_supports_vision">该模型支持图片</string>
+    <string name="settings_supports_vision_on">直接发送图片给模型</string>
+    <string name="settings_supports_vision_off">不识图：先用 MinerU 识别图片文字再发送</string>
     <string name="settings_profile_saved">配置已保存</string>
     <string name="settings_profile_deleted">配置已删除</string>
     <string name="settings_profile_need_one">至少需要保留一套配置</string>

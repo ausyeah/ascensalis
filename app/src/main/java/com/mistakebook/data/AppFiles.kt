@@ -61,6 +61,14 @@ class AppFiles(context: Context) {
         return File(dir, "$name.$extension")
     }
 
+    /**
+     * 对话页「图片先过 MinerU」的中间产物目录。
+     *
+     * 刻意**不放进** `questions/`：那里的图片是题目封面，
+     * 混进聊天 OCR 的中间文件会让备份/导出把垃圾当成题目图片带走。
+     */
+    fun chatOcrDir(sessionId: Long): File = File(chatDir(sessionId), "ocr")
+
     fun deleteRecursively(file: File?) {
         if (file == null || !file.exists()) return
         file.listFiles()?.forEach { deleteRecursively(it) }

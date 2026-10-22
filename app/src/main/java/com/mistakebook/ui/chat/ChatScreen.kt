@@ -138,6 +138,7 @@ fun ChatScreen(
             usageStatsStore = c.usageStatsStore,
             preparer = c.chatAttachmentPreparer,
             compressor = c.chatContextCompressor,
+            imageOcr = c.chatImageOcr,
             questionId = questionId,
             sessionId = sessionId
         )
@@ -440,6 +441,13 @@ fun ChatScreen(
                     lastPromptTokens = state.lastPromptTokens,
                     onCompress = viewModel::compressContext
                 )
+                Spacer(Modifier.height(4.dp))
+            }
+
+            // 后台 OCR 进度：不识图的模型收到图片时，先由 MinerU 把图里的字认出来。
+            // 整段流程在协程里跑，界面不卡；这里只显示一行进度提示。
+            state.ocrStage?.let { stage ->
+                OcrProgressBar(stage = stage)
                 Spacer(Modifier.height(4.dp))
             }
 
@@ -994,6 +1002,32 @@ private fun JumpToBottomButton(modifier: Modifier = Modifier, onClick: () -> Uni
             Icon(
                 Icons.Default.ArrowDownward,
                 contentDescription = stringResource(R.string.chat_jump_to_bottom)
+            )
+        }
+    }
+}
+
+@Composable
+private fun OcrProgressBar(stage: String) {
+    Surface(
+        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 2.dp
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stage,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
             )
         }
     }

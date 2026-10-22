@@ -182,7 +182,16 @@ class AppContainer(context: Context) {
     }
 
     /**
-     * 会话上下文压缩器：旧轮次滚成摘要，长对话不再「越聊越失忆」。
+     * 对话页的图片 OCR：模型不识图时，先让 MinerU 把图片读一遍。
+     *
+     * 与 [mineruClient] 共用同一个实例，因此用量统计是同一份口径。
+     */
+    val chatImageOcr: com.mistakebook.data.chat.ChatImageOcr by lazy {
+        com.mistakebook.data.chat.ChatImageOcr(mineruClient, files)
+    }
+
+    /**
+     * 会话上下文压缩器：旧轮次滚成摘要，长对话不再「越聊越失忆》。
      * 与 chatCompletionStream 共享同一个实例（内部各自派生 HTTP 配置，无冲突）。
      */
     val chatContextCompressor: com.mistakebook.data.chat.ChatContextCompressor by lazy {

@@ -219,6 +219,32 @@ interface ChatDao {
     @Query("SELECT * FROM chat_attachments WHERE messageId = :messageId")
     suspend fun attachmentsOf(messageId: Long): List<ChatAttachment>
 
+    /**
+     * 会话里所有**图片**附件（按 id 倒序，最新的在前）。
+     *
+     * 用于「模型不识图时补做 OCR」：历史轮次里的图片也得有文字，
+     * 否则模型对着用户几轮之前的照片提问，却什么都看不到。
+     */
+    @Query(
+        """SELECT * FROM chat_attachments
+           WHERE sessionId = :sessionId AND kind = 'IMAGE'
+           ORDER BY id DESC"""
+    )
+    suspend fun imageAttachmentsOf(sessionId: Long): List<ChatAttachment>
+
+    /**
+     * 回写附件抽出来的文本。
+     *
+     * 只改这两个字段，不整行覆盖——附件行里还有 id / messageId 等外键，
+     * 整行 `@Update` 要求先把整行读出来再写回去，多一次查询且容易漏字段。
+     */
+    @Query(
+        """UPDATE chat_attachments
+           SET textExcerpt = :text, extractedChars = :chars
+           WHERE id = :id"""
+    )
+    suspend fun updateAttachmentText(id: Long, text: String, chars: Int)
+
     @Query(
         """UPDATE chat_attachments
            SET status = :status, errorMessage = :errorMessage

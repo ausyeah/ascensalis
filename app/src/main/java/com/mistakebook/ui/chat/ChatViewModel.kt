@@ -1,10 +1,12 @@
 package com.mistakebook.ui.chat
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.data.chat.ChatAttachmentPreparer
 import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.chat.ChatContextCompressor
+import com.mistakebook.data.chat.ChatImageOcr
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.chat.PreparedAttachment
 import com.mistakebook.data.local.entities.ChatAttachment
@@ -26,6 +28,7 @@ import com.mistakebook.net.llm.ImageUrl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -139,7 +142,14 @@ data class ChatUiState(
      * 上一次请求的输入 token 数（服务端回报，0 表示还没问过）。
      * 输入栏显示「上次请求 ≈ N tokens」，让用户对上下文占用有数。
      */
-    val lastPromptTokens: Int = 0
+    val lastPromptTokens: Int = 0,
+
+    /**
+     * 正在后台用 MinerU 识别图片时的阶段文案。
+     *
+     * 非空时输入栏上方显示一条进度提示。
+     */
+    val ocrStage: String? = null
 )
 
 /** 一次性事件。 */
@@ -164,6 +174,7 @@ class ChatViewModel(
     private val usageStatsStore: UsageStatsStore,
     private val preparer: ChatAttachmentPreparer,
     private val compressor: ChatContextCompressor,
+    private val imageOcr: ChatImageOcr,
     private val questionId: Long?,
 
     /** 从对话记录进来时直接指定会话；null = 新开或按题目定位。 */
@@ -186,6 +197,9 @@ class ChatViewModel(
 
     /** 气泡图片的加载任务，新消息到达时取消旧的。 */
     private var bubbleImageJob: Job? = null
+
+    /** 后台图片 OCR 任务。 */
+    private var ocrJob: Job? = null
 
     /**
      * 本轮被截断的那条助手消息。
@@ -341,6 +355,9 @@ class ChatViewModel(
 
     fun stop() {
         streamJob?.cancel()
+        // OCR 阶段还没有 streamJob 可停，这里一并取消，
+        // 否则用户点「停止」后 MinerU 还在后台烧额度。
+        ocrJob?.cancel()
     }
 
     private suspend fun runOnce(
@@ -361,7 +378,34 @@ class ChatViewModel(
                 repository.setAttachmentIds(message.id, ids)
             }
         }
-        val context = repository.buildContext(sessionId, questionId)
+        // **模型不识图时，先让 MinerU 把图片读一遍。**
+        //
+        // 用户接的大模型不一定支持多模态（DeepSeek-chat、Qwen-plus 都看不见图）。
+        // 但本 App 已经接了 MinerU——它能把图片里的文字、公式逐字抽出来。
+        // 于是「给不识图的模型发图」有了可行路径：先 OCR，再把文字喂给模型。
+        //
+        // **必须等它做完再发请求**：这一轮用户问的往往正是图里的内容，
+        // 少了一张图的文字，模型只能对着「用户发了张图」这句话瞎猜。
+        //
+        // 「后台」指的是**不阻塞界面**：整个过程在协程里跑，
+        // 界面照常显示进度提示，用户随时可以点「停止」取消。
+        if (!profile.supportsVision) {
+            // 直接在当前协程里跑（runOnce 本身就是 viewModelScope.launch 的协程），
+            // 这样取消能自然传播：用户点「停止」→ 外层协程取消 → OCR 一起停。
+            // 之前另起一个 job 再 join，取消传播是断的。
+            ocrJob = currentCoroutineContext()[Job]
+            try {
+                ensureImageOcr(sessionId)
+            } finally {
+                ocrJob = null
+            }
+        }
+
+        val context = repository.buildContext(
+            sessionId = sessionId,
+            questionId = questionId,
+            supportsVision = profile.supportsVision
+        )
         val assistantId = repository.insertStreamingAssistantMessage(sessionId, profile.model)
         _state.value = _state.value.copy(
             isStreaming = true,
@@ -414,6 +458,80 @@ class ChatViewModel(
             } catch (t: Throwable) {
                 _state.value = _state.value.copy(compressing = false)
             }
+        }
+    }
+
+    /**
+     * 后台给会话里的图片补做 OCR。
+     *
+     * ## 为什么是「后台」
+     *
+     * MinerU 是按页计费的外部服务，一次识别要等几秒到几十秒。
+     * 「后台」指的是**不阻塞界面**：整个过程跑在协程里，
+     * 输入栏上方显示一行进度提示，用户随时可以点「停止」取消。
+     *
+     * 但**这一轮的请求仍然要等它做完**——用户问的往往正是图里的内容，
+     * 少了一张图的文字，模型只能对着「用户发了张图」这句话瞎猜。
+     * 界面看着在转圈，其实是在干实事：进度条会报「正在识别第几张、到哪一步」。
+     *
+     * ## 为什么覆盖历史轮次的图
+     *
+     * 只补本轮的图片是不够的：用户经常隔几轮才问「刚才那张图」，
+     * 那时那张图早就不在「本轮」里了。所以把会话里所有还没有
+     * OCR 文字的图片都补一遍（已识别的靠缓存跳过，不重复烧额度）。
+     */
+    private suspend fun ensureImageOcr(sessionId: Long) {
+        try {
+            val settings = settingsStore.settings.first()
+            if (!settings.mineruConfigured) {
+                // 没配 MinerU Key 就别白跑一趟，直接告诉用户。
+                _state.value = _state.value.copy(ocrStage = null)
+                _events.trySend(
+                    ChatEvent.Error("当前模型不支持图片，且未配置 MinerU Key，无法识别图片内容")
+                )
+                return
+            }
+            val pending = repository.imageAttachmentsWithoutOcr(sessionId)
+            if (pending.isEmpty()) {
+                _state.value = _state.value.copy(ocrStage = null)
+                return
+            }
+            for ((index, attachment) in pending.withIndex()) {
+                _state.value = _state.value.copy(
+                    ocrStage = "正在用 MinerU 识别图片（${index + 1}/${pending.size}）…"
+                )
+                val file = java.io.File(attachment.localPath)
+                if (!file.exists()) continue
+                val result = imageOcr.recognize(
+                    sessionId = sessionId,
+                    imageFile = file,
+                    settings = settings,
+                    onStage = { stage ->
+                        _state.value = _state.value.copy(
+                            ocrStage = "正在用 MinerU 识别图片（${index + 1}/${pending.size}）：$stage"
+                        )
+                    }
+                )
+                when (result) {
+                    is com.mistakebook.net.ApiResult.Success -> {
+                        if (result.data.isNotBlank()) {
+                            repository.updateAttachmentOcr(attachment.id, result.data)
+                        }
+                    }
+
+                    is com.mistakebook.net.ApiResult.Failure -> {
+                        // 单张失败不中断后面的：一张图识别不出来，
+                        // 不该让整会话的其他图都不识别。
+                        Log.w(TAG, "图片 OCR 失败: ${attachment.fileName}")
+                    }
+                }
+            }
+            _state.value = _state.value.copy(ocrStage = null)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (t: Throwable) {
+            Log.w(TAG, "图片 OCR 任务异常", t)
+            _state.value = _state.value.copy(ocrStage = null)
         }
     }
 
@@ -688,6 +806,8 @@ class ChatViewModel(
     }
 
     companion object {
+        private const val TAG = "ChatViewModel"
+
         /**
          * 落库节流间隔。
          *

@@ -503,12 +503,17 @@ internal fun ProfileRow(
     var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
     var model by remember(profile.id) { mutableStateOf(profile.model) }
 
+    // 这个模型能不能直接看图。不识图的模型在对话里收到图片时，
+    // 应用会先调 MinerU 把图里的字识别出来，再把文字喂给模型。
+    var supportsVision by remember(profile.id) { mutableStateOf(profile.supportsVision) }
+
     // 当前输入拼成的草稿。保存 / 拉列表 / 测试都用它，保证三者看到的是同一份值
     fun draft(): LlmProfile = profile.copy(
         name = name,
         baseUrl = baseUrl,
         apiKey = apiKey,
-        model = model
+        model = model,
+        supportsVision = supportsVision
     )
 
     // 只有域名和 Key 齐了才能发请求；模型名**不**参与判断
@@ -605,6 +610,34 @@ internal fun ProfileRow(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.settings_supports_vision),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = stringResource(
+                                if (supportsVision) R.string.settings_supports_vision_on
+                                else R.string.settings_supports_vision_off
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = supportsVision,
+                        onCheckedChange = {
+                            supportsVision = it
+                            onDraftChanged()
+                        }
+                    )
+                }
 
                 Spacer(Modifier.height(10.dp))
                 // 两个按钮等宽平分。原先是三个按钮挤在一行，

@@ -4,6 +4,7 @@ import android.util.Log
 import com.mistakebook.data.AppFiles
 import com.mistakebook.data.chat.AssembledContext
 import com.mistakebook.data.chat.ChatContextAssembler
+import com.mistakebook.data.chat.ChatOcrText
 import com.mistakebook.data.chat.ChatPrompts
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.local.ChatDao
@@ -348,7 +349,14 @@ class ChatRepository(
     suspend fun buildContext(
         sessionId: Long,
         questionId: Long?,
-        pendingText: String = ""
+        pendingText: String = "",
+        /**
+         * 当前模型**能不能直接看图**。
+         *
+         * 不能看图时：图片附件的 data URL **不再发给模型**（发了也只会得到
+         * 「不支持图片」的错误或空回答），改为只发 MinerU 抽出来的文字。
+         */
+        supportsVision: Boolean = true
     ): AssembledContext {
         val systemContext = if (questionId != null) buildQuestionContext(questionId).orEmpty() else ""
         // 失败的、取消的消息**都保留**：它们的内容是有效的对话上下文。
@@ -362,7 +370,8 @@ class ChatRepository(
             it.role == ChatRole.SYSTEM &&
                 it.content.startsWith(ChatContextAssembler.SUMMARY_PREFIX)
         }
-        val history = raw.filterNot { it.id == summaryMessage?.id }.map { it.toOutgoing() }
+        val history = raw.filterNot { it.id == summaryMessage?.id }
+            .map { it.toOutgoing(supportsVision) }
         return ChatContextAssembler.assemble(
             systemPrompt = ChatPrompts.SYSTEM,
             questionContext = systemContext,
@@ -372,26 +381,61 @@ class ChatRepository(
         )
     }
 
-    private suspend fun ChatMessage.toOutgoing(): OutgoingMessage {
+    private suspend fun ChatMessage.toOutgoing(supportsVision: Boolean): OutgoingMessage {
         val attachments = attachmentIds().mapNotNull { chatDao.findAttachment(it) }
         val usable = attachments.filter { it.status == AttachmentStatus.READY }
+        val imageAttachments = usable.filter { it.kind == AttachmentKind.IMAGE }
         val text = buildString {
             append(content)
+            // 文档类附件的正文：一直都要带。
             val excerpts = usable.filter { it.kind != AttachmentKind.IMAGE }
                 .mapNotNull { it.textExcerpt.takeIf { excerpt -> excerpt.isNotBlank() } }
             if (excerpts.isNotEmpty()) {
                 append("\n\n")
                 append(excerpts.joinToString("\n\n"))
             }
+            // **模型不识图时**，把 MinerU 从图片里抽出的文字补上。
+            //
+            // 图片本身这时不发（`images` 为空），模型完全看不到那张图；
+            // 若不给文字，模型只能对着「用户发了张图」这句话瞎猜。
+            if (!supportsVision) {
+                val imageTexts = imageAttachments
+                    .mapNotNull { it.textExcerpt.takeIf { excerpt -> excerpt.isNotBlank() } }
+                if (imageTexts.isNotEmpty()) {
+                    append("\n\n")
+                    append(
+                        imageTexts.joinToString("\n\n") { ChatOcrText.section(it) }
+                    )
+                }
+            }
         }
-        val images = usable.filter { it.kind == AttachmentKind.IMAGE }
-            .mapNotNull { attachment -> runCatching { imageDataUrls.dataUrlOf(attachment) }.getOrNull() }
+        val images = if (supportsVision) {
+            imageAttachments.mapNotNull { attachment ->
+                runCatching { imageDataUrls.dataUrlOf(attachment) }.getOrNull()
+            }
+        } else {
+            emptyList()
+        }
         return OutgoingMessage(
             id = id,
             role = role,
             text = text,
             images = images
         )
+    }
+
+    /**
+     * 会话里还没有 OCR 文字的图片附件（最新的在前）。
+     *
+     * 用于「模型不识图时补做 OCR」：历史轮次里的图片也得有文字，
+     * 否则用户问「刚才那张图里的第三题是什么」时，模型什么都看不到。
+     */
+    suspend fun imageAttachmentsWithoutOcr(sessionId: Long): List<ChatAttachment> =
+        chatDao.imageAttachmentsOf(sessionId).filter { it.textExcerpt.isBlank() }
+
+    /** 回写图片附件的 OCR 文字。 */
+    suspend fun updateAttachmentOcr(id: Long, text: String) {
+        chatDao.updateAttachmentText(id, text, text.length)
     }
 
     // ------------------------------------------------------------ 辅助
