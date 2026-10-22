@@ -1346,10 +1346,12 @@ private fun QuizOptionRow(
                     )
                 } else {
                     // 常规四选一模式：词性内联在释义行首（「n. 金属板」），
-                    // 不再独立成行——旧版词性一行 + 释义槽 48dp，四个选项
-                    // 全都带着一截空白，把答案区顶出首屏。槽位收到 40dp
-                    // 仍然保持四个选项等高（作答瞬间不跳）。
-                    Row(verticalAlignment = Alignment.Top) {
+                    // 不再独立成行。整个文本区固定 40dp 高、内容垂直居中——
+                    // 单行不偏上、双行放得下，四个选项从始至终一样高。
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.height(OPTION_MEANING_SLOT_QUIZ.dp)
+                    ) {
                         if (option.word.pos.isNotBlank()) {
                             Text(
                                 text = option.word.pos,
@@ -1357,7 +1359,7 @@ private fun QuizOptionRow(
                                 color = posColor,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
-                                modifier = Modifier.padding(top = 2.dp, end = 6.dp)
+                                modifier = Modifier.padding(end = 6.dp)
                             )
                         }
                         Text(
@@ -1370,13 +1372,6 @@ private fun QuizOptionRow(
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    // 恒定占位：保证四个选项从始至终一样高。
-                    Text(
-                        text = "",
-                        modifier = Modifier.height(
-                            (OPTION_MEANING_SLOT_QUIZ - MEANING_LINE_HEIGHT_QUIZ).coerceAtLeast(0).dp
-                        )
-                    )
                 }
             }
 
@@ -2155,8 +2150,6 @@ private fun WordItemCard(
  */
 private const val OPTION_MEANING_SLOT_QUIZ = 40
 
-/** bodyMedium 一行释义的近似高度（dp），用于把恒定槽位拆成「内容 + 余量」。 */
-private const val MEANING_LINE_HEIGHT_QUIZ = 20
 
 /**
  * 义项辨析选项的释义区高度（dp）。

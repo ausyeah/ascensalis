@@ -741,8 +741,9 @@ private fun QuestionCard(
             QuestionThumb(
                 imagePath = question.printImagePath,
                 contentDescription = stringResource(R.string.edit_original_image),
-                // 只锁高度、宽度交给图片比例：横图宽些、竖图窄些，画面不裁
-                modifier = Modifier.height(72.dp)
+                // 列表小图保持固定方块 + 居中裁剪，行列整齐
+                modifier = Modifier.size(72.dp),
+                keepAspect = false
             )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {

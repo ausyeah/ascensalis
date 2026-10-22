@@ -55,24 +55,24 @@ class WordAudioPlayer(context: Context) : TextToSpeech.OnInitListener {
         if (status == TextToSpeech.SUCCESS) {
             val ttsInstance = tts ?: return
 
-            // Try US English first, fallback to UK, then default
+            // 优先美音，退英音，再退泛英语。都不可用**不判死**：
+            // 用户手机很可能装的是纯中文引擎（小米「系统语音引擎」
+            // 首选语言是中文），setLanguage(英语) 会返回 NOT_SUPPORTED，
+            // 但引擎仍能把英文单词念出来（音素近似或逐字母拼）。
+            // 退回系统默认语言、照常标记 ready——有声音总比没有强。
+            // 只有 status == ERROR（设备根本没有任何 TTS 引擎）才算不可用。
             val resultUS = ttsInstance.setLanguage(Locale.US)
             if (resultUS == TextToSpeech.LANG_MISSING_DATA || resultUS == TextToSpeech.LANG_NOT_SUPPORTED) {
                 val resultUK = ttsInstance.setLanguage(Locale.UK)
                 if (resultUK == TextToSpeech.LANG_MISSING_DATA || resultUK == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    val resultDefault = ttsInstance.setLanguage(Locale.ENGLISH)
-                    if (resultDefault != TextToSpeech.LANG_MISSING_DATA && resultDefault != TextToSpeech.LANG_NOT_SUPPORTED) {
-                        _isReady.value = true
-                    } else {
-                        Log.w("WordAudioPlayer", "English language is not supported")
-                        _unavailable.value = true
+                    val resultEn = ttsInstance.setLanguage(Locale.ENGLISH)
+                    if (resultEn == TextToSpeech.LANG_MISSING_DATA || resultEn == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        Log.w("WordAudioPlayer", "English language unavailable (result=$resultEn), falling back to system default language")
+                        ttsInstance.setLanguage(Locale.getDefault())
                     }
-                } else {
-                    _isReady.value = true
                 }
-            } else {
-                _isReady.value = true
             }
+            _isReady.value = true
         } else {
             Log.e("WordAudioPlayer", "TTS Initialization failed with status: $status")
             _unavailable.value = true

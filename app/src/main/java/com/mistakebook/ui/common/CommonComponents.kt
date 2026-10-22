@@ -170,7 +170,16 @@ fun QuestionThumb(
     imagePath: String,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    /**
+     * 是否按图片真实比例展开宽度。
+     *
+     * - true（默认）：高度由调用方给定，宽度 = 高度 × 图片比例——详情页
+     *   大图、编辑页附图用它，画面完整不裁；
+     * - false：完全遵守调用方给的固定尺寸（如列表里 72×72 方块），
+     *   配合 [ContentScale.Crop] 居中裁剪——列表小图要整齐划一，用它。
+     */
+    keepAspect: Boolean = true
 ) {
     val context = LocalContext.current
     // request 也 remember：否则每次重组都新建 ImageRequest，Coil 会认为
@@ -186,7 +195,7 @@ fun QuestionThumb(
     var aspectRatio by remember(imagePath) { mutableStateOf<Float?>(null) }
     Surface(
         modifier = modifier
-            .aspectRatio(aspectRatio ?: 1f)
+            .then(if (keepAspect) Modifier.aspectRatio(aspectRatio ?: 1f) else Modifier)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant

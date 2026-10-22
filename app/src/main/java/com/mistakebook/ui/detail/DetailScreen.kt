@@ -168,11 +168,11 @@ fun DetailScreen(
                         QuestionThumb(
                             imagePath = question.imagePath,
                             contentDescription = stringResource(R.string.edit_original_image),
-                            // 高度区间而非固定值：宽度撑满后高度按图片比例落位，
-                            // 长题图不再被 220dp 裁头去尾
+                            // 宽度撑满、高度完全交给图片比例（min 只是加载中的
+                            // 占位下限）：长题图整幅可见，不再被固定高度裁头去尾
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 160.dp, max = 380.dp),
+                                .heightIn(min = 120.dp),
                             onClick = { showFullImage = true; fullImagePath = null }
                         )
                         // 重新裁切：只换这张显示图/封面，不重新识别。
