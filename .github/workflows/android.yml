@@ -83,6 +83,24 @@ jobs:
           echo "keystore.properties 已生成（口令不回显）"
           echo "SIGNING=on" >> "$GITHUB_ENV"
 
+      # 闸门：维护者仓库的 tag 构建（即对外发布）必须是正式签名。
+      # 随机 debug 签名意味着「每次升级都要卸载重装、丢数据」——
+      # 这正是 v0.0.12 之前踩过的坑，绝不允许再犯。
+      # fork / PR / main 推送仍走 debug 降级，不影响贡献者。
+      - name: Enforce release signing for tag builds (maintainer only)
+        if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'ausyeah/mistake-recorder'
+        run: |
+          set -euo pipefail
+          if [ "${SIGNING:-off}" != "on" ]; then
+            echo "::error::tag 构建（对外发布）必须使用正式签名，但未配置签名 Secrets"
+            echo "::error::未配置时 CI 会降级产出随机 debug 签名的包——用户每次升级都要卸载重装。"
+            echo "::error::请先在 仓库 Settings → Secrets and variables → Actions 配置："
+            echo "::error::  RELEASE_KEYSTORE_B64 / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD"
+            echo "::error::（值见随版本交付的《签名 Secrets 添加指南》），然后重打 tag。"
+            exit 1
+          fi
+          echo "正式签名已就绪，继续构建发布包"
+
       - name: Build APK
         run: |
           set -euo pipefail
@@ -135,7 +153,8 @@ jobs:
           grep -E "certificate SHA-256" /tmp/sig.txt || true
 
       # 闸门（仅正式签名构建）：签名证书必须和仓库记录的指纹一致
-      # fork 用户的密钥当然不一致，所以只在维护者的 main 上强制。
+      # 维护者仓库的 main 与 tag 都强制：指纹不一致 = 用户无法覆盖升级 = 禁止发布。
+      # fork 用户的密钥当然不一致，所以只对维护者仓库强制。
       - name: Verify signer matches recorded fingerprint (signed builds only)
         if: env.SIGNING == 'on'
         run: |
@@ -149,15 +168,19 @@ jobs:
             echo "::warning::读不到期望或实际指纹，跳过一致性比对（期望长度 ${#EXPECTED}，实际长度 ${#ACTUAL}）"
             exit 0
           fi
+          ENFORCE=0
+          case "${GITHUB_REF}" in
+            refs/heads/main|refs/tags/*) ENFORCE=1 ;;
+          esac
           if [ "$EXPECTED" != "$ACTUAL" ]; then
-            if [ "${GITHUB_REPOSITORY}" = "ausyeah/mistake-recorder" ] && [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            if [ "${GITHUB_REPOSITORY}" = "ausyeah/mistake-recorder" ] && [ "$ENFORCE" = "1" ]; then
               echo "::error::签名证书与 signing/expected-cert-sha256.txt 不一致"
               echo "::error::已安装的用户将无法升级这个 App。请勿发布，先核对发布密钥。"
               echo "::error::  期望: $EXPECTED"
               echo "::error::  实际: $ACTUAL"
               exit 1
             fi
-            echo "::warning::签名与仓库记录不一致（非维护者仓库，跳过）"
+            echo "::warning::签名与仓库记录不一致（非维护者仓库/非发布分支，跳过）"
             echo "  期望: $EXPECTED"
             echo "  实际: $ACTUAL"
             exit 0
@@ -191,22 +214,11 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      # Release 说明由发版流程通过 API 撰写（功能更新 + 安装指引），
+      # 这里只负责挂 APK，绝不覆盖 body——曾因 body 覆盖丢过一次完整的版本说明。
       - name: Attach APK to Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.apk
-          generate_release_notes: true
           fail_on_unmatched_files: true
-          body: |
-            ## 安装与首次配置
-
-            1. 下载 `mistakebook-${{ github.ref_name }}-android.apk` 安装（需允许「安装未知来源应用」）
-            2. 首次启动后进入 **设置**，填写两个密钥：
-               - **MinerU API Key** —— 在 MinerU 开放平台申请
-               - **大模型接入** —— 填接口地址与 API Key，点「获取模型列表」可自动选模型名
-
-            > **本安装包不预置任何 API Key。** 密钥由使用者自行填写，只存本机加密存储。
-            > 早期版本曾把密钥打进安装包，而 APK 里的密钥可以被直接提取。
-            > 现已改为由使用者自行填写；如果你在旧版本里填过密钥，
-            > 建议到服务商后台把它们重置一次。

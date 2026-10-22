@@ -238,3 +238,22 @@
    - 空搜索时仅懒截取前 100 词，满足后短路终止，大幅降低内存分配；
 4. **AtomicBoolean 原子状态锁与 Job 协同**：
    - `selectOption` 与 `rateCard` 使用 CAS 原子保护，防止极速连击导致并发写入与跳题。
+
+## 签名体系统一收口：release 密钥为唯一签名源 (2026-10-22)
+
+### 背景与痛点
+1. **「每次升级都要卸载重装、丢数据」**：v0.0.11 及之前的所有发布包都由 CI 随机生成的 debug 密钥签名（干净容器无固定 keystore），每个包签名都不同，Android 判定非法覆盖安装；
+2. **稳定 debug 密钥方案落空**：2024-10 的决策写的是「将 `signing/debug.keystore` 纳入仓库」，但 `.gitignore` 的 `*.keystore` 规则从未被绕过，该文件实际从未进过仓库，对应代码路径在 CI 中是死代码；
+3. **发布密钥断代**：`signing/expected-cert-sha256.txt` 记录的旧钥匙（`00:6B:BF…`）随沙箱重置丢失，若照旧配置 Secrets，CI 指纹闸门会在 main 推送时硬失败；
+4. **Release 说明被覆盖**：`Attach APK to Release` 步骤自带 `body` 参数，会把 API 撰写的版本说明整体替换成安装指引。
+
+### 决策内容
+1. **唯一签名源 = release 密钥**（`CN=mistakebook, O=ausyeah`，SHA256 `E3:BA:30…`，口令随《签名 Secrets 添加指南》交付，永进仓库的只有指纹）：
+   - v0.0.12 安装包由维护者在本地用该密钥重签（v2+v3 双 scheme，minSdk 26 无需 v1）；
+   - 配置 4 个 Secrets 后 CI 自动产出同签名包，用户此后永远直接覆盖升级；
+   - 放弃「仓库内置稳定 debug 密钥」路线，杜绝两套合法签名并存的混淆；
+2. **CI 三道签名闸门**：
+   - tag 构建（对外发布）未配 Secrets 直接失败，绝不再产出随机 debug 签名的发布包；
+   - 指纹一致性校验从「仅 main」扩大到「main + 所有 tag」，防换钥发布；
+   - `Attach APK to Release` 去掉 `body`/`generate_release_notes`，版本说明只由发版流程通过 API 撰写；
+3. **指纹记录同步换新**并注明旧钥匙从未到达任何用户（v0.0.11 前均为随机 debug 签名），更换不影响已安装用户。
