@@ -788,6 +788,13 @@ internal fun MineruUsageSection(container: com.mistakebook.di.AppContainer) {
                 label = stringResource(R.string.settings_usage_mineru_calls),
                 value = "${formatCount(snap.mineruCalls)} 次"
             )
+            // 页数是 MinerU 的真实计费单位（免费额度 2000 页/天）：
+            // 「解析 3 次」可能是 3 张截图，也可能是一份 150 页的 PDF，
+            // 不看页数根本判断不了额度消耗。
+            UsageRow(
+                label = stringResource(R.string.settings_usage_mineru_pages),
+                value = "${formatCount(snap.mineruPages)} 页"
+            )
             Text(
                 text = stringResource(R.string.settings_usage_hint),
                 style = MaterialTheme.typography.bodySmall,

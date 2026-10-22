@@ -26,7 +26,16 @@ data class MineruOutcome(
     val batchId: String,
     val markdown: String,
     val imagePaths: List<String>,
-    val rawDir: File
+    val rawDir: File,
+
+    /**
+     * 本次解析的页数（MinerU 计费单位）。
+     *
+     * 从轮询期间观察到的 `extract_progress.total_pages` 取最后一个
+     * 非零值。服务端全程不给这个字段时为 0——用量页数记 0，
+     * 次数照记（次数是「调用过」的口径，与页数无关）。
+     */
+    val pages: Int = 0
 )
 
 /**
@@ -91,8 +100,9 @@ class MineruClient(
 
         // 一次 recognize 成功 = 一次 MinerU 用量。放在这里而不是 downloadAndExtract：
         // 只有服务端真的解析完（state=done）才算数，上传/轮询阶段的失败不烧额度口径。
+        // 页数（MinerU 的真实计费单位）随 outcome 一起传出，一并记账。
         val outcome = pollResults(auth, batch.batch_id, fileName, taskId, onStage)
-        if (outcome is ApiResult.Success) usageStatsStore.recordMineru()
+        if (outcome is ApiResult.Success) usageStatsStore.recordMineru(outcome.data.pages)
         outcome
     }
 
@@ -133,6 +143,9 @@ class MineruClient(
         val startedAt = System.currentTimeMillis()
         var runningCount = 0
         var first = true
+        // 页数跟踪：`total_pages` 在 running 阶段持续给出，done 时可能不再带。
+        // 取最后一个非零值，随 outcome 传给用量记账（MinerU 按页计费）。
+        var lastTotalPages = 0
         // 状态计时器：记录最后一次变化时刻，判断是否停滞。
         // 抽成对象是为了可测——见 [MineruStallTracker]。
         val stallTracker = MineruStallTracker()
@@ -175,6 +188,8 @@ class MineruClient(
 
             if (item != null) {
                 val percent = item.progressPercent()
+                val pages = item.totalPages()
+                if (pages > 0) lastTotalPages = pages
                 val detail = buildString {
                     append("MinerU ").append(stageVerb(item.state)).append(' ')
                     percent?.let { append(it).append("% ") }
@@ -230,7 +245,7 @@ class MineruClient(
                 "done" -> {
                     val zipUrl = item.fullZipUrl
                         ?: return fail(ApiErrorKind.BAD_RESPONSE, "解析完成但未返回结果包地址")
-                    return downloadAndExtract(zipUrl, taskId, batchId)
+                    return downloadAndExtract(zipUrl, taskId, batchId, lastTotalPages)
                 }
                 "failed" -> {
                     return fail(ApiErrorKind.SERVER, item.errMsg.orEmpty().ifBlank { "MinerU 解析失败" })
@@ -260,7 +275,8 @@ class MineruClient(
     private suspend fun downloadAndExtract(
         zipUrl: String,
         taskId: Long,
-        batchId: String
+        batchId: String,
+        pages: Int = 0
     ): ApiResult<MineruOutcome> {
         val response = rethrowCancellation { api.downloadZip(zipUrl) }
             .getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
@@ -294,7 +310,8 @@ class MineruClient(
                 batchId = batchId,
                 markdown = markdown,
                 imagePaths = absolutePaths,
-                rawDir = mineruDir
+                rawDir = mineruDir,
+                pages = pages
             )
         )
     }

@@ -231,7 +231,70 @@ class SseDrainTest {
     }
 
     // ------------------------------------------------------------------
-    // 五、终止判定本身
+    // 六、finish 之后的 usage 帧补读（token 用量不为 0 的来源）
+    // ------------------------------------------------------------------
+
+    /**
+     * `stream_options.include_usage` 生效时的规范形态：
+     * finish 帧之后还有一个 usage 帧（`choices` 为空），然后才是 `[DONE]`。
+     *
+     * 补读不到它，token 用量就永远是 0——用户反馈「次数有了但具体量都是 0」。
+     */
+    @Test
+    fun `finish 之后的 usage 帧被补读合并`() {
+        val result = drainSse(
+            readLine = source(deltaFrame("正文"), terminalFrame("stop")),
+            afterFinish = source(
+                """data:{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":22,"prompt_cache_hit_tokens":5}}""",
+                "data: [DONE]"
+            )
+        )
+        assertEquals("finish_reason", result.endedBy)
+        assertEquals(11, result.promptTokens)
+        assertEquals(22, result.completionTokens)
+        assertEquals(5, result.cachedTokens)
+    }
+
+    /**
+     * 服务端**挂着不发** usage 帧（连 `[DONE]` 都没有）。
+     *
+     * 补读必须兜住异常：拿不到数字是小事，把一次已经成功的流变成失败
+     * 会让界面从「答完了」跳成「出错了」。
+     */
+    @Test
+    fun `补读挂住时照常收尾不炸`() {
+        val result = drainSse(
+            readLine = source(deltaFrame("正文"), terminalFrame("stop")),
+            afterFinish = { error("服务端不吭声了") }
+        )
+        assertEquals("finish_reason", result.endedBy)
+        assertEquals(0, result.promptTokens)
+        assertEquals(0, result.completionTokens)
+    }
+
+    /** 补读只等到哨兵：服务端不回 usage 帧，数字保持 0，不收尾失败。 */
+    @Test
+    fun `补读只等到哨兵时 usage 为 0`() {
+        val result = drainSse(
+            readLine = source(deltaFrame("正文"), terminalFrame("stop")),
+            afterFinish = source("data: [DONE]")
+        )
+        assertEquals("finish_reason", result.endedBy)
+        assertEquals(0, result.promptTokens)
+    }
+
+    /** 不传 afterFinish 时保持老行为：finish 之后一行都不多读。 */
+    @Test
+    fun `默认不补读`() {
+        val result = drainSse(
+            readLine = source(deltaFrame("正文"), terminalFrame("stop"))
+        )
+        assertEquals("finish_reason", result.endedBy)
+        assertEquals(0, result.promptTokens)
+    }
+
+    // ------------------------------------------------------------------
+    // 七、终止判定本身
     // ------------------------------------------------------------------
 
     @Test

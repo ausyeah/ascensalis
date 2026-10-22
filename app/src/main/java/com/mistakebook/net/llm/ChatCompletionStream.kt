@@ -244,22 +244,51 @@ class ChatCompletionStream(
      * 一次性非流式对话，拿完整文本。
      *
      * 给**内部辅助场景**用（上下文压缩的摘要生成）：那种场景不需要流式，
-     * 也没有 UI 在等增量。走 [nonStreaming] 的同一条路，错误同样不抛到
+     * 也没有 UI 在增量。走 [nonStreaming] 的同一条路，错误同样不抛到
      * 调用方，只是包成 [ApiResult]。
+     *
+     * @param effort 思考强度。压缩摘要这类「想清楚比答得快重要」的场景
+     *   传 [ReasoningEffort.MAX]：候选链（`max`→`high`→字段名逐个）由
+     *   [ReasoningFallback] 生成，服务端不认当前字段名时自动换下一个，
+     *   正常服务端第一次即成功，多试的代价只是多一次 400 往返。
+     * @param onDone 成功时回调一次 usage。**内部调用也要记账**——
+     *   压缩器的 LLM 调用不计入用量概览的话，「对话」一栏永远是 0。
      */
-    suspend fun completeOnce(profile: LlmProfile, request: ChatRequest): ApiResult<String> {
+    suspend fun completeOnce(
+        profile: LlmProfile,
+        request: ChatRequest,
+        effort: ReasoningEffort = ReasoningEffort.OFF,
+        onDone: (ChatStreamEvent.Done) -> Unit = {}
+    ): ApiResult<String> {
         val text = StringBuilder()
-        var error: ApiError? = null
-        nonStreaming(profile, request.copy(stream = false), deltasAlreadyEmitted = 0, null)
-            .collect { event ->
+        val attempts = ReasoningFallback.attempts(effort)
+        var lastError: ApiError? = null
+
+        for ((index, attempt) in attempts.withIndex()) {
+            text.clear()
+            var error: ApiError? = null
+            // attempt 为 (字段名, 取值)；nonStreaming 内部会 withReasoning 带上
+            nonStreaming(
+                profile,
+                request.copy(stream = false),
+                deltasAlreadyEmitted = 0,
+                attempt
+            ).collect { event ->
                 when (event) {
                     is ChatStreamEvent.Delta -> text.append(event.text)
+                    is ChatStreamEvent.Done -> onDone(event)
                     is ChatStreamEvent.Failed -> error = event.error
                     else -> Unit
                 }
             }
-        error?.let { return ApiResult.Failure(it) }
-        return ApiResult.Success(text.toString())
+            if (error == null) return ApiResult.Success(text.toString())
+            lastError = error
+            // 只有「服务端不认这个思考字段名」才值得换下一个候选；
+            // 鉴权 / 限流 / 服务端错误换字段再发还是同样结果。
+            if (!ReasoningFallback.isUnknownFieldError(error)) break
+            if (index == attempts.lastIndex) break
+        }
+        return ApiResult.Failure(lastError ?: ApiError(ApiErrorKind.BAD_RESPONSE, "模型未返回任何结果"))
     }
 
     // ------------------------------------------------------------ 流式
@@ -321,11 +350,24 @@ class ChatCompletionStream(
         }
 
         val parser = SseLineParser(json)
+        val source = body.source()
         val result = drainSse(
-            readLine = { body.source().readUtf8Line() },
+            readLine = { source.readUtf8Line() },
             parser = parser,
             onThinking = { emit(RawEvent.Thinking(it)) },
-            onDelta = { emit(RawEvent.Delta(it)) }
+            onDelta = { emit(RawEvent.Delta(it)) },
+            // finish_reason 之后的限时补读：OpenAI 规范里 usage 帧排在
+            // finish 帧与 [DONE] 之间。但「挂着不发」的服务端实测存在
+            // （见 [isTerminalFinish] 注释），所以只给它一次机会：
+            // 读到就合并 usage，读不到（超时 / EOF / 异常）就带已有数字收尾。
+            // 超时由 Okio source 的 read timeout 实现——**只在这条补读路径上**，
+            // 主循环的读取不受影响（模型思考再久也不会被 2 秒掐断）。
+            afterFinish = {
+                runCatching {
+                    source.timeout().timeout(USAGE_TAIL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    source.readUtf8Line()
+                }.getOrNull()
+            }
         )
         // 无论是怎么结束的（[DONE] / EOF / finish_reason），都发一次 Ended。
         // 上层靠它把消息状态从「生成中」翻成完成。
@@ -426,7 +468,10 @@ class ChatCompletionStream(
             temperature = TEMPERATURE,
             max_tokens = request.max_tokens.takeIf { it > 0 } ?: MAX_TOKENS,
             responseFormat = null,
-            stream = streaming
+            stream = streaming,
+            // 流式响应默认不带 usage（OpenAI 规范），不显式打开的话
+            // token 统计永远是 0。非流式响应体本来就带，不发这个字段。
+            streamOptions = if (streaming) StreamOptions() else null
         )
         val payload = json.encodeToString(ChatRequest.serializer(), body)
         return Request.Builder()
@@ -460,8 +505,24 @@ class ChatCompletionStream(
         const val MAX_TOKENS = 16_384
 
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        /**
+         * finish 帧之后给 usage 帧的补读超时。
+         *
+         * 正常服务端几十毫秒就把 usage 帧发完；「挂着不发」的服务端
+         * 最多让收尾晚这么久。再长就得不偿失——用户已经在等下一轮对话了。
+         */
+        private val USAGE_TAIL_TIMEOUT_MS = 2_000L
     }
 }
+
+/**
+ * finish 之后最多补读几行。
+ *
+ * 规范上只剩「usage 帧 + `[DONE]`」两行，留一行余量给中转站的
+ * keep-alive 注释行。再多就说明服务端不守规矩，不必等了。
+ */
+private const val USAGE_TAIL_LINES = 3
 
 /**
  * 这一帧是否意味着**生成已经结束**。
@@ -485,6 +546,11 @@ class ChatCompletionStream(
  * 早先为了留那一帧而继续读，代价就是「可能永远读不到」——
  * 而丢掉的 token 用量只写进数据库、**界面上根本不显示**。
  * 拿一个用户看得见的死等，去换一个他看不见的数字，不划算。
+ *
+ * 现在的取舍：**照旧在 finish_reason 处收尾**，但给 finish 之后的
+ * usage 帧一次 2 秒限时的补读机会（见 [drainSse] 的 `afterFinish`）。
+ * 正常服务端几十毫秒就把 usage 帧发完；挂死的服务端最多让收尾晚 2 秒，
+ * 不会再卡住界面。
  *
  * @param finishReason 该帧携带的 `finish_reason`
  */
@@ -525,6 +591,16 @@ data class SseStreamResult(
  * 永远不跑——`isStreaming` 一直是 true，右下角就一直显示「停止」。
  * 用户看到的是「内容早出完了，图标还是停止」。
  *
+ * ## finish 之后的 usage 补读（[afterFinish]）
+ *
+ * `stream_options.include_usage` 生效时，服务端在 finish 帧之后还会补一个
+ * usage 帧，然后才是 `[DONE]`。**这是 token 用量不为 0 的唯一来源**——
+ * 不带 `stream_options` 的话服务端根本不发它（见 [StreamOptions]）。
+ *
+ * 但「挂着不发」的服务端同样存在，所以补读必须是限时的：调用方传入的
+ * lambda 自己负责超时（真实代码里是 Okio source 的 2 秒 read timeout），
+ * 这里只约定「返回 null 或抛异常都当作没有 usage 帧」。
+ *
  * ## 为什么把 [readLine] 做成参数
  *
  * 「挂住」在真实代码里是 `readUtf8Line()` 阻塞，单测里没法复现。
@@ -533,12 +609,14 @@ data class SseStreamResult(
  * 而不是安静地返回、把 bug 放过去。
  *
  * @param readLine 读下一行；返回 `null` 表示 EOF。**不返回**即代表连接挂住。
+ * @param afterFinish finish 帧之后的补读。默认 null = 不补读（老行为）。
  */
 fun drainSse(
     readLine: () -> String?,
     parser: SseLineParser = SseLineParser(),
     onThinking: (String) -> Unit = {},
-    onDelta: (String) -> Unit = {}
+    onDelta: (String) -> Unit = {},
+    afterFinish: (() -> String?)? = null
 ): SseStreamResult {
     var finishReason: String? = null
     var promptTokens = 0
@@ -560,8 +638,14 @@ fun drainSse(
                 if (event.completionTokens > 0) completionTokens = event.completionTokens
                 if (event.cachedTokens > 0) cachedTokens = event.cachedTokens
 
-                // 到了就不再多读一行——多读那一下可能就是永远。
+                // 到了就不再多读——但给 finish 之后的 usage 帧一次补读机会。
                 if (isTerminalFinish(event.finishReason)) {
+                    val tail = readUsageTail(afterFinish, parser)
+                    if (tail != null) {
+                        if (tail.first > 0) promptTokens = tail.first
+                        if (tail.second > 0) completionTokens = tail.second
+                        if (tail.third > 0) cachedTokens = tail.third
+                    }
                     return SseStreamResult(
                         promptTokens, completionTokens, finishReason, cachedTokens,
                         endedBy = "finish_reason"
@@ -579,4 +663,41 @@ fun drainSse(
             SseEvent.Ignore -> Unit
         }
     }
+}
+
+/**
+ * finish 帧之后的**限时补读**，最多读 [USAGE_TAIL_LINES] 行。
+ *
+ * 按规范，finish 帧与 `[DONE]` 之间只剩 usage 帧（`choices` 为空、
+ * `usage` 非空）。所以：读到带 usage 的帧就合并后收工；读到 `[DONE]`、
+ * EOF、或任何不带 usage 的帧都说明 usage 帧不在，直接放弃。
+ *
+ * **任何异常都吞掉**：补读是尽力而为，把一次已经成功的流变成失败
+ * 比丢几个 token 数字严重得多。挂死的服务端在真实代码里由
+ * [ChatCompletionStream] 的 Okio 超时 lambda 兜底，这里再兜一层。
+ *
+ * @return `(prompt, completion, cached)`；没读到返回 null。
+ */
+private fun readUsageTail(
+    readLine: (() -> String?)?,
+    parser: SseLineParser
+): Triple<Int, Int, Int>? {
+    if (readLine == null) return null
+    repeat(USAGE_TAIL_LINES) {
+        val line = runCatching { readLine() }.getOrNull() ?: return null
+        when (val event = parser.accept(line)) {
+            is SseEvent.Chunk -> {
+                val hasUsage = event.promptTokens > 0 ||
+                    event.completionTokens > 0 ||
+                    event.cachedTokens > 0
+                if (!hasUsage) return null
+                return Triple(event.promptTokens, event.completionTokens, event.cachedTokens)
+            }
+
+            // [DONE] / 坏帧 / 注释行：usage 帧不在后面了
+            SseEvent.Done, is SseEvent.Malformed, SseEvent.Ignore -> return null
+            null -> return@repeat
+        }
+    }
+    return null
 }

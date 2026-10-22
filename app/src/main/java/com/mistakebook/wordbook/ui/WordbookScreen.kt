@@ -505,13 +505,21 @@ private fun StudyView(
 
                             // 作答后展示原词与全部释义。
                             //
+                            // **只在答错时展示**：答对后 380ms 就自动切题，
+                            // 释义闪现一下没有意义；答错时用户正需要
+                            // 「正确答案 + 完整释义」来理解错因。
+                            // （学习 github.com/ausyeah/wordbook：答对只出
+                            // 「✓ 回答正确！」反馈，答错才给正确答案。）
+                            //
                             // 不用 AnimatedVisibility：它的 exit 渐隐期间 content
                             // 仍会组合渲染——切题时新词的释义会先闪一下再消失
                             // （用户实测「还没选就出现了」）。改为显式 alpha：
                             // 隐藏时 snap() 瞬间归零立即停止渲染，显示时才渐显。
+                            val senseSelected = state.options.getOrNull(state.selectedOptionIndex ?: -1)
+                            val senseAnsweredWrong = state.isAnswered && senseSelected?.isCorrect == false
                             val senseAlpha by animateFloatAsState(
-                                targetValue = if (state.isAnswered) 1f else 0f,
-                                animationSpec = if (state.isAnswered) tween(220) else snap(),
+                                targetValue = if (senseAnsweredWrong) 1f else 0f,
+                                animationSpec = if (senseAnsweredWrong) tween(220) else snap(),
                                 label = "senseAnswerAlpha"
                             )
                             if (senseAlpha > 0.01f) {
@@ -574,11 +582,16 @@ private fun StudyView(
                             }
 
                             // 作答后或卡片揭晓后展示完整中文释义。
+                            // **答对不展示**：答对即退出本轮（380ms 自动切题），
+                            // 释义留给答错时理解错因；卡片模式是主动翻面，
+                            // isCardRevealed 照常展示。
                             // 同 SENSE 分支：不用 AnimatedVisibility，避免 exit
                             // 渐隐期间新词释义闪现；隐藏即时、显示渐显。
+                            val selectedOption = state.options.getOrNull(state.selectedOptionIndex ?: -1)
+                            val answeredWrong = state.isAnswered && selectedOption?.isCorrect == false
                             val meaningAlpha by animateFloatAsState(
-                                targetValue = if (state.isAnswered || state.isCardRevealed) 1f else 0f,
-                                animationSpec = if (state.isAnswered || state.isCardRevealed) tween(220) else snap(),
+                                targetValue = if (answeredWrong || state.isCardRevealed) 1f else 0f,
+                                animationSpec = if (answeredWrong || state.isCardRevealed) tween(220) else snap(),
                                 label = "meaningAlpha"
                             )
                             if (meaningAlpha > 0.01f) {
@@ -879,16 +892,35 @@ private fun QuizOptionRow(
 
             Spacer(Modifier.width(12.dp))
 
+            // 选项文本区。
+            //
+            // **固定高度是这个区的核心目的**：实测词库 4356 词——
+            // 100% 有词性（最长 34 字符，独立一行放得下）、释义长度
+            // p50=13 / p90=25 / p99=33 字符，中文 bodyMedium 一行约
+            // 18 字，两行空间（48dp）覆盖 99% 的词。所以：
+            //
+            // - 释义区写死 48dp（QUIZ）/ 40dp（SENSE 作答后）：
+            //   单行释义不塌高度、双行不撑高，四个选项从始至终一样高；
+            // - 不写死 Card 总高度：ROM 行高有差异，写死会溢出裁剪，
+            //   固定文本区高度则无论行高多少总高都恒定；
+            // - 词性独立成行（QUIZ）：有没有词性、词性长短都不影响高度。
+            //
+            // 改之前的现象：词性有无（有的词没有）、释义一两行、
+            // 作答后多一行释义——三种因素叠加，四个选项高矮不齐、
+            // 切题时整组跳动，用户答题时要点的位置一直在飘。
             Column(modifier = Modifier.weight(1f)) {
                 if (isSenseMode) {
-                    // 义项辨析模式：选项呈现英文单词
+                    // 义项辨析模式：选项呈现英文单词，词性内联小标同行
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = option.word.word,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Serif,
-                            color = meaningColor
+                            color = meaningColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         if (option.word.pos.isNotBlank()) {
                             Spacer(Modifier.width(8.dp))
@@ -896,35 +928,43 @@ private fun QuizOptionRow(
                                 text = option.word.pos,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = posColor,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
-                    if (isAnswered) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = option.word.meaning,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = meaningColor.copy(alpha = 0.85f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    // 释义区**恒定占位**：未作答时也留着这 40dp。
+                    // 四个选项在作答瞬间一起从 52dp 长到 96dp 也算「位置跳」，
+                    // 未作答就预留空间，全程等高，切题/作答都不动。
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = if (isAnswered) option.word.meaning else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = meaningColor.copy(alpha = 0.85f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.height(OPTION_MEANING_SLOT_SENSE.dp)
+                    )
                 } else {
-                    // 常规四选一模式：选项呈现中文释义
+                    // 常规四选一模式：选项呈现中文释义，词性独立成行
                     if (option.word.pos.isNotBlank()) {
                         Text(
                             text = option.word.pos,
                             style = MaterialTheme.typography.labelSmall,
                             color = posColor,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
                         )
                     }
                     Text(
                         text = option.word.meaning,
                         style = MaterialTheme.typography.bodyMedium,
                         color = meaningColor,
-                        fontWeight = if (isAnswered && (option.isCorrect || option.isSelected)) FontWeight.Medium else FontWeight.Normal
+                        fontWeight = if (isAnswered && (option.isCorrect || option.isSelected)) FontWeight.Medium else FontWeight.Normal,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.height(OPTION_MEANING_SLOT_QUIZ.dp)
                     )
                 }
             }
@@ -1394,3 +1434,21 @@ private fun WordItemCard(
         }
     }
 }
+
+/**
+ * 四选一选项的释义区高度（dp）。
+ *
+ * 写死文本区高度而不是 Card 总高度：词库实测释义 p99=33 字符，
+ * 中文 bodyMedium 一行约 18 字，48dp（两行空间）覆盖 99% 的词；
+ * 单行释义不塌、双行不撑，四个选项从始至终等高。
+ * 详见 [QuizOptionRow] 里的注释。
+ */
+private const val OPTION_MEANING_SLOT_QUIZ = 48
+
+/**
+ * 义项辨析选项的释义区高度（dp）。
+ *
+ * bodySmall 一行约 22 字，40dp 两行覆盖 44 字——词库最长释义
+ * 43 字符，刚好全覆盖。未作答时也恒定占位，作答不改变选项高度。
+ */
+private const val OPTION_MEANING_SLOT_SENSE = 40

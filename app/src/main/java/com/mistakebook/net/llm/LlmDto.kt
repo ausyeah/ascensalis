@@ -30,7 +30,19 @@ data class ChatRequest(
     @SerialName("reasoning_effort") val reasoningEffort: String? = null,
     @SerialName("thinking") val thinking: String? = null,
     @SerialName("reasoning") val reasoning: String? = null,
-    val stream: Boolean = false
+    val stream: Boolean = false,
+
+    /**
+     * 流式用量回传开关。
+     *
+     * **为什么需要它**：OpenAI 兼容规范里，流式响应**默认不回 usage**——
+     * 不带这个字段，finish_reason 之后再无任何帧，token 用量统计永远是 0
+     * （用户反馈「用量概览次数有了但具体量都是 0」的第一层原因）。
+     *
+     * 由 [ChatCompletionStream.buildRequest] 在流式时统一注入，
+     * 调用方不需要知道这个字段的存在；非流式响应体本来就带 usage，不发。
+     */
+    @SerialName("stream_options") val streamOptions: StreamOptions? = null
 ) {
     /**
      * 用指定的字段名携带思考强度；[field] 为 null 表示三个字段全不发。
@@ -55,6 +67,18 @@ data class ChatMessage(
 @Serializable
 data class ResponseFormat(
     val type: String
+)
+
+/**
+ * 流式用量开关。
+ *
+ * `include_usage = true` 时，服务端才会在 `finish_reason` 帧之后、
+ * `[DONE]` 之前补一个携带 `usage` 的帧。默认 false（OpenAI 规范行为），
+ * 不带就是「流式响应永远没有用量」。
+ */
+@Serializable
+data class StreamOptions(
+    @SerialName("include_usage") val includeUsage: Boolean = true
 )
 
 @Serializable

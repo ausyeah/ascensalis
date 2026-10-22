@@ -16,7 +16,16 @@ data class UsageSnapshot(
     val llmPromptTokens: Int = 0,
     val llmCompletionTokens: Int = 0,
     val llmCachedTokens: Int = 0,
-    val mineruCalls: Int = 0
+    val mineruCalls: Int = 0,
+
+    /**
+     * MinerU 解析的累计页数。
+     *
+     * MinerU 免费额度按页算（2000 页/天），「解析几次」说明不了花了多少
+     * 额度——一份 50 页的 PDF 和一张截图都只算 1 次。页数才是
+     * 「识别」这一侧的具体量（用户反馈「对话和识别都要计算在内」）。
+     */
+    val mineruPages: Int = 0
 )
 
 /**
@@ -48,9 +57,19 @@ class UsageStatsStore(context: Context) {
         }
     }
 
-    /** 记一次 MinerU 文件解析（一次 recognize 成功 = 一次用量）。 */
-    fun recordMineru() {
-        prefs.edit { putInt(KEY_MINERU_CALLS, prefs.getInt(KEY_MINERU_CALLS, 0) + 1) }
+    /**
+     * 记一次 MinerU 文件解析。
+     *
+     * @param pages 本次解析的页数（MinerU 计费单位）。服务端没给
+     *   `total_pages` 时传 0：次数照记，页数不记。
+     */
+    fun recordMineru(pages: Int = 0) {
+        prefs.edit {
+            putInt(KEY_MINERU_CALLS, prefs.getInt(KEY_MINERU_CALLS, 0) + 1)
+            if (pages > 0) {
+                putInt(KEY_MINERU_PAGES, prefs.getInt(KEY_MINERU_PAGES, 0) + pages)
+            }
+        }
     }
 
     fun snapshot(): UsageSnapshot = UsageSnapshot(
@@ -58,7 +77,8 @@ class UsageStatsStore(context: Context) {
         llmPromptTokens = prefs.getInt(KEY_LLM_PROMPT, 0),
         llmCompletionTokens = prefs.getInt(KEY_LLM_COMPLETION, 0),
         llmCachedTokens = prefs.getInt(KEY_LLM_CACHED, 0),
-        mineruCalls = prefs.getInt(KEY_MINERU_CALLS, 0)
+        mineruCalls = prefs.getInt(KEY_MINERU_CALLS, 0),
+        mineruPages = prefs.getInt(KEY_MINERU_PAGES, 0)
     )
 
     /** 清零全部计数。换 Key / 换服务商后从零看用量时用。 */
@@ -73,6 +93,7 @@ class UsageStatsStore(context: Context) {
         const val KEY_LLM_COMPLETION = "llm_completion_tokens"
         const val KEY_LLM_CACHED = "llm_cached_tokens"
         const val KEY_MINERU_CALLS = "mineru_calls"
+        const val KEY_MINERU_PAGES = "mineru_pages"
     }
 }
 

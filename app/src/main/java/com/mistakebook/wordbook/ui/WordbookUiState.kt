@@ -33,6 +33,33 @@ data class QuizOption(
 )
 
 /**
+ * 「上一题」历史栈里存的一道题的**完整现场**。
+ *
+ * ## 为什么不是只存 Word
+ *
+ * 早先栈里只存 `Word`，回退时调 `presentWord(prev)` **重新构题**——
+ * 干扰项重抽一遍（选项顺序、内容都变了）、`isAnswered`/`selectedOptionIndex`
+ * 重置。用户回看上一题，看到的是「同一道题但选项完全不同、且不知道自己
+ * 当时选了什么、对没对」——反馈「返回上一词没有上一词的状态」。
+ *
+ * 学习 github.com/ausyeah/wordbook 的 `prevQuestion()`：原选项重放
+ * （keepOptions），选中与对错原样恢复。所以这里把整道题的可见状态
+ * 全存下来：词、进度、题干义项、四个选项（含选中标记）、作答状态。
+ *
+ * 内存占用：一道题 ≈ 四个 QuizOption（各含一个 Word），30 题上限约
+ * 几百 KB，相对 4356 词的词库可忽略。
+ */
+data class QuestionSnapshot(
+    val word: Word,
+    val progress: WordProgress?,
+    val sense: String?,
+    val options: List<QuizOption>,
+    val selectedOptionIndex: Int?,
+    val isAnswered: Boolean,
+    val isCardRevealed: Boolean
+)
+
+/**
  * 错词本子标签。
  */
 enum class WrongSubTab {

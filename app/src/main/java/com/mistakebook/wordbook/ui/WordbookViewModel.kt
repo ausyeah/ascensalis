@@ -40,9 +40,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     private val recentWords = ArrayDeque<String>()
     private val COOL_DOWN_WINDOW = 8
 
-    // 「上一题」历史栈：每离开一题就把刚做的词压栈，回退时弹出重放。
+    // 「上一题」历史栈：每离开一题就把刚做的题**连同作答现场**压栈，
+    // 回退时原样重放（选项、选中、对错都不重抽）——见 [QuestionSnapshot]。
     // 限长防止无限增长——回看 30 题足够，再往前的没有记忆价值。
-    private val questionHistory = ArrayDeque<Word>()
+    private val questionHistory = ArrayDeque<QuestionSnapshot>()
     private val HISTORY_LIMIT = 30
 
     /** 错词本列表的刷新防抖：答题写库很密集，没必要每次都重建列表。 */
@@ -80,11 +81,27 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private fun pushHistory(word: Word?) {
-        if (word == null) return
+    /**
+     * 把当前这道题的**完整现场**压入「上一题」历史栈。
+     *
+     * 存的不是 Word 而是 [QuestionSnapshot]：回退时要原样恢复
+     * 「当时选的哪个、对不对、卡片翻没翻」，只存词的话回退等于重抽题。
+     */
+    private fun pushHistory(state: WordbookUiState) {
+        val word = state.currentWord ?: return
         // 连着同一个词不重复入栈（自动切题与手动下一题可能快速连点）
-        if (questionHistory.lastOrNull()?.word == word.word) return
-        questionHistory.addLast(word)
+        if (questionHistory.lastOrNull()?.word?.word == word.word) return
+        questionHistory.addLast(
+            QuestionSnapshot(
+                word = word,
+                progress = state.currentProgress,
+                sense = state.currentSense,
+                options = state.options,
+                selectedOptionIndex = state.selectedOptionIndex,
+                isAnswered = state.isAnswered,
+                isCardRevealed = state.isCardRevealed
+            )
+        )
         while (questionHistory.size > HISTORY_LIMIT) {
             questionHistory.removeFirst()
         }
@@ -256,8 +273,8 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             }
             return
         }
-        // 离开当前题：把刚做的词压入「上一题」历史栈
-        pushHistory(_uiState.value.currentWord)
+        // 离开当前题：把这道题的完整现场（含作答状态）压入「上一题」历史栈
+        pushHistory(_uiState.value)
         presentWord(nextWord)
     }
 
@@ -360,25 +377,36 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     /**
      * 返回上一题。卡片模式与四选一 / 义项辨析都可用。
      *
-     * 标准回退栈语义：弹掉栈顶（上一题）并展示，**当前词直接丢弃**。
-     * 不回压当前词——否则连按「上一题」只会在最近两题之间振荡
+     * 标准回退栈语义：弹掉栈顶（上一题）并**原样重放**，**当前题直接丢弃**。
+     * 不回压当前题——否则连按「上一题」只会在最近两题之间振荡
      * （w3→w2→w3→w2…），永远回不到更早的题。
-     * 代价是回退后再按「下一题」会抽新题，往前走过的词不保留，
+     * 代价是回退后再按「下一题」会抽新题，往前走过的题不保留，
      * 与浏览器「后退后再前进」丢弃 forward 历史的行为一致。
      *
-     * 不走冷却队列与数据库调度——回看的是刚做过的题，
-     * 直接重放比重新抽题更符合「上一题」的直觉。
+     * 重放走 [QuestionSnapshot] 直接套状态：**不重新构题**——
+     * 干扰项不重抽、选中与对错原样恢复（学习 wordbook 仓库的
+     * keepOptions 重放）。同步完成，没有异步，也就不需要
+     * isActionInProgress 守卫；但要取消可能在飞的自动切题协程
+     * （答对后 380ms 的那一个），否则它会按旧词的条件把界面切走。
      */
     fun previousQuestion() {
-        if (isActionInProgress.get()) return
         // 用 removeLast 而不是 pollLast：这里是 kotlin.collections.ArrayDeque，
         // pollLast 是 java.util.ArrayDeque 的方法名（混用会编译不过）。
         if (questionHistory.isEmpty()) return
-        val prev = questionHistory.removeLast()
-        _uiState.update { it.copy(hasPrevious = questionHistory.isNotEmpty()) }
+        val snapshot = questionHistory.removeLast()
         nextQuestionJob?.cancel()
-        nextQuestionJob = viewModelScope.launch {
-            presentWord(prev)
+        _uiState.update {
+            it.copy(
+                currentWord = snapshot.word,
+                currentProgress = snapshot.progress,
+                currentSense = snapshot.sense,
+                options = snapshot.options,
+                selectedOptionIndex = snapshot.selectedOptionIndex,
+                isAnswered = snapshot.isAnswered,
+                isCardRevealed = snapshot.isCardRevealed,
+                isLoading = false,
+                hasPrevious = questionHistory.isNotEmpty()
+            )
         }
     }
 

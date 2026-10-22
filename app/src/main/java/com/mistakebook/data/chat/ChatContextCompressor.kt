@@ -3,6 +3,8 @@ package com.mistakebook.data.chat
 import com.mistakebook.data.local.ChatDao
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.prefs.ReasoningEffort
+import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.domain.ChatRole
 import com.mistakebook.domain.MessageStatus
 import com.mistakebook.net.ApiResult
@@ -37,10 +39,20 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * 压缩是「请求发出前的准备工作」，用户不需要看它逐字生成；
  * 一次非流式调用拿完整结果最直接（[ChatCompletionStream.completeOnce]）。
+ *
+ * ## 思考强度与记账
+ *
+ * 摘要用 [ReasoningEffort.MAX]：「从十几轮对话里挑出还没解决的约束」
+ * 是典型的需要想清楚的任务。字段名降级由 [ReasoningFallback] 自动完成。
+ *
+ * 用量照常记：压缩是**真实发生的 LLM 调用**，不计的话用量概览的
+ * 「对话」一栏会无缘无故少一截（用户反馈「具体量都是 0」的教训——
+ * 每条调用路径都得数进去）。
  */
 class ChatContextCompressor(
     private val chatDao: ChatDao,
-    private val stream: ChatCompletionStream
+    private val stream: ChatCompletionStream,
+    private val usageStatsStore: UsageStatsStore
 ) {
 
     /**
@@ -75,7 +87,18 @@ class ChatContextCompressor(
             stream = false
         )
 
-        return when (val result = stream.completeOnce(profile, request)) {
+        return when (val result = stream.completeOnce(
+            profile,
+            request,
+            effort = ReasoningEffort.MAX,
+            onDone = { done ->
+                usageStatsStore.recordLlm(
+                    promptTokens = done.promptTokens,
+                    completionTokens = done.completionTokens,
+                    cachedTokens = done.cachedTokens
+                )
+            }
+        )) {
             is ApiResult.Success -> {
                 val body = result.data.trim()
                 if (body.isEmpty()) return null

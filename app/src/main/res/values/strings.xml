@@ -219,6 +219,7 @@
     <string name="settings_usage_completion">输出 tokens</string>
     <string name="settings_usage_cached">缓存命中 tokens</string>
     <string name="settings_usage_mineru_calls">MinerU 解析</string>
+    <string name="settings_usage_mineru_pages">解析页数（计费额度按页算）</string>
     <string name="settings_usage_reset">清零重算</string>
     <string name="settings_usage_hint">仅统计本机，自上次清零起累计；缓存命中部分的单价低于普通输入</string>
 

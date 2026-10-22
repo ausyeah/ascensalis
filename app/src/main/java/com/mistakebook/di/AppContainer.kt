@@ -176,7 +176,7 @@ class AppContainer(context: Context) {
      * 与 chatCompletionStream 共享同一个实例（内部各自派生 HTTP 配置，无冲突）。
      */
     val chatContextCompressor: com.mistakebook.data.chat.ChatContextCompressor by lazy {
-        com.mistakebook.data.chat.ChatContextCompressor(database.chatDao(), chatCompletionStream)
+        com.mistakebook.data.chat.ChatContextCompressor(database.chatDao(), chatCompletionStream, usageStatsStore)
     }
 
     val recognitionEngine: RecognitionEngine by lazy {

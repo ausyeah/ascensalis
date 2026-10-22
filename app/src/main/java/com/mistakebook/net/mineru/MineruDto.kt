@@ -80,6 +80,21 @@ data class ExtractResultItem(
     }
 
     /**
+     * 本次解析的**总页数**（MinerU 的计费单位）。
+     *
+     * 免费额度按页算（2000 页/天），所以「解析了几次」说明不了花了多少
+     * 额度——一份 50 页的 PDF 和一张截图都只算 1 次。用量概览要把
+     * 页数单独列出来（用户反馈「对话和识别都要计算在内」）。
+     *
+     * 服务端在 `extract_progress.total_pages` 里给；拿不到时返回 0，
+     * 由调用方决定记 0 还是不记。
+     */
+    fun totalPages(): Int {
+        val obj = extractProgress as? JsonObject ?: return 0
+        return obj.intOrNull("total_pages") ?: 0
+    }
+
+    /**
      * 安全取整数。
      *
      * 不能用 `jsonPrimitive`：它在元素不是 primitive 时**抛异常**，
