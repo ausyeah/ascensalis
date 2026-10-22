@@ -83,6 +83,7 @@ import com.mistakebook.ui.common.containerViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.ExpandLess
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
