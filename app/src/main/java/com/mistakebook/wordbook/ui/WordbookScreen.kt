@@ -9,6 +9,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.VolumeUp
@@ -76,6 +79,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -394,21 +400,35 @@ private fun StudyView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 四个模式 chip 横向滚动：加上「拼写」后，即使把模式名
+                // 缩成「四选一/卡片/义项/拼写」，360dp 小屏上仍可能
+                // 与熟词星标挤在一起。让 chip 区自己滚动、占满剩余宽度，
+                // 星标固定在右侧，两边都不被挤掉。
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     FilterChip(
                         selected = state.studyMode == StudyMode.QUIZ,
                         onClick = { viewModel.setStudyMode(StudyMode.QUIZ) },
-                        label = { Text("四选一模式") }
+                        label = { Text("四选一") }
                     )
                     FilterChip(
                         selected = state.studyMode == StudyMode.CARD,
                         onClick = { viewModel.setStudyMode(StudyMode.CARD) },
-                        label = { Text("卡片自测") }
+                        label = { Text("卡片") }
                     )
                     FilterChip(
                         selected = state.studyMode == StudyMode.SENSE,
                         onClick = { viewModel.setStudyMode(StudyMode.SENSE) },
-                        label = { Text("义项辨析") }
+                        label = { Text("义项") }
+                    )
+                    FilterChip(
+                        selected = state.studyMode == StudyMode.SPELL,
+                        onClick = { viewModel.setStudyMode(StudyMode.SPELL) },
+                        label = { Text("拼写") }
                     )
                 }
 
@@ -594,6 +614,110 @@ private fun StudyView(
                                     )
                                 }
                             }
+                        } else if (state.studyMode == StudyMode.SPELL) {
+                            // 拼写模式题干：只给中文释义，不给单词。
+                            //
+                            // 释义用 full（多义项全文）而不是 meaning（短释义）：
+                            // meaning 只有一两个词，猜出英文很容易（一个中文
+                            // 词对应一串英文候选）；full 里有词性、多义项、
+                            // 近反义，猜的难度才够。
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isDark) Color(0xFF232A46) else PaperPrimaryTint,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = if (isDark) Color(0xFF91A7FF) else PaperPrimary
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = "拼写模式 · 看释义写单词",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isDark) Color(0xFF91A7FF) else PaperPrimary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = currentWord.full.ifBlank { currentWord.meaning },
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Serif,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 34.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "根据上面的释义，拼写出对应的英文单词：",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            // 答错后揭晓正确拼写。
+                            // 答对时不展示（600ms 后自动切题，闪现没意义），
+                            // 答错时用户正需要「正确拼写 + 释义」来记牢。
+                            if (state.spellSubmitted && !state.spellCorrect) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Spacer(Modifier.height(18.dp))
+                                    HorizontalDivider(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        thickness = 1.dp,
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                                    )
+                                    Spacer(Modifier.height(14.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = currentWord.word,
+                                            fontSize = 26.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Serif,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        IconButton(
+                                            onClick = viewModel::speakCurrentWord,
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.VolumeUp,
+                                                contentDescription = "朗读单词",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                    if (currentWord.pos.isNotBlank()) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            text = currentWord.pos,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 发音 + 生词本收藏。
+                            // 这里的喇叭是「听一遍」：**不自动播放**，由用户
+                            // 自己决定听不听——自动播等于直接把答案念出来，
+                            // 拼写练习就退化成听写；用户主动点才是听写练习。
+                            Spacer(Modifier.height(6.dp))
+                            QuestionActionRow(
+                                isFavorite = state.currentProgress?.isFavorite == true,
+                                onSpeak = viewModel::speakCurrentWord,
+                                onToggleFavorite = viewModel::toggleFavoriteCurrentWord
+                            )
                         } else {
                             // 常规四选一 / 卡片模式题干
                             Text(
@@ -749,6 +873,11 @@ private fun StudyView(
                         }
                     }
                 }
+            } else if (state.studyMode == StudyMode.SPELL) {
+                // 拼写模式：输入框 + 提交 + 结果反馈
+                item {
+                    SpellAnswerArea(state = state, viewModel = viewModel)
+                }
             } else {
                 // 卡片模式：翻面揭晓与四档打分
                 item {
@@ -809,6 +938,161 @@ private fun RateButton(
 }
 
 /**
+ * 拼写模式的作答区：输入框 + 提交 + 对错反馈。
+ *
+ * 三种状态：
+ * - 未提交：输入框可编辑，下面一个「提交答案」大按钮；
+ * - 答对：绿色对勾一行，600ms 后自动进入下一题（拼写比四选一多看一眼的时间）；
+ * - 答错：红色卡片给出正确拼写（题干卡里也会揭晓），并给「下一题」按钮。
+ *
+ * 输入框用 IME「完成」动作提交：手机上单手打字时，键盘上的
+ * 「完成/换行」键比伸手点屏幕上的按钮顺手得多。
+ */
+@Composable
+private fun SpellAnswerArea(
+    state: WordbookUiState,
+    viewModel: WordbookViewModel
+) {
+    val isDark = LocalDarkTheme.current
+    val okColor = if (isDark) com.mistakebook.ui.theme.PaperOkDark else PaperOk
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = state.spellInput,
+            onValueChange = viewModel::setSpellInput,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("在这里拼写单词…") },
+            singleLine = true,
+            enabled = !state.spellSubmitted,
+            isError = state.spellSubmitted && !state.spellCorrect,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrect = false,
+                imeAction = ImeAction.Done,
+                keyboardType = KeyboardType.Text
+            ),
+            keyboardActions = KeyboardActions(onDone = { viewModel.submitSpell() }),
+            trailingIcon = {
+                if (!state.spellSubmitted) {
+                    IconButton(
+                        onClick = viewModel::submitSpell,
+                        enabled = state.spellInput.isNotBlank()
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = "提交答案")
+                    }
+                }
+            },
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface
+            )
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        when {
+            !state.spellSubmitted -> {
+                Button(
+                    onClick = viewModel::submitSpell,
+                    enabled = state.spellInput.isNotBlank(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text(
+                        "提交答案",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+
+            state.spellCorrect -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        tint = okColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "拼写正确！",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = okColor
+                    )
+                }
+            }
+
+            else -> {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isDark) Color(0xFF381518) else Color(0xFFFFF0F0)
+                    ),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(
+                            if (isDark) Color(0xFFFF6B6B) else Color(0xFFC92A2A)
+                        )
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = null,
+                            tint = if (isDark) Color(0xFFFF6B6B) else Color(0xFFC92A2A),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "拼写不对（已加入错词本待复习）",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color(0xFFFFA8A8) else Color(0xFFC92A2A)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "正确拼写：${state.currentWord?.word ?: ""}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFFFFE8E8) else Color(0xFF821818)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = viewModel::prepareNextQuestion,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("下一题", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
+                }
+            }
+        }
+    }
+}
+
+/**
  * 题干卡内的「发音 + 生词本收藏」操作行。
  *
  * 两个图标按钮并排、不加文字标签：图标语义（喇叭/书签）在工具类
@@ -822,9 +1106,9 @@ private fun RateButton(
 @Composable
 private fun QuestionActionRow(
     isFavorite: Boolean,
-    showSpeak: Boolean,
     onSpeak: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    showSpeak: Boolean = true
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),

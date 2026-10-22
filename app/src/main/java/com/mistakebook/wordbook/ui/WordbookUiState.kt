@@ -19,7 +19,8 @@ enum class WordbookTab {
 enum class StudyMode {
     QUIZ,  // 四选一单选题（题干单词，选项一行一释义）
     CARD,  // 卡片翻面自测（正面单词，点击揭晓完整词性与多义项）
-    SENSE  // 义项辨析模式（题干单一特定义项，选项4个英文单词，专攻熟词僻义）
+    SENSE, // 义项辨析模式（题干单一特定义项，选项4个英文单词，专攻熟词僻义）
+    SPELL  // 拼写模式（题干给中文释义，用户拼出英文单词）
 }
 
 /**
@@ -56,7 +57,11 @@ data class QuestionSnapshot(
     val options: List<QuizOption>,
     val selectedOptionIndex: Int?,
     val isAnswered: Boolean,
-    val isCardRevealed: Boolean
+    val isCardRevealed: Boolean,
+    // 拼写模式的作答现场：输入了什么、交没交、对不对
+    val spellInput: String = "",
+    val spellSubmitted: Boolean = false,
+    val spellCorrect: Boolean = false
 )
 
 /**
@@ -102,6 +107,11 @@ data class WordbookUiState(
     val isAnswered: Boolean = false,
     val isCardRevealed: Boolean = false,
     val remainingQueueCount: Int = 0,
+
+    // 拼写模式（SPELL）状态
+    val spellInput: String = "",
+    val spellSubmitted: Boolean = false,
+    val spellCorrect: Boolean = false,
 
     // 统计指标
     val studiedTodayCount: Int = 0,

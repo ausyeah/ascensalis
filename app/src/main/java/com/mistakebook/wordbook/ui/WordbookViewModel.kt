@@ -3,6 +3,7 @@ package com.mistakebook.wordbook.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.di.AppContainer
+import com.mistakebook.wordbook.algo.SpellRules
 import com.mistakebook.wordbook.algo.WordbookRules
 import com.mistakebook.wordbook.data.SenseQuestion
 import com.mistakebook.wordbook.data.Word
@@ -112,7 +113,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 options = state.options,
                 selectedOptionIndex = state.selectedOptionIndex,
                 isAnswered = state.isAnswered,
-                isCardRevealed = state.isCardRevealed
+                isCardRevealed = state.isCardRevealed,
+                spellInput = state.spellInput,
+                spellSubmitted = state.spellSubmitted,
+                spellCorrect = state.spellCorrect
             )
         )
         while (questionHistory.size > HISTORY_LIMIT) {
@@ -283,6 +287,9 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     isAnswered = false,
                     selectedOptionIndex = null,
                     isCardRevealed = false,
+                    spellInput = "",
+                    spellSubmitted = false,
+                    spellCorrect = false,
                     isLoading = false
                 )
             }
@@ -300,6 +307,29 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
      * 共用同一套构题逻辑（四选一 / 义项辨析两种模式）。
      */
     private suspend fun presentWord(word: Word) {
+        if (_uiState.value.studyMode == StudyMode.SPELL) {
+            // 拼写模式：只给释义，不给单词、不给选项。
+            // 题干卡显示的是 currentWord.full/meaning，
+            // 单词本身要等用户提交后才揭晓。
+            val progress = dao.getProgress(word.word) ?: WordProgress(word = word.word)
+            _uiState.update {
+                it.copy(
+                    currentWord = word,
+                    currentProgress = progress,
+                    currentSense = null,
+                    options = emptyList(),
+                    selectedOptionIndex = null,
+                    isAnswered = false,
+                    isCardRevealed = false,
+                    spellInput = "",
+                    spellSubmitted = false,
+                    spellCorrect = false,
+                    isLoading = false
+                )
+            }
+            return
+        }
+
         if (_uiState.value.studyMode == StudyMode.SENSE) {
             var senseQ: SenseQuestion? = null
             var candidate: Word? = word
@@ -419,6 +449,9 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 selectedOptionIndex = snapshot.selectedOptionIndex,
                 isAnswered = snapshot.isAnswered,
                 isCardRevealed = snapshot.isCardRevealed,
+                spellInput = snapshot.spellInput,
+                spellSubmitted = snapshot.spellSubmitted,
+                spellCorrect = snapshot.spellCorrect,
                 isLoading = false,
                 hasPrevious = questionHistory.isNotEmpty()
             )
@@ -550,56 +583,11 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val now = System.currentTimeMillis()
-                val oldProgress = dao.getProgress(current.word) ?: WordProgress(word = current.word)
-
-                val newProgress = if (isCorrect) {
-                    val newReps = oldProgress.reps + 1
-                    // 错题在间隔复习中连对 2 次才毕业移出错词本（保留曾错标记）。
-                    // 1 次太松（刚看完解析带着印象选对，并没真记住），3 次太严
-                    // （错词本越积越厚）。规则见 WordbookRules.GRADUATION_REPS。
-                    val outOfWrongBook = oldProgress.isWrongBook && WordbookRules.shouldGraduateFromWrongBook(newReps)
-                    oldProgress.copy(
-                        level = maxOf(oldProgress.level, 2),
-                        reps = newReps,
-                        correctCount = oldProgress.correctCount + 1,
-                        isWrongBook = if (outOfWrongBook) false else oldProgress.isWrongBook,
-                        lastAnsweredAt = now,
-                        updatedAt = now
-                    )
-                } else {
-                    // 答错惩罚：进入错题本，归零连对，并安排 8 题后重现强化
-                    deferQueue.add(DeferItem(current, sessionAnswerCount + 8))
-                    oldProgress.copy(
-                        level = 0,
-                        reps = 0,
-                        lapses = oldProgress.lapses + 1,
-                        wrongCount = oldProgress.wrongCount + 1,
-                        isWrongBook = true,
-                        everWrong = true,
-                        lastAnsweredAt = now,
-                        updatedAt = now
-                    )
-                }
-
-                dao.upsertProgress(newProgress)
-                // 内存缓存同步增量：下一次抽词直接读缓存，不再全表读 progress
-                progressCache[current.word] = newProgress
-                wrongWordsCache = if (newProgress.isWrongBook) {
-                    wrongWordsCache + current.word
-                } else {
-                    wrongWordsCache - current.word
-                }
-                dao.insertStudyLog(
-                    WordStudyLog(
-                        word = current.word,
-                        isCorrect = isCorrect,
-                        studyMode = if (state.studyMode == StudyMode.SENSE) "sense" else "quiz",
-                        answeredAt = now
-                    )
+                recordAnswer(
+                    current = current,
+                    isCorrect = isCorrect,
+                    studyModeLabel = if (state.studyMode == StudyMode.SENSE) "sense" else "quiz"
                 )
-
-                _uiState.update { it.copy(currentProgress = newProgress) }
             } finally {
                 if (!isCorrect) {
                     // 答错后留在当前界面展示解析卡片，释放锁让用户可以点击「下一题」
@@ -615,6 +603,145 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     delay(380L)
                     val s = _uiState.value
                     if (s.isAnswered && s.currentWord?.word == current.word && (s.studyMode == StudyMode.QUIZ || s.studyMode == StudyMode.SENSE)) {
+                        loadNextQuestionInternal()
+                    }
+                } finally {
+                    isActionInProgress.set(false)
+                }
+            }
+        }
+    }
+
+    /**
+     * 记录一次作答（四选一 / 义项辨析 / 拼写共用同一条打分路径）。
+     *
+     * 抽出来是因为三条路径的「答对/答错」后果完全一致：
+     * 答对 → 连对 +1、掌握度提到「认识」、错词本连对够次数就毕业；
+     * 答错 → 进错词本、连对归零、8 题后安排重现强化。
+     * 以前四选一和卡片各写一份，改毕业条件要改两处，
+     * 迟早漏一处（上一版就出现过 UI 显示 x/3 而逻辑是 x/1）。
+     *
+     * @param studyModeLabel 写进流水表的模式标记（quiz / sense / spell）。
+     */
+    private suspend fun recordAnswer(current: Word, isCorrect: Boolean, studyModeLabel: String) {
+        val now = System.currentTimeMillis()
+        val oldProgress = dao.getProgress(current.word) ?: WordProgress(word = current.word)
+
+        val newProgress = if (isCorrect) {
+            val newReps = oldProgress.reps + 1
+            // 错题在间隔复习中连对 2 次才毕业移出错词本（保留曾错标记）。
+            // 1 次太松（刚看完解析带着印象选对，并没真记住），3 次太严
+            // （错词本越积越厚）。规则见 WordbookRules.GRADUATION_REPS。
+            val outOfWrongBook = oldProgress.isWrongBook && WordbookRules.shouldGraduateFromWrongBook(newReps)
+            oldProgress.copy(
+                level = maxOf(oldProgress.level, 2),
+                reps = newReps,
+                correctCount = oldProgress.correctCount + 1,
+                isWrongBook = if (outOfWrongBook) false else oldProgress.isWrongBook,
+                lastAnsweredAt = now,
+                updatedAt = now
+            )
+        } else {
+            // 答错惩罚：进入错词本，归零连对，并安排 8 题后重现强化
+            deferQueue.add(DeferItem(current, sessionAnswerCount + 8))
+            oldProgress.copy(
+                level = 0,
+                reps = 0,
+                lapses = oldProgress.lapses + 1,
+                wrongCount = oldProgress.wrongCount + 1,
+                isWrongBook = true,
+                everWrong = true,
+                lastAnsweredAt = now,
+                updatedAt = now
+            )
+        }
+
+        dao.upsertProgress(newProgress)
+        // 内存缓存同步增量：下一次抽词直接读缓存，不再全表读 progress
+        progressCache[current.word] = newProgress
+        wrongWordsCache = if (newProgress.isWrongBook) {
+            wrongWordsCache + current.word
+        } else {
+            wrongWordsCache - current.word
+        }
+        dao.insertStudyLog(
+            WordStudyLog(
+                word = current.word,
+                isCorrect = isCorrect,
+                studyMode = studyModeLabel,
+                answeredAt = now
+            )
+        )
+
+        // 只在界面还停在这道题时才回写进度：作答落库是异步的，
+        // 期间可能已经自动切到下一题，这时把旧词的进度塞给新题
+        // 会让收藏/熟词图标显示错位。
+        _uiState.update { st ->
+            if (st.currentWord?.word == current.word) st.copy(currentProgress = newProgress) else st
+        }
+    }
+
+    /**
+     * 拼写模式：更新输入框内容。
+     *
+     * 只在未提交时允许输入——提交后输入框锁定，
+     * 否则用户改了答案却还沿用旧的判定结果。
+     */
+    fun setSpellInput(text: String) {
+        val state = _uiState.value
+        if (state.studyMode != StudyMode.SPELL || state.isAnswered) return
+        _uiState.update { it.copy(spellInput = text) }
+    }
+
+    /**
+     * 拼写模式：提交作答。
+     *
+     * 判定规则见 [SpellRules]：忽略大小写与首尾空格，严格比对拼写。
+     * 答对 600ms 后自动进入下一题（比四选一的 380ms 稍长——
+     * 拼写要低头看自己写的字母，闪一下就走等于没看到对错）；
+     * 答错停在当前题，展示正确拼写与释义，等用户点「下一题」。
+     */
+    fun submitSpell() {
+        val state = _uiState.value
+        if (state.isLoading || state.isAnswered) return
+        if (state.studyMode != StudyMode.SPELL) return
+        val current = state.currentWord ?: return
+        val input = state.spellInput
+        if (input.isBlank()) {
+            _uiState.update { it.copy(snackbarMessage = "先写出你的答案再提交") }
+            return
+        }
+        if (!isActionInProgress.compareAndSet(false, true)) return
+
+        sessionAnswerCount++
+        recordRecentWord(current.word)
+        val isCorrect = SpellRules.isCorrect(input, current.word)
+
+        _uiState.update {
+            it.copy(
+                isAnswered = true,
+                spellSubmitted = true,
+                spellCorrect = isCorrect
+            )
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                recordAnswer(current = current, isCorrect = isCorrect, studyModeLabel = "spell")
+            } finally {
+                if (!isCorrect) {
+                    // 答错停留当前题，释放锁让用户可以点「下一题」
+                    isActionInProgress.set(false)
+                }
+            }
+        }
+
+        if (isCorrect) {
+            viewModelScope.launch {
+                try {
+                    delay(600L)
+                    val s = _uiState.value
+                    if (s.isAnswered && s.currentWord?.word == current.word && s.studyMode == StudyMode.SPELL) {
                         loadNextQuestionInternal()
                     }
                 } finally {
