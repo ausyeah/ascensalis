@@ -706,7 +706,8 @@ private fun MessageBubble(
                 if (thinking.isNotBlank()) {
                     ThinkingBlock(
                         text = thinking,
-                        streaming = isStreaming
+                        streaming = isStreaming,
+                        mathRenderer = mathRenderer
                     )
                     if (answer.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
@@ -894,14 +895,35 @@ private fun StatusRow(
  * 模型还在输出时自动收起，页面会不停跳而且看不到「它在想什么」；
  * 一直展开着，正文一出来就被推到屏幕外。两种做法各错一半，
  * 所以按状态切换：思考中展开、结束收起，各一次，不反复横跳。
+ *
+ * ## 思考过程同样走 [RichText]
+ *
+ * 推理模型的思考里**全是公式**（推导过程），用纯 Text 渲染就是满屏
+ * LaTeX 源码（用户反馈「思考过程中的 latex 没有渲染」）。
+ *
+ * 流式两条规则与正文一致（`trimIncompleteTrailingFormula` +
+ * `streaming = true`）：
+ * 1. 未闭合的 `$`/`$$` 先隐藏，配对符到齐再整段渲染滑入——
+ *    即「先渲染后输出」，不会先闪源码再跳公式；
+ * 2. 位图未就绪的公式只留占位，不回退显示源码。
  */
 @Composable
-private fun ThinkingBlock(text: String, streaming: Boolean) {
+private fun ThinkingBlock(
+    text: String,
+    streaming: Boolean,
+    mathRenderer: com.mistakebook.math.MathRenderer
+) {
     var expanded by remember { mutableStateOf(true) }
     LaunchedEffect(streaming) {
         if (!streaming) {
             expanded = false
         }
+    }
+
+    // 尾巴上未闭合的公式先藏起来：半截公式一旦进 RichText 就会先显示
+    // 源码、拼完再跳成公式。与正文同一套处理（见 MessageBubble）。
+    val displayText = remember(text, streaming) {
+        if (streaming) trimIncompleteTrailingFormula(text) else text
     }
 
     Column(
@@ -946,13 +968,15 @@ private fun ThinkingBlock(text: String, streaming: Boolean) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (expanded && text.isNotBlank()) {
+        if (expanded && displayText.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
-            Text(
-                text = text,
+            RichText(
+                text = displayText,
+                mathRenderer = mathRenderer,
                 style = MaterialTheme.typography.bodySmall,
                 // 思考过程同样加深：onSurfaceVariant 在浅色主题下对比度不足
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                streaming = streaming
             )
         }
     }
