@@ -93,8 +93,6 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import java.io.File
-import android.content.Intent
-import android.provider.MediaStore
 import android.widget.Toast
 
 /**
@@ -323,15 +321,28 @@ fun ChatScreen(
                 } else {
                     tempCameraUri = uri
                     tempCameraFile = file
-                    // 没有 app 响应 ACTION_IMAGE_CAPTURE（相机被禁用/卸载/魔改 ROM）时
-                    // launch 会抛 ActivityNotFoundException 直接闪退。
-                    // manifest 里已声明 <queries>，resolveActivity 才能看见相机 app。
-                    val capture = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
-                        putExtra(MediaStore.EXTRA_OUTPUT, uri)
-                        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                    }
-                    val hasCamera = capture.resolveActivity(context.packageManager) != null
-                    if (!hasCamera) {
+                    // **不要用 resolveActivity 预检**。
+                    //
+                    // v0.0.11 在这里加了预检，真机实测直接误判：设备上明明有相机，
+                    // resolveActivity 却返回 null，于是走了「没有相机」分支，
+                    // 拍照功能整个不可用。Android 11+ 的包可见性对
+                    // ACTION_IMAGE_CAPTURE 本来就不完全可靠——部分 ROM 的相机
+                    // 没有按规范暴露 intent-filter，<queries> 也救不回来。
+                    //
+                    // 改成直接 launch + try-catch：真有相机就一定拉得起来；
+                    // 真的一个都没有时，launch 抛 ActivityNotFoundException，
+                    // 由 runCatching 兜住并提示。预检唯一的价值是「别闪退」，
+                    // 而 try-catch 已经做到了，且不会误伤。
+                    //
+                    // 注意这里传的是 uri 而不是自己拼的 Intent：
+                    // cameraLauncher 用的是 ActivityResultContracts.TakePicture，
+                    // 它的入参就是「照片写到哪个 Uri」，intent 由 contract 自己构造。
+                    val launched = runCatching { cameraLauncher.launch(uri) }.isSuccess
+                    if (launched) {
+                        // 相机拉起成功后才关面板——万一启动失败，面板留着，
+                        // 用户还能改选「从相册选择」
+                        showAttachSheet = false
+                    } else {
                         tempCameraUri = null
                         tempCameraFile = null
                         Toast.makeText(
@@ -339,21 +350,6 @@ fun ChatScreen(
                             R.string.chat_attach_no_camera,
                             Toast.LENGTH_SHORT
                         ).show()
-                    } else {
-                        val launched = runCatching { cameraLauncher.launch(uri) }.isSuccess
-                        if (launched) {
-                            // 相机拉起成功后才关面板——万一启动失败，面板留着，
-                            // 用户还能改选「从相册选择」
-                            showAttachSheet = false
-                        } else {
-                            tempCameraUri = null
-                            tempCameraFile = null
-                            Toast.makeText(
-                                context,
-                                R.string.chat_attach_no_camera,
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
                     }
                 }
             },
