@@ -64,8 +64,9 @@ data class QuestionSnapshot(
  */
 enum class WrongSubTab {
     WRONG_BOOK, // 错题本（排队待复习）
-    EVER_WRONG, // 曾错本（已连对3次毕业）
-    MASTERED    // 熟词本（手动标记的熟词）
+    EVER_WRONG, // 曾错本（已连对2次毕业）
+    MASTERED,   // 熟词本（手动标记的熟词）
+    FAVORITE    // 生词本（手动收藏，书签图标）
 }
 
 /**
@@ -106,6 +107,7 @@ data class WordbookUiState(
     val studiedTodayCount: Int = 0,
     val masteredCount: Int = 0,
     val wrongBookCount: Int = 0,
+    val favoriteCount: Int = 0,
     val totalVocabCount: Int = 4356,
 
     // 学习统计页：近 7 天每日学习量与正确率（顺序为从早到晚）

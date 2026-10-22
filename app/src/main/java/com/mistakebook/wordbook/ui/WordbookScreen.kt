@@ -7,6 +7,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,11 +32,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -90,6 +94,7 @@ import com.mistakebook.ui.theme.PaperPrimary
 import com.mistakebook.ui.theme.PaperPrimaryTint
 import com.mistakebook.wordbook.data.Word
 import com.mistakebook.wordbook.data.WordProgress
+import com.mistakebook.wordbook.algo.WordbookRules
 
 /**
  * 单词书主界面（纯本地化纸质书卷质感设计）。
@@ -503,6 +508,19 @@ private fun StudyView(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
+                            // 义项辨析模式下**不给发音入口**：发音等于直接
+                            // 报答案（听到读音就能选出对应单词），练义项
+                            // 辨析的意义就没了。收藏与对错无关，照常给。
+                            // 答错后展示原词时再补一个发音按钮（见下方
+                            // 揭晓区），让用户对答案建立「音-义」关联。
+                            Spacer(Modifier.height(6.dp))
+                            QuestionActionRow(
+                                isFavorite = state.currentProgress?.isFavorite == true,
+                                showSpeak = false,
+                                onSpeak = {},
+                                onToggleFavorite = viewModel::toggleFavoriteCurrentWord
+                            )
+
                             // 作答后展示原词与全部释义。
                             //
                             // **只在答错时展示**：答对后 380ms 就自动切题，
@@ -536,13 +554,28 @@ private fun StudyView(
                                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                                     )
                                     Spacer(Modifier.height(14.dp))
-                                    Text(
-                                        text = currentWord.word,
-                                        fontSize = 26.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Serif,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = currentWord.word,
+                                            fontSize = 26.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Serif,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        // 答错后才出现发音按钮：此时答案已揭晓，
+                                        // 听一遍建立「音-义-形」关联不再泄露答案。
+                                        IconButton(
+                                            onClick = viewModel::speakCurrentWord,
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.VolumeUp,
+                                                contentDescription = "朗读单词",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
                                     if (currentWord.pos.isNotBlank()) {
                                         Spacer(Modifier.height(4.dp))
                                         Text(
@@ -580,6 +613,16 @@ private fun StudyView(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+
+                            // 发音 + 生词本收藏。放在题干卡内、单词正下方：
+                            // 朗读要贴着单词点（先听后记），收藏是「这个词我要
+                            // 重点关照」的即时动作，都在看题的动线上。
+                            Spacer(Modifier.height(6.dp))
+                            QuestionActionRow(
+                                isFavorite = state.currentProgress?.isFavorite == true,
+                                onSpeak = viewModel::speakCurrentWord,
+                                onToggleFavorite = viewModel::toggleFavoriteCurrentWord
+                            )
 
                             // 作答后或卡片揭晓后展示完整中文释义。
                             // **答对不展示**：答对即退出本轮（380ms 自动切题），
@@ -762,6 +805,50 @@ private fun RateButton(
         colors = ButtonDefaults.buttonColors(containerColor = color)
     ) {
         Text(title, color = Color.White, fontWeight = FontWeight.Bold)
+    }
+}
+
+/**
+ * 题干卡内的「发音 + 生词本收藏」操作行。
+ *
+ * 两个图标按钮并排、不加文字标签：图标语义（喇叭/书签）在工具类
+ * App 里已是共识，带文字会把 36sp 大单词的视觉重心抢走。
+ * 收藏态用实心书签 + 主题色，未收藏是描边书签 + 弱化色——
+ * 与熟词星标（Star/StarBorder）保持同一套「实心=已标记」的视觉语言。
+ *
+ * @param showSpeak 义项辨析模式传 false（发音=报答案），答错后的揭晓区
+ *   会单独给发音入口。
+ */
+@Composable
+private fun QuestionActionRow(
+    isFavorite: Boolean,
+    showSpeak: Boolean,
+    onSpeak: () -> Unit,
+    onToggleFavorite: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (showSpeak) {
+            IconButton(onClick = onSpeak, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = Icons.Default.VolumeUp,
+                    contentDescription = "朗读单词",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+        IconButton(onClick = onToggleFavorite, modifier = Modifier.size(40.dp)) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                contentDescription = if (isFavorite) "取消收藏" else "收进生词本",
+                tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 
@@ -994,10 +1081,13 @@ private fun WrongBookView(
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // 三级子标签
+        // 四级子标签。四个 chip 加角标在窄屏上会超出屏幕宽度，
+        // 整行可横向滚动——生词本、熟词本的角标让用户不点进去
+        // 就知道各库有多少词。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -1016,6 +1106,11 @@ private fun WrongBookView(
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.MASTERED) },
                 label = { Text("熟词本 (${state.masteredCount})") }
             )
+            FilterChip(
+                selected = state.wrongSubTab == WrongSubTab.FAVORITE,
+                onClick = { viewModel.setWrongSubTab(WrongSubTab.FAVORITE) },
+                label = { Text("生词本 (${state.favoriteCount})") }
+            )
         }
 
         if (state.wrongBookList.isEmpty()) {
@@ -1028,6 +1123,7 @@ private fun WrongBookView(
                         WrongSubTab.WRONG_BOOK -> "错词本干干净净，暂无待复习错词 🎉"
                         WrongSubTab.EVER_WRONG -> "暂无曾错毕业词汇"
                         WrongSubTab.MASTERED -> "暂无手动标记的熟词"
+                        WrongSubTab.FAVORITE -> "生词本空着——刷题或词库检索时点书签图标即可收藏"
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium
@@ -1043,7 +1139,9 @@ private fun WrongBookView(
                         word = word,
                         progress = progress,
                         showRemove = state.wrongSubTab == WrongSubTab.WRONG_BOOK,
-                        onRemove = { viewModel.removeFromWrongBook(word.word) }
+                        onRemove = { viewModel.removeFromWrongBook(word.word) },
+                        onSpeak = { viewModel.speakWord(word.word) },
+                        onToggleFavorite = { viewModel.toggleFavorite(word.word) }
                     )
                 }
             }
@@ -1112,7 +1210,9 @@ private fun LibraryView(
                     word = word,
                     progress = progress ?: WordProgress(word = word.word),
                     showRemove = false,
-                    onRemove = {}
+                    onRemove = {},
+                    onSpeak = { viewModel.speakWord(word.word) },
+                    onToggleFavorite = { viewModel.toggleFavorite(word.word) }
                 )
             }
         }
@@ -1363,7 +1463,9 @@ private fun WordItemCard(
     word: Word,
     progress: WordProgress,
     showRemove: Boolean,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onSpeak: () -> Unit = {},
+    onToggleFavorite: () -> Unit = {}
 ) {
     val levelColor = when (progress.level) {
         1 -> PaperLv1
@@ -1410,7 +1512,10 @@ private fun WordItemCard(
                     if (progress.isWrongBook) {
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "连对 ${progress.reps}/3",
+                            // 毕业线抽成了 WordbookRules.GRADUATION_REPS：
+                            // UI 文案与打分逻辑共用同一个常量，不会出现
+                            // 「显示 x/2 实际要对 3 次」的割裂。
+                            text = "连对 ${progress.reps}/${WordbookRules.GRADUATION_REPS}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error
                         )
@@ -1423,6 +1528,25 @@ private fun WordItemCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // 列表里的发音与收藏：单词旁的即点即读/即收藏，
+            // 不用进详情页（本项目不做单词详情页）。
+            IconButton(onClick = onSpeak, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = Icons.Default.VolumeUp,
+                    contentDescription = "朗读单词",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            IconButton(onClick = onToggleFavorite, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = if (progress.isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                    contentDescription = if (progress.isFavorite) "取消收藏" else "收进生词本",
+                    tint = if (progress.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
                 )
             }
 

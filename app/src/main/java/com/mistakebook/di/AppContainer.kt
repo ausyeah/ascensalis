@@ -152,6 +152,16 @@ class AppContainer(context: Context) {
         com.mistakebook.wordbook.data.VocabRepository(appContext)
     }
 
+    /**
+     * 单词发音（TTS）单例。
+     *
+     * 全局一个实例：TextToSpeech 初始化是重量级操作（绑系统 TTS 服务），
+     * 每题一建不仅慢还会泄漏。未初始化完成时 speak 静默忽略。
+     */
+    val wordAudioPlayer: com.mistakebook.wordbook.audio.WordAudioPlayer by lazy {
+        com.mistakebook.wordbook.audio.WordAudioPlayer(appContext)
+    }
+
     val mineruClient: MineruClient by lazy { MineruClient(mineruApi, files, usageStatsStore) }
 
     val llmClient: LlmClient by lazy { LlmClient(llmApi) }

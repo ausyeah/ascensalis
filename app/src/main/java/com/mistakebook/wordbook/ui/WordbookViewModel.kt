@@ -3,6 +3,7 @@ package com.mistakebook.wordbook.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.di.AppContainer
+import com.mistakebook.wordbook.algo.WordbookRules
 import com.mistakebook.wordbook.data.SenseQuestion
 import com.mistakebook.wordbook.data.Word
 import com.mistakebook.wordbook.data.WordProgress
@@ -25,8 +26,19 @@ import kotlin.random.Random
 
 class WordbookViewModel(private val container: AppContainer) : ViewModel() {
 
+    /** 顶部摘要四个计数的合并载体（combine 四路 Flow 的产物）。 */
+    private data class StatsCounts(
+        val today: Int,
+        val mastered: Int,
+        val wrong: Int,
+        val favorite: Int
+    )
+
     private val vocabRepo = container.vocabRepository
     private val dao = container.wordbookDao
+
+    /** 单词发音（TTS）。单例随 AppContainer，初始化异步完成，未就绪时点击静默忽略。 */
+    private val audioPlayer = container.wordAudioPlayer
 
     private val _uiState = MutableStateFlow(WordbookUiState(isLoading = true))
     val uiState: StateFlow<WordbookUiState> = _uiState.asStateFlow()
@@ -71,6 +83,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     // 快速连击与防重入原子状态锁
     private val isActionInProgress = AtomicBoolean(false)
     private val isTogglingMaster = AtomicBoolean(false)
+    private val isTogglingFavorite = AtomicBoolean(false)
     private var nextQuestionJob: Job? = null
     private var librarySearchJob: Job? = null
 
@@ -135,15 +148,17 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             combine(
                 dao.observeStudiedTodayCount(startOfDayMs),
                 dao.observeMasteredCount(),
-                dao.observeWrongBookCount()
-            ) { today, mastered, wrong ->
-                Triple(today, mastered, wrong)
-            }.collect { (today, mastered, wrong) ->
+                dao.observeWrongBookCount(),
+                dao.observeFavoriteCount()
+            ) { today, mastered, wrong, favorite ->
+                StatsCounts(today, mastered, wrong, favorite)
+            }.collect { counts ->
                 _uiState.update {
                     it.copy(
-                        studiedTodayCount = today,
-                        masteredCount = mastered,
-                        wrongBookCount = wrong
+                        studiedTodayCount = counts.today,
+                        masteredCount = counts.mastered,
+                        wrongBookCount = counts.wrong,
+                        favoriteCount = counts.favorite
                     )
                 }
             }
@@ -540,8 +555,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
 
                 val newProgress = if (isCorrect) {
                     val newReps = oldProgress.reps + 1
-                    // 错题在间隔复习中答对 1 次即可毕业移出错词本（保留曾错标记），避免反复惩罚
-                    val outOfWrongBook = oldProgress.isWrongBook && newReps >= 1
+                    // 错题在间隔复习中连对 2 次才毕业移出错词本（保留曾错标记）。
+                    // 1 次太松（刚看完解析带着印象选对，并没真记住），3 次太严
+                    // （错词本越积越厚）。规则见 WordbookRules.GRADUATION_REPS。
+                    val outOfWrongBook = oldProgress.isWrongBook && WordbookRules.shouldGraduateFromWrongBook(newReps)
                     oldProgress.copy(
                         level = maxOf(oldProgress.level, 2),
                         reps = newReps,
@@ -660,7 +677,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     }
                     2 -> {
                         val newReps = old.reps + 1
-                        val outOfWrongBook = old.isWrongBook && newReps >= 1
+                        val outOfWrongBook = old.isWrongBook && WordbookRules.shouldGraduateFromWrongBook(newReps)
                         old.copy(
                             level = 2,
                             reps = newReps,
@@ -730,6 +747,73 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * 收藏/取消收藏当前单词（生词本，书签图标）。
+     *
+     * 与熟词标记完全独立：收藏不影响抽词权重、不影响错题本状态，
+     * 纯粹是「我想重点关照这个词」的手动清单。取消收藏只是把书签
+     * 拔掉，学习进度原样保留。
+     */
+    fun toggleFavoriteCurrentWord() {
+        val current = _uiState.value.currentWord ?: return
+        if (!isTogglingFavorite.compareAndSet(false, true)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val old = dao.getProgress(current.word) ?: WordProgress(word = current.word)
+                val nextFavorite = !old.isFavorite
+                val updated = old.copy(
+                    isFavorite = nextFavorite,
+                    updatedAt = System.currentTimeMillis()
+                )
+                dao.upsertProgress(updated)
+                syncProgressCache(updated)
+                _uiState.update {
+                    it.copy(
+                        currentProgress = updated,
+                        snackbarMessage = if (nextFavorite) "已收进生词本" else "已从生词本移除"
+                    )
+                }
+                // 生词本子页正开着时才值得刷新；刷题页上收藏不改变任何列表
+                if (_uiState.value.currentTab == WordbookTab.WRONG_BOOK &&
+                    _uiState.value.wrongSubTab == WrongSubTab.FAVORITE
+                ) {
+                    refreshWrongSubTabList(WrongSubTab.FAVORITE)
+                }
+            } finally {
+                isTogglingFavorite.set(false)
+            }
+        }
+    }
+
+    /** 列表页（词库检索 / 生词本）里的收藏切换。 */
+    fun toggleFavorite(wordStr: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val p = dao.getProgress(wordStr) ?: return@launch
+            val updated = p.copy(
+                isFavorite = !p.isFavorite,
+                updatedAt = System.currentTimeMillis()
+            )
+            dao.upsertProgress(updated)
+            syncProgressCache(updated)
+            refreshWrongSubTabList(_uiState.value.wrongSubTab)
+            // 词库页也显示收藏态：刷新一次列表让书签图标即时翻转
+            if (_uiState.value.currentTab == WordbookTab.LIBRARY) {
+                refreshLibraryList()
+            }
+        }
+    }
+
+    /** 朗读当前单词（TTS）。未就绪时静默忽略——初始化是异步的，首次点击可能没声音。 */
+    fun speakCurrentWord() {
+        val word = _uiState.value.currentWord?.word ?: return
+        audioPlayer.speak(word)
+    }
+
+    /** 列表页朗读指定单词。 */
+    fun speakWord(wordStr: String) {
+        audioPlayer.speak(wordStr)
+    }
+
     // =========================================================================
     // 错词本子列表加载
     // =========================================================================
@@ -740,6 +824,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 WrongSubTab.WRONG_BOOK -> dao.observeWrongBook().first()
                 WrongSubTab.EVER_WRONG -> dao.observeEverWrong().first()
                 WrongSubTab.MASTERED -> dao.observeMastered().first()
+                WrongSubTab.FAVORITE -> dao.observeFavorite().first()
             }
 
             val pairedList = progressList.mapNotNull { p ->

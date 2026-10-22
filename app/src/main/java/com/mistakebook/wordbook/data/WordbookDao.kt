@@ -24,6 +24,10 @@ interface WordbookDao {
     @Query("SELECT * FROM word_progress WHERE isMastered = 1 ORDER BY updatedAt DESC")
     fun observeMastered(): Flow<List<WordProgress>>
 
+    /** 生词本（手动收藏）。按收藏更新时间倒序，后收藏的排前面。 */
+    @Query("SELECT * FROM word_progress WHERE isFavorite = 1 ORDER BY updatedAt DESC")
+    fun observeFavorite(): Flow<List<WordProgress>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProgress(progress: WordProgress)
 
@@ -45,6 +49,10 @@ interface WordbookDao {
 
     @Query("SELECT COUNT(*) FROM word_progress WHERE isWrongBook = 1")
     fun observeWrongBookCount(): Flow<Int>
+
+    /** 生词本收藏数（错题本页子标签角标用）。 */
+    @Query("SELECT COUNT(*) FROM word_progress WHERE isFavorite = 1")
+    fun observeFavoriteCount(): Flow<Int>
 
     @Query("DELETE FROM word_study_log")
     suspend fun clearLogs()
