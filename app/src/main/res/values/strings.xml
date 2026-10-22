@@ -19,6 +19,8 @@
     <string name="action_back">返回</string>
     <string name="channel_review_name">复习提醒</string>
     <string name="channel_review_desc">每天提醒待复习的错题</string>
+    <string name="channel_wordbook_name">单词学习提醒</string>
+    <string name="channel_wordbook_desc">到点提醒完成每日单词学习目标</string>
 
     <!-- 首页 / 列表 -->
     <!-- home_title 已删：TopAppBar 标题位现在是搜索框，应用名不再显示 -->
@@ -347,6 +349,8 @@
     <!-- 复习 -->
     <string name="review_notification_title">今天有 %1$d 道错题待复习</string>
     <string name="review_notification_channel">复习提醒</string>
+    <string name="wordbook_reminder_title">单词目标还差 %1$d 个</string>
+    <string name="wordbook_reminder_text">今日目标 %1$d 词，已学 %2$d 词</string>
     <string name="review_filter_due">待复习</string>
 
     <!-- ========== AI 对话（v0.0.6） ========== -->

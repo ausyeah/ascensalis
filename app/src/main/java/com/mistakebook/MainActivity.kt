@@ -103,6 +103,13 @@ class MainActivity : ComponentActivity() {
                 snapshot.reminderHour,
                 snapshot.reminderMinute
             )
+            // 单词书的每日目标提醒：与错题复习提醒同一时刻，
+            // 少设一个时间开关，用户少困惑一次。
+            com.mistakebook.wordbook.notify.WordbookReminderScheduler.schedule(
+                this@MainActivity,
+                snapshot.reminderHour,
+                snapshot.reminderMinute
+            )
         }
         if (intent?.getBooleanExtra(EXTRA_FILTER_DUE, false) == true) {
             dueFilterRequest.intValue += 1

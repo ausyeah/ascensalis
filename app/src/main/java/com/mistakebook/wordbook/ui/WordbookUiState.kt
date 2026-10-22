@@ -123,6 +123,18 @@ data class WordbookUiState(
     // 学习统计页：近 7 天每日学习量与正确率（顺序为从早到晚）
     val weeklyDayStats: List<DayStat> = emptyList(),
 
+    // 学习统计页：当月每日学习量（用于月度热力图，按 1 号到月末顺序）
+    val monthDayStats: List<DayStat> = emptyList(),
+
+    /** 连续打卡天数（今天没学不算断，从昨天接着数）。 */
+    val streakDays: Int = 0,
+
+    /** 每日单词学习目标（去重词数）。 */
+    val dailyGoal: Int = 20,
+
+    /** 是否开启每日目标的本地提醒。 */
+    val reminderEnabled: Boolean = true,
+
     // 是否有可回退的「上一题」（按钮置灰用）
     val hasPrevious: Boolean = false,
 

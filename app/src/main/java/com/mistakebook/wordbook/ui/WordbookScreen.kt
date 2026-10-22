@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -33,10 +35,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
@@ -59,6 +63,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
@@ -198,7 +203,8 @@ fun WordbookScreen(
                             viewModel = viewModel
                         )
                         WordbookTab.STATS -> StatsView(
-                            state = state
+                            state = state,
+                            viewModel = viewModel
                         )
                     }
                 }
@@ -391,6 +397,12 @@ private fun StudyView(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // 每日目标进度条：放在最上面一屏就要看见，
+        // 「今天还要学多少」是用户进刷题页第一个想知道的事。
+        item {
+            DailyGoalBar(studiedToday = state.studiedTodayCount, goal = state.dailyGoal)
+        }
+
         // 模式切换与熟词标记操作栏
         item {
             Row(
@@ -1093,6 +1105,56 @@ private fun SpellAnswerArea(
 }
 
 /**
+ * 每日目标进度条（刷题页顶部）。
+ *
+ * 达标了就把文案换成「今日目标已达成 🎉」并把进度条填满——
+ * 明确的正反馈比一个 100% 的数字更让人愿意第二天继续。
+ */
+@Composable
+private fun DailyGoalBar(studiedToday: Int, goal: Int) {
+    val isDark = LocalDarkTheme.current
+    val okColor = if (isDark) com.mistakebook.ui.theme.PaperOkDark else PaperOk
+    val reached = goal > 0 && studiedToday >= goal
+    val ratio = if (goal <= 0) 0f else (studiedToday.toFloat() / goal).coerceIn(0f, 1f)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "今日目标",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = if (reached) "今日目标已达成 🎉" else "$studiedToday / $goal 词",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (reached) okColor else MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = { ratio },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = if (reached) okColor else MaterialTheme.colorScheme.primary,
+                trackColor = if (isDark) Color(0xFF282D42) else PaperPrimaryTint
+            )
+        }
+    }
+}
+
+/**
  * 题干卡内的「发音 + 生词本收藏」操作行。
  *
  * 两个图标按钮并排、不加文字标签：图标语义（喇叭/书签）在工具类
@@ -1509,7 +1571,8 @@ private fun LibraryView(
 
 @Composable
 private fun StatsView(
-    state: WordbookUiState
+    state: WordbookUiState,
+    viewModel: WordbookViewModel
 ) {
     LazyColumn(
         modifier = Modifier
@@ -1550,6 +1613,23 @@ private fun StatsView(
                     )
                 }
             }
+        }
+
+        // 连续打卡 + 每日目标设置
+        item {
+            StreakAndGoalCard(
+                streakDays = state.streakDays,
+                dailyGoal = state.dailyGoal,
+                studiedToday = state.studiedTodayCount,
+                reminderEnabled = state.reminderEnabled,
+                onGoalChange = viewModel::setDailyGoal,
+                onReminderChange = viewModel::setReminderEnabled
+            )
+        }
+
+        // 月度热力图
+        item {
+            MonthlyHeatmapCard(days = state.monthDayStats)
         }
 
         item {
@@ -1598,6 +1678,250 @@ private fun StatsView(
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
             ) {
                 WeeklyAccuracyCard(stats = state.weeklyDayStats)
+            }
+        }
+    }
+}
+
+/**
+ * 连续打卡 + 每日目标设置（统计页）。
+ *
+ * 目标用 -5 / +5 步进而不是输入框：手机上开输入框只为改一个数字
+ * 太折腾，步进按钮点两下就到位（5 词一档，5~200 词范围）。
+ */
+@Composable
+private fun StreakAndGoalCard(
+    streakDays: Int,
+    dailyGoal: Int,
+    studiedToday: Int,
+    reminderEnabled: Boolean,
+    onGoalChange: (Int) -> Unit,
+    onReminderChange: (Boolean) -> Unit
+) {
+    val isDark = LocalDarkTheme.current
+    val okColor = if (isDark) com.mistakebook.ui.theme.PaperOkDark else PaperOk
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(
+                text = "连续打卡",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = "$streakDays",
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (streakDays > 0) okColor else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "天连续学习",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "今天已学 $studiedToday 词（今天还没学不算断签）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "每日学习目标",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "每日新学去重词数目标",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(
+                    onClick = { onGoalChange(dailyGoal - GOAL_STEP) },
+                    enabled = dailyGoal > GOAL_STEP
+                ) {
+                    Icon(Icons.Default.Remove, contentDescription = "减少目标")
+                }
+                Text(
+                    text = "$dailyGoal",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.widthIn(min = 40.dp)
+                )
+                IconButton(onClick = { onGoalChange(dailyGoal + GOAL_STEP) }) {
+                    Icon(Icons.Default.Add, contentDescription = "增加目标")
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "每日目标提醒",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "到点还没达标时通知我（与错题复习提醒同一时刻）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = reminderEnabled, onCheckedChange = onReminderChange)
+            }
+        }
+    }
+}
+
+/**
+ * 月度打卡热力图。
+ *
+ * 一格一天，7 列按「周一到周日」排（与国内日历习惯一致），
+ * 当月 1 号不是周一就在第一行前面留空格。
+ * 颜色深浅按当天学过的去重词数分四档，空格表示那天完全没学。
+ *
+ * 用 Box 画而不是 Canvas：颜色档位用 MaterialTheme 取，
+ * 深浅色主题自动适配，不用处理 Canvas 里的密度换算。
+ */
+@Composable
+private fun MonthlyHeatmapCard(days: List<DayStat>) {
+    val primary = MaterialTheme.colorScheme.primary
+    val outline = MaterialTheme.colorScheme.outline
+
+    fun heatColor(count: Int, max: Int): Color {
+        if (count <= 0) return outline.copy(alpha = 0.22f)
+        val ratio = count.toFloat() / max.coerceAtLeast(1)
+        return when {
+            ratio <= 0.25f -> primary.copy(alpha = 0.28f)
+            ratio <= 0.5f -> primary.copy(alpha = 0.50f)
+            ratio <= 0.75f -> primary.copy(alpha = 0.72f)
+            else -> primary
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(
+                text = "本月打卡热力图",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "每格一天，颜色越深当天学得越多",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+
+            if (days.isEmpty()) {
+                Text(
+                    text = "本月还没有学习记录",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                return@Column
+            }
+
+            // 星期表头
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf("一", "二", "三", "四", "五", "六", "日").forEach { w ->
+                    Text(
+                        text = w,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+
+            val maxCount = days.maxOfOrNull { it.studiedCount }?.coerceAtLeast(1) ?: 1
+            // Calendar.DAY_OF_WEEK：周日=1 … 周六=7；转成「周一=0」的偏移
+            val firstWeekday = (java.util.Calendar.getInstance().apply {
+                timeInMillis = days.first().dayMs
+            }.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7
+            val cells: List<DayStat?> = List(firstWeekday) { null } + days
+
+            cells.chunked(7).forEach { week ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    week.forEach { d ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(heatColor(d?.studiedCount ?: 0, maxCount))
+                        )
+                    }
+                    // 最后一周不满 7 天时补空格，保证每行都是 7 格（列宽不被拉歪）
+                    repeat(7 - week.size) {
+                        Box(modifier = Modifier.weight(1f))
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "少",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(4.dp))
+                listOf(0, 1, 2, 3, 4).forEach { level ->
+                    val count = when (level) {
+                        0 -> 0
+                        1 -> (maxCount * 0.2f).toInt().coerceAtLeast(1)
+                        2 -> (maxCount * 0.4f).toInt().coerceAtLeast(1)
+                        3 -> (maxCount * 0.6f).toInt().coerceAtLeast(1)
+                        else -> maxCount
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(heatColor(count, maxCount))
+                    )
+                    Spacer(Modifier.width(3.dp))
+                }
+                Text(
+                    text = "多",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -1860,3 +2184,9 @@ private const val OPTION_MEANING_SLOT_QUIZ = 48
  * 43 字符，刚好全覆盖。未作答时也恒定占位，作答不改变选项高度。
  */
 private const val OPTION_MEANING_SLOT_SENSE = 40
+
+/**
+ * 每日目标的调整步长（词）。5 词一档：一次点一下就够用，
+ * 也不至于让用户点十几次才改得动。
+ */
+private const val GOAL_STEP = 5

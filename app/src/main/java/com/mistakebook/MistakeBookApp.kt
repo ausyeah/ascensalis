@@ -21,6 +21,7 @@ class MistakeBookApp : Application() {
         instance = this
         container = AppContainer(this)
         createReviewChannel()
+        createWordbookChannel()
         container.appScope.launch {
             container.captureTaskRepository.failUnfinished(RecognitionEngineInterruptedMessage)
         }
@@ -40,8 +41,30 @@ class MistakeBookApp : Application() {
         }
     }
 
+    /**
+     * 单词学习目标提醒渠道。
+     *
+     * 独立渠道而不是复用错题复习渠道：两条提醒的触发条件完全不同
+     * （「有到期错题」vs「今天没达标」），混在一个渠道里用户没法
+     * 单独关掉其中一条。
+     */
+    private fun createWordbookChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            val channel = NotificationChannel(
+                CHANNEL_WORDBOOK,
+                getString(R.string.channel_wordbook_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getString(R.string.channel_wordbook_desc)
+            }
+            manager.createNotificationChannel(channel)
+        }
+    }
+
     companion object {
         const val CHANNEL_REVIEW = "review"
+        const val CHANNEL_WORDBOOK = "wordbook"
         const val RecognitionEngineInterruptedMessage = "任务被中断"
 
         @Volatile

@@ -107,7 +107,10 @@ class SettingsStore(context: Context) {
             ocrStrength = prefs[KEY_OCR_STRENGTH] ?: legacyStrength(prefs),
             reviewReminderEnabled = prefs[KEY_REMINDER_ON] ?: true,
             reminderHour = prefs[KEY_REMINDER_HOUR] ?: 20,
-            reminderMinute = prefs[KEY_REMINDER_MINUTE] ?: 0
+            reminderMinute = prefs[KEY_REMINDER_MINUTE] ?: 0,
+            wordbookDailyGoal = (prefs[KEY_WORDBOOK_DAILY_GOAL] ?: DEFAULT_WORDBOOK_DAILY_GOAL)
+                .coerceIn(MIN_WORDBOOK_DAILY_GOAL, MAX_WORDBOOK_DAILY_GOAL),
+            wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true
         )
     }
 
@@ -295,6 +298,17 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ===== 单词书每日目标 =====
+
+    /** 设置每日单词学习目标（去重词数），越界自动夹紧。 */
+    suspend fun setWordbookDailyGoal(value: Int) {
+        editInt(KEY_WORDBOOK_DAILY_GOAL, value.coerceIn(MIN_WORDBOOK_DAILY_GOAL, MAX_WORDBOOK_DAILY_GOAL))
+    }
+
+    /** 开关「单词书每日目标」提醒。关闭后到点不再发通知。 */
+    suspend fun setWordbookReminderEnabled(value: Boolean) =
+        editBoolean(KEY_WORDBOOK_REMINDER, value)
+
     // ===== 外观与主题 =====
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -353,6 +367,14 @@ class SettingsStore(context: Context) {
         val KEY_REMINDER_ON = booleanPreferencesKey("review_reminder_enabled")
         val KEY_REMINDER_HOUR = intPreferencesKey("reminder_hour")
         val KEY_REMINDER_MINUTE = intPreferencesKey("reminder_minute")
+
+        // 单词书每日目标与提醒
+        val KEY_WORDBOOK_DAILY_GOAL = intPreferencesKey("wordbook_daily_goal")
+        val KEY_WORDBOOK_REMINDER = booleanPreferencesKey("wordbook_reminder_enabled")
+
+        const val DEFAULT_WORDBOOK_DAILY_GOAL = 20
+        const val MIN_WORDBOOK_DAILY_GOAL = 5
+        const val MAX_WORDBOOK_DAILY_GOAL = 200
         val KEY_ACTIVE_PROFILE = stringPreferencesKey("active_llm_profile")
         val KEY_HOME_QUESTION_ORDER = stringPreferencesKey("home_question_order")
     }

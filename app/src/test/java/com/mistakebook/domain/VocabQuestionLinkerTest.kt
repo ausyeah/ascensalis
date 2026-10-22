@@ -21,12 +21,14 @@ class FakeWordbookDao(private val progressMap: Map<String, WordProgress>) : Word
     override fun observeWrongBook(): Flow<List<WordProgress>> = emptyFlow()
     override fun observeEverWrong(): Flow<List<WordProgress>> = emptyFlow()
     override fun observeMastered(): Flow<List<WordProgress>> = emptyFlow()
+    override fun observeFavorite(): Flow<List<WordProgress>> = emptyFlow()
     override suspend fun upsertProgress(progress: WordProgress) {}
     override suspend fun upsertAllProgress(list: List<WordProgress>) {}
     override suspend fun insertStudyLog(log: WordStudyLog) {}
     override fun observeStudiedTodayCount(startOfDayMs: Long): Flow<Int> = emptyFlow()
     override fun observeMasteredCount(): Flow<Int> = emptyFlow()
     override fun observeWrongBookCount(): Flow<Int> = emptyFlow()
+    override fun observeFavoriteCount(): Flow<Int> = emptyFlow()
     override suspend fun logsSince(sinceMs: Long): List<WordStudyLog> = emptyList()
     override suspend fun clearLogs() {}
 }

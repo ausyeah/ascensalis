@@ -47,7 +47,19 @@ data class SettingsSnapshot(
     val ocrStrength: Int = 2,
     val reviewReminderEnabled: Boolean = true,
     val reminderHour: Int = 20,
-    val reminderMinute: Int = 0
+    val reminderMinute: Int = 0,
+
+    /**
+     * 每日单词学习目标（去重词数）。
+     *
+     * 默认 20：按「一天 20 个新词」定，覆盖 4356 词的词库约 218 天，
+     * 配合错词本复习刚好是考研期的合理节奏。目标只影响进度条与
+     * 提醒通知，不影响抽词算法。
+     */
+    val wordbookDailyGoal: Int = 20,
+
+    /** 是否开启「单词书每日目标」本地提醒（到点未达标才通知）。 */
+    val wordbookReminderEnabled: Boolean = true
 ) {
     // ===== 以下三项已固定，不再暴露给用户 =====
     //

@@ -144,6 +144,31 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 _uiState.update { it.copy(weeklyDayStats = stats) }
             }
         }
+        // 每日目标与提醒开关跟随设置变化
+        viewModelScope.launch {
+            container.settingsStore.settings.collect { s ->
+                _uiState.update {
+                    it.copy(
+                        dailyGoal = s.wordbookDailyGoal,
+                        reminderEnabled = s.wordbookReminderEnabled
+                    )
+                }
+            }
+        }
+    }
+
+    /** 修改每日学习目标（去重词数）。设置层会夹紧到合理区间。 */
+    fun setDailyGoal(goal: Int) {
+        viewModelScope.launch {
+            container.settingsStore.setWordbookDailyGoal(goal)
+        }
+    }
+
+    /** 开关每日目标的本地提醒。 */
+    fun setReminderEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            container.settingsStore.setWordbookReminderEnabled(enabled)
+        }
     }
 
     private fun observeDatabaseStats() {
@@ -195,6 +220,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             refreshLibraryList()
         } else if (tab == WordbookTab.STATS) {
             refreshWeeklyStats()
+            refreshMonthlyStats()
         }
     }
 
@@ -247,6 +273,96 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 )
             }
             weeklyStats.value = stats
+        }
+    }
+
+    /**
+     * 月度热力图 + 连续打卡天数。
+     *
+     * ## 为什么查 120 天而不是 30 天
+     *
+     * 连续打卡可能横跨上个月（月初连着上月底连学 20 天）。
+     * 只查本月流水算出来的 streak 会被截断在「当月 1 号」，
+     * 用户明明连着学了一个多月，界面却显示 3 天。
+     * 所以一次查 120 天：月度热力图只取当月部分，
+     * streak 用全部（有跨月能力的）日期集合算。
+     */
+    private fun refreshMonthlyStats() {
+        viewModelScope.launch {
+            val today = getStartOfDayMillis()
+            val lookbackStart = Calendar.getInstance().apply {
+                timeInMillis = today
+                add(Calendar.DAY_OF_YEAR, -120)
+            }.timeInMillis
+            val logs = withContext(Dispatchers.IO) { dao.logsSince(lookbackStart) }
+
+            // 按天分组（本地时区 00:00 为界，与 DAO 的今日统计口径一致）
+            val dayMsOf: (Long) -> Long = { ts ->
+                Calendar.getInstance().apply {
+                    timeInMillis = ts
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            }
+            val grouped = logs.groupBy { dayMsOf(it.answeredAt) }
+
+            // ----- 月度热力图：当月 1 号到月末，一天一格 -----
+            val monthCal = Calendar.getInstance().apply {
+                timeInMillis = today
+                set(Calendar.DAY_OF_MONTH, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val year = monthCal.get(Calendar.YEAR)
+            val month = monthCal.get(Calendar.MONTH)
+            val daysInMonth = Calendar.getInstance().apply {
+                set(Calendar.YEAR, year)
+                set(Calendar.MONTH, month)
+                set(Calendar.DAY_OF_MONTH, 1)
+            }.getActualMaximum(Calendar.DAY_OF_MONTH)
+            val monthStats = (1..daysInMonth).map { day ->
+                val dayMs = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, year)
+                    set(Calendar.MONTH, month)
+                    set(Calendar.DAY_OF_MONTH, day)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+                val dayLogs = grouped[dayMs].orEmpty()
+                DayStat(
+                    dayMs = dayMs,
+                    studiedCount = dayLogs.map { it.word }.distinct().size,
+                    correctCount = dayLogs.count { it.isCorrect },
+                    totalCount = dayLogs.size
+                )
+            }
+
+            // ----- 连续打卡 -----
+            // 今天还没学**不算断签**：一天还没过完，
+            // 昨晚连学 5 天的人不该在早上 9 点看到 streak 归零。
+            var cursor = today
+            if (cursor !in grouped) {
+                cursor = Calendar.getInstance().apply {
+                    timeInMillis = today
+                    add(Calendar.DAY_OF_YEAR, -1)
+                }.timeInMillis
+            }
+            var streak = 0
+            while (cursor in grouped) {
+                streak++
+                cursor = Calendar.getInstance().apply {
+                    timeInMillis = cursor
+                    add(Calendar.DAY_OF_YEAR, -1)
+                }.timeInMillis
+            }
+
+            _uiState.update { it.copy(monthDayStats = monthStats, streakDays = streak) }
         }
     }
 
