@@ -157,10 +157,14 @@ fun MistakeBookNavHost(
             arguments = listOf(navArgument("imagePath") { type = NavType.StringType })
         ) { entry ->
             val recrop = container.recropping
+            // 重新识别（先裁切再识别）：详情页入口置上的题目 id。
+            // 与 recrop 互斥——前者要提交识别，后者只换图。
+            val reRecognizeQuestionId = container.reRecognizeQuestionId
             CropScreen(
                 container = container,
                 imagePath = entry.arguments?.getString("imagePath").orEmpty(),
                 recropOnly = recrop,
+                reRecognizeQuestionId = reRecognizeQuestionId,
                 onRecropped = { newPath ->
                     container.recroppedImagePath = newPath
                     container.recropping = false
@@ -168,6 +172,7 @@ fun MistakeBookNavHost(
                 },
                 onConfirmed = { taskIds ->
                     container.recropping = false
+                    container.reRecognizeQuestionId = null
                     navController.navigate(Routes.progress(taskIds.first())) {
                         popUpTo(Routes.HOME)
                     }
@@ -176,6 +181,7 @@ fun MistakeBookNavHost(
                 onManualEntry = { navController.navigate(Routes.MANUAL_EDIT) },
                 onBack = {
                     container.recropping = false
+                    container.reRecognizeQuestionId = null
                     // 用户中途退出裁剪页时必须清掉来源标记，
                     // 否则下一次拍照提交会被错标成「相册导入」
                     container.cropSourceIsGallery = false
@@ -220,7 +226,12 @@ fun MistakeBookNavHost(
                 container = container,
                 taskId = entry.arguments?.getLong("taskId") ?: 0L,
                 initialIndex = entry.arguments?.getInt("index") ?: 0,
-                onRecrop = { path -> navController.navigate(Routes.crop(path)) },
+                onRecrop = { path ->
+                    // 重新裁切：只换图不识别。EditScreen 自己也会置这个标志，
+                    // 重复置无害；QuestionEditScreen 没有置，这里统一补上。
+                    container.recropping = true
+                    navController.navigate(Routes.crop(path))
+                },
                 onBack = { navController.popBackStack() },
                 onSaved = { questionId ->
                     navController.navigate(Routes.detail(questionId)) {
@@ -258,7 +269,17 @@ fun MistakeBookNavHost(
                 questionId = entry.arguments?.getLong("questionId") ?: 0L,
                 onBack = { navController.popBackStack() },
                 onEdit = { id -> navController.navigate(Routes.questionEdit(id)) },
-                onRecrop = { path -> navController.navigate(Routes.crop(path)) },
+                onRecrop = { path ->
+                    // 重新裁切：只换封面/显示图，不重新识别（recropping 标志）
+                    container.recropping = true
+                    navController.navigate(Routes.crop(path))
+                },
+                // 重新识别：确认后先到裁剪页让用户自己裁切/涂鸦，
+                // 裁完才提交识别（questionId 标志告诉裁剪页这是重新识别）。
+                onReRecognizeWithCrop = { path ->
+                    container.reRecognizeQuestionId = entry.arguments?.getLong("questionId") ?: 0L
+                    navController.navigate(Routes.crop(path))
+                },
                 // 重新识别提交成功后跳进度页，让用户看着它跑完。
                 // 之前调的是 onBack()，用户点完就「回到主页」，完全不知道任务已经提交了。
                 onOpenChat = { questionId -> navController.navigate(Routes.chat(questionId)) },
@@ -277,7 +298,12 @@ fun MistakeBookNavHost(
             QuestionEditScreen(
                 container = container,
                 questionId = entry.arguments?.getLong("questionId") ?: 0L,
-                onRecrop = { path -> navController.navigate(Routes.crop(path)) },
+                onRecrop = { path ->
+                    // 重新裁切：只换图不识别（v0.0.12 修复：此前漏置 recropping，
+                    // 编辑页点「重新裁切」会走完整识别流程，裁好的图被当成新题提交）
+                    container.recropping = true
+                    navController.navigate(Routes.crop(path))
+                },
                 onBack = { navController.popBackStack() }
             )
         }

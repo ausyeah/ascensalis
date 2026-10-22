@@ -146,6 +146,20 @@ class QuestionRepository(
         )
     }
 
+    /**
+     * 重新裁切后换掉封面/显示图：**只改 imagePath，不动题干内容**。
+     *
+     * 重新裁切的语义就是「图裁得不好，重裁一张」——识别结果保持不变。
+     * 重新识别（先裁切再提交）走的是另一条路：裁完先调这里换图，
+     * 再交给 RecognitionSubmitter 覆盖内容。
+     */
+    suspend fun updateImagePath(id: Long, imagePath: String) {
+        val question = questionDao.findById(id) ?: return
+        questionDao.update(
+            question.copy(imagePath = imagePath, updatedAt = System.currentTimeMillis())
+        )
+    }
+
     /** 单独改难度。大模型给的星级只是初值，用户有最终判断权。 */
     suspend fun setDifficulty(id: Long, difficulty: Int) {
         val question = questionDao.findById(id) ?: return

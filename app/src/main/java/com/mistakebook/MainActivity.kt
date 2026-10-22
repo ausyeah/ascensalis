@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -114,6 +115,14 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.SYSTEM -> systemInDark
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
+            }
+            // 公式位图是透明背景的，前景色必须跟主题走：
+            // 深色主题还用墨黑，公式贴到近黑背景上就是一片空白（v0.0.12 反馈）。
+            LaunchedEffect(isDark) {
+                container.mathRenderer.setForegroundColor(
+                    if (isDark) com.mistakebook.math.MathRenderer.FG_DARK
+                    else com.mistakebook.math.MathRenderer.FG_LIGHT
+                )
             }
             MistakeBookTheme(darkTheme = isDark) {
                 Surface(color = MaterialTheme.colorScheme.background) {

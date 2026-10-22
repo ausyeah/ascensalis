@@ -27,6 +27,12 @@ data class SettingsSnapshot(
     val llmProfiles: List<LlmProfile> = emptyList(),
     val activeProfileId: String? = null,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+
+    /**
+     * 对话思考强度。默认 HIGH：整理错题、总结题目时「想清楚」比「答得快」重要。
+     * 服务端不认对应字段时会自动降级（见 ReasoningFallback），用户无感。
+     */
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.HIGH,
     val attachOriginalImage: Boolean = true,
     val imageLongEdgePx: Int = 1280,
     val printIncludeImage: Boolean = false,

@@ -211,8 +211,9 @@
 
     <string name="settings_llm_profiles">大模型接入配置</string>
 
-    <!-- 用量概览 -->
-    <string name="settings_usage_title">用量概览</string>
+    <!-- 用量概览（两处：大模型配置下一份、MinerU 配置下一份） -->
+    <string name="settings_usage_title_llm">大模型用量</string>
+    <string name="settings_usage_title_mineru">MinerU 用量</string>
     <string name="settings_usage_llm_calls">大模型调用</string>
     <string name="settings_usage_prompt">输入 tokens</string>
     <string name="settings_usage_completion">输出 tokens</string>
@@ -220,6 +221,16 @@
     <string name="settings_usage_mineru_calls">MinerU 解析</string>
     <string name="settings_usage_reset">清零重算</string>
     <string name="settings_usage_hint">仅统计本机，自上次清零起累计；缓存命中部分的单价低于普通输入</string>
+
+    <!-- 思考强度 -->
+    <string name="settings_reasoning_title">对话思考强度</string>
+    <string name="settings_reasoning_desc">控制模型回答前的思考深度。越高想得越久、越细，适合整理错题；日常问答可调低。</string>
+    <string name="settings_reasoning_off">关闭</string>
+    <string name="settings_reasoning_low">低</string>
+    <string name="settings_reasoning_medium">中</string>
+    <string name="settings_reasoning_high">高</string>
+    <string name="settings_reasoning_max">最高</string>
+    <string name="settings_reasoning_hint">各服务端字段名不统一（reasoning_effort / thinking / reasoning），不被识别时会自动换字段重试，通常无感；关闭则完全由服务端默认决定。</string>
 
     <string name="settings_active_profile">当前使用</string>
     <string name="settings_add_profile">新增配置</string>
@@ -285,8 +296,8 @@
     <string name="edit_note_hint">记下思路、易错点、老师补充…</string>
     <string name="detail_mastered_switch">掌握</string>
     <string name="detail_re_recognize">重新识别</string>
-    <string name="detail_re_recognize_confirm">重新识别会用 AI 重新整理这道题的原图，识别完成后**覆盖**当前的题干、选项、答案、解析与附图。\n\n掌握状态、复习时间和你的备注会保留。确定要覆盖吗？</string>
-    <string name="detail_re_recognize_confirm_action">覆盖并重新识别</string>
+    <string name="detail_re_recognize_confirm">重新识别会用 AI 重新整理这道题的原图，识别完成后**覆盖**当前的题干、选项、答案、解析与附图。\n\n掌握状态、复习时间和你的备注会保留。\n\n下一步会先打开裁切页：你可以重新裁切、涂掉不要的部分，确认后才提交识别。</string>
+    <string name="detail_re_recognize_confirm_action">去裁切</string>
     <string name="detail_re_recognize_need_key">请先到设置填写 API Key</string>
     <string name="detail_re_recognize_no_file">原图已不存在，无法重新识别</string>
     <string name="detail_re_recognize_failed">提交失败，请重试</string>

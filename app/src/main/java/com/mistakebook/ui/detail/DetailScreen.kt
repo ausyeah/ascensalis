@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Alignment
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
@@ -83,6 +85,8 @@ fun DetailScreen(
     onEdit: (Long) -> Unit,
     onRecrop: (String) -> Unit = {},
     onReRecognize: (Long) -> Unit = {},
+    /** 重新识别（先裁切再识别）：确认后带原图路径进裁剪页。 */
+    onReRecognizeWithCrop: (String) -> Unit = {},
     onOpenChat: (Long) -> Unit = {}
 ) {
     val viewModel: DetailViewModel =
@@ -94,7 +98,6 @@ fun DetailScreen(
     var fullImagePath by remember { mutableStateOf<String?>(null) }
     // 重新识别会覆盖当前题目，必须让用户明确确认
     var showReRecognizeDialog by remember { mutableStateOf(false) }
-    var reRecognizeError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.question == null) {
         if (!state.loading && state.question == null) onBack()
@@ -170,6 +173,20 @@ fun DetailScreen(
                                 .height(220.dp),
                             onClick = { showFullImage = true; fullImagePath = null }
                         )
+                        // 重新裁切：只换这张显示图/封面，不重新识别。
+                        // 与右上角「重新识别」的分工——那个是先裁切再识别。
+                        TextButton(
+                            onClick = { onRecrop(question.imagePath) },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Icon(
+                                Icons.Default.Crop,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.edit_recrop))
+                        }
                         Spacer(Modifier.height(12.dp))
                     }
                     // 题目附图：MinerU 从原图切出的图形部分。与上面的整张原图明显区分，
@@ -318,30 +335,15 @@ fun DetailScreen(
         AlertDialog(
             onDismissRequest = { showReRecognizeDialog = false },
             title = { Text(stringResource(R.string.detail_re_recognize)) },
-            text = {
-                Text(
-                    if (reRecognizeError != null) reRecognizeError.orEmpty()
-                    else stringResource(R.string.detail_re_recognize_confirm)
-                )
-            },
+            text = { Text(stringResource(R.string.detail_re_recognize_confirm)) },
             confirmButton = {
                 TextButton(
                     onClick = {
+                        // 不再直接提交：先带原图进裁剪页，让用户自己裁切/涂鸦，
+                        // 裁完才提交识别。原图裁得好的场景居多，但「涂掉半道题」
+                        // 「只框这道题」这类修正只有在裁切页里才做得了。
                         showReRecognizeDialog = false
-                        reRecognizeError = null
-                        viewModel.reRecognize { result ->
-                            when (result) {
-                                is ReRecognizeResult.Submitted -> {
-                                    reRecognizeError = null
-                                    onReRecognize(result.taskId)
-                                }
-
-                                is ReRecognizeResult.Failed -> {
-                                    // 留在详情页并把原因显示出来，让用户知道为什么没动
-                                    reRecognizeError = result.reason
-                                }
-                            }
-                        }
+                        question?.let { onReRecognizeWithCrop(it.imagePath) }
                     }
                 ) { Text(stringResource(R.string.detail_re_recognize_confirm_action)) }
             },

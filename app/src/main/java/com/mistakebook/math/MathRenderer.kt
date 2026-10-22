@@ -1,6 +1,7 @@
 package com.mistakebook.math
 
 import android.content.Context
+import androidx.annotation.ColorInt
 import androidx.collection.LruCache
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -59,6 +60,33 @@ class MathRenderer(context: Context) {
     private var webView: WebView? = null
     private var pageLoaded: CompletableDeferred<Unit> = CompletableDeferred()
 
+    /**
+     * 公式前景色（CSS 串）。
+     *
+     * 抠出来的位图是**透明背景**的，前景色必须跟当前 App 主题走：
+     * 深色主题下还用浅色的墨黑 #1B1F26，公式贴到近黑背景上就是
+     * 「一片深色叠一片深色」——用户看到的是空白（v0.0.12 实测反馈）。
+     */
+    @Volatile
+    private var fgCss: String = FG_CSS_LIGHT
+
+    /**
+     * 切换主题时由 UI 层调用。颜色变了就**整表作废缓存**——
+     * 缓存 key 里没有颜色，旧位图全是上一个主题的墨水，留着只会显示错色。
+     */
+    fun setForegroundColor(@ColorInt color: Int) {
+        val css = String.format("#%06X", 0xFFFFFF and color)
+        if (css == fgCss) return
+        fgCss = css
+        cache.evictAll()
+        Log.i(TAG, "公式前景色切换为 $css，缓存已作废")
+    }
+
+    /** 把当前前景色推进页面。同一 WebView 的 JS 队列保序，放在 render 脚本前调用即先生效。 */
+    private fun pushForegroundColor(view: WebView) {
+        view.evaluateJavascript("setFgColor('$fgCss')", null)
+    }
+
     /** 渲染结果为透明背景位图 + 实际字号；失败返回 null（调用方回退为源码文本）。 */
     suspend fun render(latex: String, displayMode: Boolean): RenderedMath? {
         // 顺序要紧：先清理语义命令，再修复控制字符。
@@ -94,6 +122,8 @@ class MathRenderer(context: Context) {
                         Log.w(TAG, "KaTeX 页面加载超时: $trimmed")
                         return@withLock null
                     }
+                    // 先把主题前景色推上去，再发 render：JS 队列保序，颜色必然先生效。
+                    pushForegroundColor(view)
                     // 留 32px 余量给 #out 的 padding，避免抠图时切到最右侧
                     val script =
                         "render(${jsonString(trimmed)}, $displayMode, ${MAX_BITMAP_EDGE - 32})"
@@ -600,6 +630,8 @@ class MathRenderer(context: Context) {
                     pending.forEach { (key, _) -> results[key] = null }
                     return@withLock
                 }
+                // 批量路径同样要先推主题色：长卷里每个公式都继承 #sheet 的 color。
+                pushForegroundColor(view)
                 val script = buildBatchScript(pending)
                 val raw = awaitJavascript(view, script)
                 if (raw == null) {
@@ -770,6 +802,19 @@ class MathRenderer(context: Context) {
         /** 批量长卷视口上限。12 个公式 × ~200 设备像素 + 余量，4096 绰绰有余。 */
         private const val BATCH_VIEWPORT_HEIGHT = 4096
 
+        /**
+         * 浅色主题的公式前景色（墨黑），与 math.html 里 CSS 默认值一致。
+         * 保持原值不动：浅色模式下公式一直是这个色，不能因改造而变色。
+         */
+        const val FG_LIGHT = 0xFF1B1F26.toInt()
+
+        /**
+         * 深色主题的公式前景色，取设计系统的 PaperTextPrimaryDark（柔和月白）。
+         * 抠图是透明背景，深色模式下必须用亮色，否则深字贴深底 = 用户看到空白。
+         */
+        const val FG_DARK = 0xFFECE9E2.toInt()
+
+        private const val FG_CSS_LIGHT = "#1B1F26"
     }
 }
 

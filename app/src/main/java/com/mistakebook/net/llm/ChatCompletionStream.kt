@@ -1,6 +1,7 @@
 package com.mistakebook.net.llm
 
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.net.ApiError
 import com.mistakebook.net.ApiErrorKind
 import com.mistakebook.net.HttpFactory
@@ -133,44 +134,70 @@ class ChatCompletionStream(
      *
      * 内部顺序：先流式，[StreamFallback] 判定可以降级时才发非流式。
      * **两条路对上层完全一样**——都是 [ChatStreamEvent] 序列，UI 察觉不到区别。
+     *
+     * @param effort 思考强度。按 [ReasoningFallback.attempts] 生成的候选链逐个试：
+     *   服务端不认当前字段名（HTTP 400）就换下一个，正常服务端第一次即成功。
+     *   已经吐出过内容时绝不换字段重发——那会让用户看到同一段话出现两遍。
      */
-    fun complete(profile: LlmProfile, request: ChatRequest): Flow<ChatStreamEvent> = flow {
+    fun complete(
+        profile: LlmProfile,
+        request: ChatRequest,
+        effort: ReasoningEffort = ReasoningEffort.OFF
+    ): Flow<ChatStreamEvent> = flow {
         var deltas = 0
         var thinkings = 0
         var failure: ApiError? = null
         var ended = false
 
+        val attempts = ReasoningFallback.attempts(effort)
         try {
-            rawStream(profile, request).collect { event ->
-                when (event) {
-                    is RawEvent.Delta -> {
-                        if (event.text.isNotEmpty()) {
-                            deltas++
-                            emit(ChatStreamEvent.Delta(event.text))
+            for ((index, attempt) in attempts.withIndex()) {
+                var attemptFailure: ApiError? = null
+                rawStream(
+                    profile,
+                    request.withReasoning(attempt?.first, attempt?.second)
+                ).collect { event ->
+                    when (event) {
+                        is RawEvent.Delta -> {
+                            if (event.text.isNotEmpty()) {
+                                deltas++
+                                emit(ChatStreamEvent.Delta(event.text))
+                            }
                         }
-                    }
 
-                    is RawEvent.Thinking -> {
-                        if (event.text.isNotEmpty()) {
-                            thinkings++
-                            emit(ChatStreamEvent.Thinking(event.text))
+                        is RawEvent.Thinking -> {
+                            if (event.text.isNotEmpty()) {
+                                thinkings++
+                                emit(ChatStreamEvent.Thinking(event.text))
+                            }
                         }
-                    }
 
-                    is RawEvent.Ended -> {
-                        ended = true
-                        emit(
-                            ChatStreamEvent.Done(
-                                event.promptTokens,
-                                event.completionTokens,
-                                event.finishReason,
-                                event.cachedTokens
+                        is RawEvent.Ended -> {
+                            ended = true
+                            emit(
+                                ChatStreamEvent.Done(
+                                    event.promptTokens,
+                                    event.completionTokens,
+                                    event.finishReason,
+                                    event.cachedTokens
+                                )
                             )
-                        )
-                    }
+                        }
 
-                    is RawEvent.Failed -> failure = event.error
+                        is RawEvent.Failed -> attemptFailure = event.error
+                    }
                 }
+                if (ended) return@flow
+                // 已经吐过内容：绝不换字段重发（用户会看到重复输出或长停顿）
+                if (deltas + thinkings > 0) {
+                    failure = attemptFailure
+                    break
+                }
+                failure = attemptFailure ?: failure
+                // 只有「服务端不认这个字段名」才值得换下一个候选；
+                // 鉴权 / 限流 / 服务端错误换字段再发还是同样结果，直接走原降级逻辑
+                if (attemptFailure == null || !ReasoningFallback.isUnknownFieldError(attemptFailure)) break
+                if (index == attempts.lastIndex) break
             }
         } catch (cancelled: CancellationException) {
             // 用户按了停止或页面销毁。**绝不能当成错误降级重发**。
@@ -193,7 +220,7 @@ class ChatCompletionStream(
             return@flow
         }
 
-        emitAll(nonStreaming(profile, request, totalEmitted))
+        emitAll(nonStreaming(profile, request, totalEmitted, attempts.first()))
     }
 
     // ------------------------------------------------------------ 内部事件
@@ -318,15 +345,19 @@ class ChatCompletionStream(
     private suspend fun nonStreaming(
         profile: LlmProfile,
         request: ChatRequest,
-        deltasAlreadyEmitted: Int
+        deltasAlreadyEmitted: Int,
+        reasoning: Pair<String, String>? = null
     ): Flow<ChatStreamEvent> = flow {
         if (deltasAlreadyEmitted > 0) return@flow
 
+        // 非流式降级同样带上思考字段：第一次尝试用的那个。
+        val body = request.copy(stream = false)
+            .withReasoning(reasoning?.first, reasoning?.second)
         val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
                 authorization = "Bearer ${profile.apiKey}",
-                request = request.copy(stream = false)
+                request = body
             )
         } catch (cancelled: CancellationException) {
             throw cancelled

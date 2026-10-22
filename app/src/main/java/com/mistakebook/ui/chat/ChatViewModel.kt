@@ -420,7 +420,11 @@ class ChatViewModel(
         }
 
         try {
-            stream.complete(profile, request).collect { event ->
+            stream.complete(
+                profile,
+                request,
+                settingsStore.settings.first().reasoningEffort
+            ).collect { event ->
                 when (event) {
                     is ChatStreamEvent.Thinking -> {
                         if (event.text.isNotEmpty()) {

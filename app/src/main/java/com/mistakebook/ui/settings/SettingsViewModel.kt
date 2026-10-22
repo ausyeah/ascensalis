@@ -3,6 +3,7 @@ package com.mistakebook.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.SettingsSnapshot
 import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.data.prefs.ThemeMode
@@ -190,6 +191,11 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setThemeMode(mode: ThemeMode) = viewModelScope.launch {
         store.setThemeMode(mode)
+    }
+
+    /** 设置对话思考强度（下一次请求生效）。 */
+    fun setReasoningEffort(effort: ReasoningEffort) = viewModelScope.launch {
+        store.setReasoningEffort(effort)
     }
 
     fun testMineru() {

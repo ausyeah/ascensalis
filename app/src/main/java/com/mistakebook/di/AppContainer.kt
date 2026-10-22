@@ -228,6 +228,15 @@ class AppContainer(context: Context) {
     var recropping: Boolean by mutableStateOf(false)
 
     /**
+     * 「重新识别（先裁切再识别）」模式下的题目 id。
+     *
+     * 详情页点右上角「重新识别」时置上：裁剪页据此知道
+     * 裁切涂鸦完成后要**换掉这道题的封面图并重新提交识别**，
+     * 而不是新建一道题。popBackStack / onConfirmed 时由 NavHost 清零。
+     */
+    var reRecognizeQuestionId: Long? by mutableStateOf(null)
+
+    /**
      * 当前裁剪页的图片来源。相册进来的图要标成「相册导入」而不是「拍照识别」——
      * 进度页按组浏览时，组标题是用户判断这批题从哪来的唯一线索。
      * 提交后立即清空，避免污染下一次。

@@ -126,6 +126,9 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 viewModel = viewModel
             )
 
+            // MinerU 用量紧跟 MinerU 配置：换 Key 后顺手清零对比。
+            MineruUsageSection(container = container)
+
             LlmProfilesSection(
                 state = state,
                 viewModel = viewModel,
@@ -133,10 +136,14 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 onShowModelsClick = { showModels = true }
             )
 
-            // 用量概览放在大模型配置之后、MinerU 参数之前——
-            // 两类调用（LLM 对话 / MinerU 解析）的计数都在这儿，
-            // 挨着各自的配置区，换 Key 后顺手就能清零对比。
-            UsageOverviewSection(container = container)
+            // 大模型用量紧跟大模型配置：请求次数 / 输入 / 输出 / 缓存命中。
+            LlmUsageSection(container = container)
+
+            // 思考强度紧跟大模型配置：整理错题时拉满思考，日常问答可调低省时间。
+            ReasoningEffortSection(
+                state = state,
+                viewModel = viewModel
+            )
 
             ThemeModeSection(
                 state = state,

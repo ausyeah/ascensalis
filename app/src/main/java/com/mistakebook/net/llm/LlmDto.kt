@@ -18,8 +18,29 @@ data class ChatRequest(
      */
     val max_tokens: Int = 16384,
     @SerialName("response_format") val responseFormat: ResponseFormat? = ResponseFormat("json_object"),
+
+    /**
+     * 思考强度，三个候选字段**同一时刻只有一个非空**（见 [withReasoning]）。
+     *
+     * 为什么是三个而不是一个：各服务端字段名不统一——
+     * OpenAI 系用 `reasoning_effort`，部分中转站认 `thinking`，还有认 `reasoning` 的。
+     * 只发一个字段名，遇到不认的服务端就是 HTTP 400、整次请求失败。
+     * 发送方按候选链逐个试，哪个 400 就换下一个（见 ReasoningFallback）。
+     */
+    @SerialName("reasoning_effort") val reasoningEffort: String? = null,
+    @SerialName("thinking") val thinking: String? = null,
+    @SerialName("reasoning") val reasoning: String? = null,
     val stream: Boolean = false
-)
+) {
+    /**
+     * 用指定的字段名携带思考强度；[field] 为 null 表示三个字段全不发。
+     */
+    fun withReasoning(field: String?, value: String?): ChatRequest = copy(
+        reasoningEffort = if (field == "reasoning_effort") value else null,
+        thinking = if (field == "thinking") value else null,
+        reasoning = if (field == "reasoning") value else null
+    )
+}
 
 /**
  * 消息内容既可以是纯字符串，也可以是多模态片段数组（text + image_url）。

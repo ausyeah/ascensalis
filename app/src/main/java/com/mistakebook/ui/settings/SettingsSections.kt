@@ -14,12 +14,16 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.BatteryStd
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -64,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.ThemeMode
 import com.mistakebook.data.prefs.UsageSnapshot
 import com.mistakebook.data.prefs.formatCount
@@ -717,7 +722,7 @@ internal fun LlmProfilesSection(
  * 流式降级非流式重发的那一次会照常计入（服务端确实又收了一次钱）。
  */
 @Composable
-internal fun UsageOverviewSection(container: com.mistakebook.di.AppContainer) {
+internal fun LlmUsageSection(container: com.mistakebook.di.AppContainer) {
     val scope = rememberCoroutineScope()
     var snapshot by remember { mutableStateOf<UsageSnapshot?>(null) }
 
@@ -725,7 +730,7 @@ internal fun UsageOverviewSection(container: com.mistakebook.di.AppContainer) {
         snapshot = withContext(Dispatchers.IO) { container.usageStatsStore.snapshot() }
     }
 
-    SettingsGroup(title = stringResource(R.string.settings_usage_title)) {
+    SettingsGroup(title = stringResource(R.string.settings_usage_title_llm)) {
         val snap = snapshot
         if (snap == null) {
             Text(
@@ -750,7 +755,35 @@ internal fun UsageOverviewSection(container: com.mistakebook.di.AppContainer) {
                 label = stringResource(R.string.settings_usage_cached),
                 value = formatCount(snap.llmCachedTokens)
             )
-            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.settings_usage_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            ResetUsageButton(container, scope) { snapshot = it }
+        }
+    }
+}
+
+@Composable
+internal fun MineruUsageSection(container: com.mistakebook.di.AppContainer) {
+    val scope = rememberCoroutineScope()
+    var snapshot by remember { mutableStateOf<UsageSnapshot?>(null) }
+
+    LaunchedEffect(Unit) {
+        snapshot = withContext(Dispatchers.IO) { container.usageStatsStore.snapshot() }
+    }
+
+    SettingsGroup(title = stringResource(R.string.settings_usage_title_mineru)) {
+        val snap = snapshot
+        if (snap == null) {
+            Text(
+                text = "…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
             UsageRow(
                 label = stringResource(R.string.settings_usage_mineru_calls),
                 value = "${formatCount(snap.mineruCalls)} 次"
@@ -761,19 +794,29 @@ internal fun UsageOverviewSection(container: com.mistakebook.di.AppContainer) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp)
             )
-            TextButton(
-                onClick = {
-                    scope.launch {
-                        withContext(Dispatchers.IO) { container.usageStatsStore.reset() }
-                        snapshot = container.usageStatsStore.snapshot()
-                    }
-                }
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.settings_usage_reset))
+            ResetUsageButton(container, scope) { snapshot = it }
+        }
+    }
+}
+
+/** 两个用量区共用的「清零重算」按钮：重置后把最新快照回传给调用方刷新界面。 */
+@Composable
+private fun ResetUsageButton(
+    container: com.mistakebook.di.AppContainer,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onReset: (UsageSnapshot) -> Unit
+) {
+    TextButton(
+        onClick = {
+            scope.launch {
+                withContext(Dispatchers.IO) { container.usageStatsStore.reset() }
+                onReset(container.usageStatsStore.snapshot())
             }
         }
+    ) {
+        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.settings_usage_reset))
     }
 }
 
@@ -904,6 +947,68 @@ private fun ThemeOptionCard(
                 maxLines = 1
             )
         }
+    }
+}
+
+@Composable
+internal fun ReasoningEffortSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    SettingsGroup(title = stringResource(R.string.settings_reasoning_title)) {
+        Text(
+            text = stringResource(R.string.settings_reasoning_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        val current = state.snapshot.reasoningEffort
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ThemeOptionCard(
+                title = stringResource(R.string.settings_reasoning_off),
+                icon = Icons.Default.Close,
+                selected = current == ReasoningEffort.OFF,
+                onClick = { viewModel.setReasoningEffort(ReasoningEffort.OFF) },
+                modifier = Modifier.weight(1f)
+            )
+            ThemeOptionCard(
+                title = stringResource(R.string.settings_reasoning_low),
+                icon = Icons.Default.BatteryStd,
+                selected = current == ReasoningEffort.LOW,
+                onClick = { viewModel.setReasoningEffort(ReasoningEffort.LOW) },
+                modifier = Modifier.weight(1f)
+            )
+            ThemeOptionCard(
+                title = stringResource(R.string.settings_reasoning_medium),
+                icon = Icons.Default.Speed,
+                selected = current == ReasoningEffort.MEDIUM,
+                onClick = { viewModel.setReasoningEffort(ReasoningEffort.MEDIUM) },
+                modifier = Modifier.weight(1f)
+            )
+            ThemeOptionCard(
+                title = stringResource(R.string.settings_reasoning_high),
+                icon = Icons.Default.Bolt,
+                selected = current == ReasoningEffort.HIGH,
+                onClick = { viewModel.setReasoningEffort(ReasoningEffort.HIGH) },
+                modifier = Modifier.weight(1f)
+            )
+            ThemeOptionCard(
+                title = stringResource(R.string.settings_reasoning_max),
+                icon = Icons.Default.Whatshot,
+                selected = current == ReasoningEffort.MAX,
+                onClick = { viewModel.setReasoningEffort(ReasoningEffort.MAX) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = stringResource(R.string.settings_reasoning_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

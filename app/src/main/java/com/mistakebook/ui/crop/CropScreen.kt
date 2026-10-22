@@ -184,6 +184,12 @@ fun CropScreen(
      * 确认后只回填新路径并返回编辑页，不提交识别、也不检查 API Key。
      */
     recropOnly: Boolean = false,
+    /**
+     * 「重新识别（先裁切再识别）」模式下的题目 id：详情页重新识别入口置上。
+     * 确认后先用裁切图换掉题目封面，再提交识别覆盖内容。
+     * 与 [recropOnly] 互斥——后者连识别都不跑。
+     */
+    reRecognizeQuestionId: Long? = null,
     onRecropped: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -490,6 +496,48 @@ fun CropScreen(
                                 onRecropped(saved.absolutePath)
                             } else {
                                 errorText = context.getString(R.string.crop_too_small)
+                            }
+                            return@launch
+                        }
+                        // 重新识别（先裁切再识别）：详情页入口进来。
+                        // 裁切涂鸦完成后——先用新图换掉题目封面/显示图，
+                        // 再按原图的语义提交识别覆盖内容。用户在裁切页里
+                        // 已经把图修到满意，不需要再回确认对话框。
+                        val replacesQuestionId = reRecognizeQuestionId
+                        if (replacesQuestionId != null) {
+                            val snapshot = container.settingsStore.snapshotNow()
+                            if (!snapshot.mineruConfigured || !snapshot.llmConfigured) {
+                                mineruMissing = !snapshot.mineruConfigured
+                                llmMissing = !snapshot.llmConfigured
+                                showKeyGate = true
+                                return@launch
+                            }
+                            val saved = withContext(Dispatchers.IO) {
+                                saveCrop(
+                                    displayBitmap, cropRect, container, cropStrokes,
+                                    brushWidthPx, imageSize.width.toFloat()
+                                )
+                            }
+                            if (saved == null) {
+                                errorText = context.getString(R.string.crop_too_small)
+                                return@launch
+                            }
+                            sessionStore.clear(imagePath)
+                            // 先换封面：识别要跑几十秒，这期间详情页/列表页
+                            // 看到的应该已经是裁好的新图，而不是旧原图。
+                            container.questionRepository.updateImagePath(
+                                replacesQuestionId,
+                                saved.absolutePath
+                            )
+                            val taskId = container.recognitionSubmitter.reRecognize(
+                                file = saved,
+                                replacesQuestionId = replacesQuestionId,
+                                groupTitle = "重新识别"
+                            )
+                            if (taskId == null) {
+                                errorText = context.getString(R.string.detail_re_recognize_failed)
+                            } else {
+                                onConfirmed(listOf(taskId))
                             }
                             return@launch
                         }

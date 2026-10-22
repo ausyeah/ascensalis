@@ -86,6 +86,23 @@
   }
 
   /**
+   * 设置公式前景色。
+   *
+   * 深色模式（Dark Ink Paper）下 App 背景是 #19181D 级的近黑，
+   * 而下面 CSS 里写死的 #1B1F26 是浅色模式的墨黑——
+   * 抠出来的位图是**透明背景 + 深色字**，贴到深色界面上就是
+   * 「一片深色叠一片深色」，用户看到的是空白。
+   * Android 侧按当前主题调它，inline style 的优先级高于 id 选择器，
+   * 所以这里设一次就能盖掉 CSS 默认值。
+   */
+  function setFgColor(css) {
+    var out = document.getElementById('out');
+    var sheet = document.getElementById('sheet');
+    if (out) out.style.color = css;
+    if (sheet) sheet.style.color = css;
+  }
+
+  /**
    * 输出 **MathML**（不是位图）。
    *
    * 用于 HTML 导出：浏览器自带 MathML 渲染能力（Chrome 109+ / Safari / Firefox 均支持），
