@@ -7,6 +7,7 @@ import com.mistakebook.data.chat.ChatAttachmentPreparer
 import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.chat.ChatContextCompressor
 import com.mistakebook.data.chat.ChatImageOcr
+import com.mistakebook.data.chat.ChatOcrText
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.chat.PreparedAttachment
 import com.mistakebook.data.local.entities.ChatAttachment
@@ -149,7 +150,18 @@ data class ChatUiState(
      *
      * 非空时输入栏上方显示一条进度提示。
      */
-    val ocrStage: String? = null
+    val ocrStage: String? = null,
+
+    /**
+     * 图片识别失败时的常驻说明。
+     *
+     * 与 [ocrStage] 分工：stage 是**进度**，跑了就换；
+     * 本字段是**结果**，失败原因一直挂在输入栏上方，直到重试成功或换会话。
+     *
+     * 没有它的话，失败只进 logcat——用户看到进度条消失、
+     * 模型答非所问，完全无从判断是图没传上去还是没识别出来。
+     */
+    val ocrNotice: String? = null
 )
 
 /** 一次性事件。 */
@@ -474,6 +486,19 @@ class ChatViewModel(
      * 少了一张图的文字，模型只能对着「用户发了张图」这句话瞎猜。
      * 界面看着在转圈，其实是在干实事：进度条会报「正在识别第几张、到哪一步」。
      *
+     * ## 失败怎么办（v0.0.19 修）
+     *
+     * 早先失败只写 logcat：进度条一消失，用户看到模型答非所问，
+     * 没有任何线索；更糟的是**下一句话同一张图会被重新上传一次**
+     * （没有文字 = 永远在待识别队列里），一句话烧一次额度。
+     *
+     * 现在每张图认真试过一次之后，无论成败都有交代：
+     * - 成功 → 文字落库，模型看得见；
+     * - 失败 → **失败说明落库**（[ChatOcrText.failureNote]）：
+     *   不再重传、模型明确知道「这张图没读出来」、
+     *   输入栏上方常驻一条带原因的通知（[ChatUiState.ocrNotice]），
+     *   点「重试」可清掉说明重新排队。
+     *
      * ## 为什么覆盖历史轮次的图
      *
      * 只补本轮的图片是不够的：用户经常隔几轮才问「刚才那张图」，
@@ -484,10 +509,12 @@ class ChatViewModel(
         try {
             val settings = settingsStore.settings.first()
             if (!settings.mineruConfigured) {
-                // 没配 MinerU Key 就别白跑一趟，直接告诉用户。
-                _state.value = _state.value.copy(ocrStage = null)
-                _events.trySend(
-                    ChatEvent.Error("当前模型不支持图片，且未配置 MinerU Key，无法识别图片内容")
+                // 没配 MinerU Key 就别白跑一趟。用常驻通知而不是一次性 toast——
+                // 这个原因不会自己消失，用户回到应用时还得看见它。
+                _state.value = _state.value.copy(
+                    ocrStage = null,
+                    ocrNotice = "当前模型看不到图片，需要先用 MinerU 把图转成文字，" +
+                        "但还没有配置 MinerU Key。去设置里配置后，可点右侧「重试」。"
                 )
                 return
             }
@@ -496,12 +523,22 @@ class ChatViewModel(
                 _state.value = _state.value.copy(ocrStage = null)
                 return
             }
+            val failureReasons = mutableListOf<String>()
             for ((index, attachment) in pending.withIndex()) {
                 _state.value = _state.value.copy(
                     ocrStage = "正在用 MinerU 识别图片（${index + 1}/${pending.size}）…"
                 )
                 val file = java.io.File(attachment.localPath)
-                if (!file.exists()) continue
+                if (!file.exists()) {
+                    // 文件没了（被清理或没拷完）：记一条说明，
+                    // 否则它会永远待在待识别队列里，每轮重传一次。
+                    markOcrFailed(attachment, "图片文件不存在")
+                    failureReasons += "图片文件不存在"
+                    continue
+                }
+                // 本会话已认真试过的图不重传（正常不会走到这——失败说明已落库；
+                // 这是落库失败时的兜底）
+                if (imageOcr.alreadyTried(file)) continue
                 val result = imageOcr.recognize(
                     sessionId = sessionId,
                     imageFile = file,
@@ -516,22 +553,99 @@ class ChatViewModel(
                     is com.mistakebook.net.ApiResult.Success -> {
                         if (result.data.isNotBlank()) {
                             repository.updateAttachmentOcr(attachment.id, result.data)
+                        } else {
+                            // 跑通了但没抽到字：同样记一笔，别让下一句话再烧一次额度
+                            markOcrFailed(attachment, "MinerU 已返回，但图里没有识别出文字")
+                            failureReasons += "图里没有识别出文字"
                         }
                     }
 
                     is com.mistakebook.net.ApiResult.Failure -> {
                         // 单张失败不中断后面的：一张图识别不出来，
                         // 不该让整会话的其他图都不识别。
-                        Log.w(TAG, "图片 OCR 失败: ${attachment.fileName}")
+                        val reason = result.error.serverMessage.ifBlank { "识别请求失败" }
+                        Log.w(TAG, "图片 OCR 失败: ${attachment.fileName} / $reason")
+                        markOcrFailed(attachment, reason)
+                        failureReasons += reason
                     }
                 }
             }
-            _state.value = _state.value.copy(ocrStage = null)
+            _state.value = _state.value.copy(
+                ocrStage = null,
+                ocrNotice = if (failureReasons.isEmpty()) {
+                    null
+                } else {
+                    buildOcrNotice(failureReasons)
+                }
+            )
         } catch (cancelled: CancellationException) {
+            // 用户按了停止：进度条必须撤掉，不能卡在「正在识别」——
+            // 撤了才重抛，state 写入不是挂起函数，取消态下照样能执行。
+            _state.value = _state.value.copy(ocrStage = null)
             throw cancelled
         } catch (t: Throwable) {
             Log.w(TAG, "图片 OCR 任务异常", t)
-            _state.value = _state.value.copy(ocrStage = null)
+            _state.value = _state.value.copy(
+                ocrStage = null,
+                ocrNotice = buildOcrNotice(listOf(t.message ?: "识别任务异常"))
+            )
+        }
+    }
+
+    /** 把一条失败说明写进附件：不重传 + 模型知道 + 用户看得见。 */
+    private suspend fun markOcrFailed(attachment: ChatAttachment, reason: String) {
+        runCatching { repository.updateAttachmentOcr(attachment.id, ChatOcrText.failureNote(reason)) }
+            .onFailure { Log.w(TAG, "写入 OCR 失败说明失败: ${attachment.fileName}", it) }
+    }
+
+    /** 通知条文案：第一张的原因 + 总数。MinerU 的文案可能很长，只取代表性的那条。 */
+    private fun buildOcrNotice(reasons: List<String>): String {
+        val first = reasons.firstOrNull { it.isNotBlank() }?.take(120).orEmpty()
+        val count = reasons.size
+        return if (count <= 1) {
+            "图片识别失败：$first 已如实告知模型这张图没能读出来；" +
+                "网络或额度恢复后可点右侧「重试」。"
+        } else {
+            "$count 张图片识别失败，第一张的原因：$first " +
+                "已如实告知模型这些图没能读出来；恢复后可点右侧「重试」。"
+        }
+    }
+
+    /**
+     * 重试识别失败的图片（通知条上的「重试」）。
+     *
+     * 网断了、额度没了导致的失败不该是终局：把失败说明清掉、
+     * 撤掉内存里的「已尝试」标记，重新跑一遍 [ensureImageOcr]。
+     * 全部成功则通知条自动消失。
+     */
+    fun retryOcr() {
+        val sessionId = _state.value.sessionId
+        // 流式进行中不重试：那一轮的请求早就带着现状发出去了，
+        // 现在补识别只对下一轮有用，没理由和生成中的界面抢 attention。
+        if (sessionId == 0L || _state.value.isStreaming) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(ocrNotice = null)
+            try {
+                val failed = repository.imageAttachmentsOf(sessionId)
+                    .filter { ChatOcrText.isFailureNote(it.textExcerpt) }
+                failed.forEach { attachment ->
+                    repository.clearAttachmentOcr(attachment.id)
+                    java.io.File(attachment.localPath)
+                        .takeIf { it.exists() }
+                        ?.let { imageOcr.forget(it) }
+                }
+                ocrJob = currentCoroutineContext()[Job]
+                try {
+                    ensureImageOcr(sessionId)
+                } finally {
+                    ocrJob = null
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (t: Throwable) {
+                Log.w(TAG, "重试图片识别异常", t)
+                _state.value = _state.value.copy(ocrStage = null)
+            }
         }
     }
 
@@ -815,7 +929,10 @@ class ChatViewModel(
          * 再密就纯属浪费，因为用户分辨不出「每 50ms 更新」和「每 500ms 更新」。
          */
         const val WRITE_THROTTLE_MS = 500L
-        const val PREVIEW_THROTTLE_MS = 120L
+        /** 流式预览节流：220ms（约每秒 4~5 次）。
+     *  原来是 120ms（每秒 8 次）——每刷新一次就要整篇重解析 markdown
+     *  并重绘带公式的气泡，长回答下主线程吃不消，滑动明显掉帧。 */
+    const val PREVIEW_THROTTLE_MS = 220L
 
         const val FINISH_REASON_LENGTH = "length"
 

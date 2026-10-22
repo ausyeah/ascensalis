@@ -83,4 +83,45 @@ class ChatOcrTextTest {
         val twice = ChatOcrText.section(ChatOcrText.prepare("x"))
         assertEquals(once, twice)
     }
+
+    // ------------------------------------------------------------ 失败说明
+
+    @Test
+    fun `失败说明带头部且可被认出`() {
+        val note = ChatOcrText.failureNote("MinerU 超时")
+        assertTrue(note.startsWith(ChatOcrText.FAILURE_NOTE_PREFIX))
+        assertTrue(note.contains("MinerU 超时"))
+        assertTrue(ChatOcrText.isFailureNote(note))
+    }
+
+    @Test
+    fun `失败原因可空`() {
+        val note = ChatOcrText.failureNote("")
+        assertEquals(ChatOcrText.FAILURE_NOTE_PREFIX, note)
+        assertTrue(ChatOcrText.isFailureNote(note))
+    }
+
+    @Test
+    fun `普通 OCR 文字不是失败说明`() {
+        assertFalse(ChatOcrText.isFailureNote(ChatOcrText.prepare("题目内容")))
+        assertFalse(ChatOcrText.isFailureNote(""))
+    }
+
+    @Test
+    fun `失败说明换用失败头部`() {
+        // 模型必须能区分「图里的字就是这个」和「这张图没读出来」——
+        // 拿失败说明当题目内容分析，比看不到图更糟。
+        val note = ChatOcrText.failureNote("额度不足")
+        val out = ChatOcrText.section(note)
+        assertTrue(out.startsWith(ChatOcrText.IMAGE_FAILED_HEADER))
+        assertFalse(out.startsWith(ChatOcrText.IMAGE_TEXT_HEADER))
+        assertTrue(out.contains("额度不足"))
+    }
+
+    @Test
+    fun `成功文字仍然用文字头部`() {
+        val out = ChatOcrText.section(ChatOcrText.prepare("题目内容"))
+        assertTrue(out.startsWith(ChatOcrText.IMAGE_TEXT_HEADER))
+        assertFalse(out.contains(ChatOcrText.IMAGE_FAILED_HEADER))
+    }
 }

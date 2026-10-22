@@ -26,19 +26,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Compress
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,6 +63,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -82,6 +84,8 @@ import com.mistakebook.domain.MessageStatus
 import com.mistakebook.ui.common.ApiKeyRequiredDialog
 import com.mistakebook.ui.common.RichText
 import com.mistakebook.ui.common.containerViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.ExpandLess
@@ -451,6 +455,13 @@ fun ChatScreen(
                 Spacer(Modifier.height(4.dp))
             }
 
+            // OCR 失败通知：常驻，带原因和「重试」。
+            // 进度条会消失，失败原因不能跟着消失——否则用户只看到模型答非所问。
+            state.ocrNotice?.let { notice ->
+                OcrNoticeBar(notice = notice, onRetry = viewModel::retryOcr)
+                Spacer(Modifier.height(4.dp))
+            }
+
             ChatInputBar(
                 text = state.input,
                 streaming = state.isStreaming,
@@ -504,6 +515,14 @@ private fun MessageList(
                 when (item) {
                     is ChatListItem.OmittedNotice -> "omitted-notice"
                     is ChatListItem.Message -> item.message.id
+                }
+            },
+            // contentType 让 Compose 按类型分池复用：不写的话滚动时
+            // 每条消息都可能拿到上一条不同类型的容器重新组合。
+            contentType = { item ->
+                when (item) {
+                    is ChatListItem.OmittedNotice -> "notice"
+                    is ChatListItem.Message -> "message"
                 }
             }
         ) { item ->
@@ -808,13 +827,19 @@ private fun decodeSampled(bytes: ByteArray, maxPx: Int): Bitmap? {
  */
 @Composable
 private fun BubbleImage(dataUrl: String) {
-    val bitmap = remember(dataUrl) {
-        runCatching {
-            val bytes = Base64.decode(dataUrl.substringAfter("base64,"), Base64.NO_WRAP)
-            decodeSampled(bytes, BUBBLE_IMAGE_MAX_PX)
-        }.getOrNull()
+    // **解码不能在组合期做。** base64 解码 + 两遍 BitmapFactory.decodeByteArray
+    // 是几十毫秒的重活，放在 remember 里就是卡在合成这一帧上——带图的气泡
+    // 每滑进屏幕一次就掉一次帧。produceState 让它在 IO 线程跑、完成后再回填。
+    val bitmap by produceState<android.graphics.Bitmap?>(null, dataUrl) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = Base64.decode(dataUrl.substringAfter("base64,"), Base64.NO_WRAP)
+                decodeSampled(bytes, BUBBLE_IMAGE_MAX_PX)
+            }.getOrNull()
+        }
     }
-    if (bitmap == null) {
+    val decoded = bitmap
+    if (decoded == null) {
         Text(
             text = stringResource(R.string.chat_image_unreadable),
             style = MaterialTheme.typography.labelSmall,
@@ -823,7 +848,7 @@ private fun BubbleImage(dataUrl: String) {
         return
     }
     Image(
-        bitmap = bitmap.asImageBitmap(),
+        bitmap = decoded.asImageBitmap(),
         contentDescription = stringResource(R.string.chat_image_content_description),
         modifier = Modifier
             .fillMaxWidth()
@@ -1029,6 +1054,51 @@ private fun OcrProgressBar(stage: String) {
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
+        }
+    }
+}
+
+/**
+ * 图片识别失败通知条。
+ *
+ * 与 [OcrProgressBar] 的分工：进度条报告「正在做什么」，跑了就换；
+ * 本条目报告「结果不行，为什么」。失败不会自己好转，
+ * 所以它常驻在输入栏上方，直到重试成功或离开会话。
+ *
+ * 右侧「重试」：清掉失败说明重新排队——网断了、额度没了
+ * 这类原因恢复后，用户不用退出会话再进来。
+ */
+@Composable
+private fun OcrNoticeBar(notice: String, onRetry: () -> Unit) {
+    Surface(
+        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)
+        ) {
+            Icon(
+                Icons.Outlined.Warning,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = notice,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onRetry) {
+                Text(
+                    text = stringResource(R.string.chat_ocr_retry),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
         }
     }
 }

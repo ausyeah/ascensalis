@@ -398,6 +398,10 @@ class ChatRepository(
             //
             // 图片本身这时不发（`images` 为空），模型完全看不到那张图；
             // 若不给文字，模型只能对着「用户发了张图」这句话瞎猜。
+            //
+            // 识别失败的图也会带一条失败说明进来（见 [ChatOcrText.failureNote]）：
+            // 模型由此知道「这里有一张图但没读出来」，能如实让用户补充文字，
+            // 而不是忽略这张图继续答。
             if (!supportsVision) {
                 val imageTexts = imageAttachments
                     .mapNotNull { it.textExcerpt.takeIf { excerpt -> excerpt.isNotBlank() } }
@@ -429,13 +433,25 @@ class ChatRepository(
      *
      * 用于「模型不识图时补做 OCR」：历史轮次里的图片也得有文字，
      * 否则用户问「刚才那张图里的第三题是什么」时，模型什么都看不到。
+     *
+     * 注意「没有文字」包含**失败说明**（见 [ChatOcrText.failureNote]）——
+     * 那条说明本身就是文字，带着它就不会再重传。
      */
     suspend fun imageAttachmentsWithoutOcr(sessionId: Long): List<ChatAttachment> =
         chatDao.imageAttachmentsOf(sessionId).filter { it.textExcerpt.isBlank() }
 
+    /** 会话里全部图片附件（含已识别与识别失败的），供「重试」挑出失败的那几张。 */
+    suspend fun imageAttachmentsOf(sessionId: Long): List<ChatAttachment> =
+        chatDao.imageAttachmentsOf(sessionId)
+
     /** 回写图片附件的 OCR 文字。 */
     suspend fun updateAttachmentOcr(id: Long, text: String) {
         chatDao.updateAttachmentText(id, text, text.length)
+    }
+
+    /** 清掉附件上的 OCR 文字（用户点「重试」时把失败说明撤掉，重新排队）。 */
+    suspend fun clearAttachmentOcr(id: Long) {
+        chatDao.updateAttachmentText(id, "", 0)
     }
 
     // ------------------------------------------------------------ 辅助
