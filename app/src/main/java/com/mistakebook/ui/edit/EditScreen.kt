@@ -323,7 +323,7 @@ fun EditScreen(
                                             imagePath = ref,
                                             contentDescription = stringResource(R.string.edit_figures),
                                             modifier = Modifier
-                                                .size(96.dp)
+                                                .height(96.dp)
                                                 .clip(RoundedCornerShape(6.dp))
                                         )
                                         IconButton(
@@ -358,7 +358,7 @@ fun EditScreen(
                                 com.mistakebook.ui.common.QuestionThumb(
                                     imagePath = draft.imagePath,
                                     contentDescription = stringResource(R.string.edit_original_image),
-                                    modifier = Modifier.size(56.dp)
+                                    modifier = Modifier.height(56.dp)
                                 )
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {

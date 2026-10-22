@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -150,6 +151,20 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 private const val THUMB_DECODE_PX = 512
 
 // 原图预览：点击看大图，支持缩放
+/**
+ * 题目图片缩略图。
+ *
+ * ## 「保持图片比例」是怎么生效的
+ *
+ * 旧版调用方给的都是固定方形尺寸（如 72×72）+ [ContentScale.Crop]，
+ * 拍出来的长条作业图会被裁到只剩中间一坨——看起来就像「适应比例没生效」。
+ *
+ * 现在图片加载成功后读取真实宽高比，把它接到外层尺寸上：
+ * 调用方只约束**高度**（或给一个高度区间），宽度 = 高度 × 比例自动展开，
+ * 于是横图更宽、竖图更窄，画面内容完整不裁。
+ *
+ * 极端长图按 0.4 ~ 3.0 的比例夹住，防止一条 10:1 的长截图把列表撑爆。
+ */
 @Composable
 fun QuestionThumb(
     imagePath: String,
@@ -166,8 +181,13 @@ fun QuestionThumb(
             .size(THUMB_DECODE_PX)
             .build()
     }
+    // 加载成功前置 null → 先按 1:1 占位（调用方给的高度当边长），
+    // 成功后切到真实比例。remember(imagePath)：换图（重新裁切）后重算。
+    var aspectRatio by remember(imagePath) { mutableStateOf<Float?>(null) }
     Surface(
-        modifier = modifier.then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+        modifier = modifier
+            .aspectRatio(aspectRatio ?: 1f)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant
     ) {
@@ -175,6 +195,14 @@ fun QuestionThumb(
             model = request,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
+            onSuccess = { state ->
+                val drawable = state.result.drawable
+                val w = drawable.intrinsicWidth
+                val h = drawable.intrinsicHeight
+                if (w > 0 && h > 0) {
+                    aspectRatio = (w.toFloat() / h).coerceIn(0.4f, 3f)
+                }
+            },
             modifier = Modifier.fillMaxSize()
         )
     }

@@ -313,7 +313,7 @@ private fun PrintRow(
             QuestionThumb(
                 imagePath = question.printImagePath,
                 contentDescription = null,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.height(48.dp)
             )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {

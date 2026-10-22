@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -167,9 +168,11 @@ fun DetailScreen(
                         QuestionThumb(
                             imagePath = question.imagePath,
                             contentDescription = stringResource(R.string.edit_original_image),
+                            // 高度区间而非固定值：宽度撑满后高度按图片比例落位，
+                            // 长题图不再被 220dp 裁头去尾
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(220.dp),
+                                .heightIn(min = 160.dp, max = 380.dp),
                             onClick = { showFullImage = true; fullImagePath = null }
                         )
                         // 重新裁切：只换这张显示图/封面，不重新识别。
@@ -197,7 +200,7 @@ fun DetailScreen(
                                     imagePath = ref,
                                     contentDescription = stringResource(R.string.edit_figures),
                                     modifier = Modifier
-                                        .size(120.dp)
+                                        .height(120.dp)
                                         .clip(RoundedCornerShape(8.dp)),
                                     onClick = { showFullImage = true; fullImagePath = ref }
                                 )

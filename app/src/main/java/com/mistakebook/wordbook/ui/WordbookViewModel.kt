@@ -1046,15 +1046,28 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** 朗读当前单词（TTS）。未就绪时静默忽略——初始化是异步的，首次点击可能没声音。 */
+    /** 朗读当前单词（TTS）。初始化中的点击会被暂存、就绪后补发（见 WordAudioPlayer）。 */
     fun speakCurrentWord() {
         val word = _uiState.value.currentWord?.word ?: return
-        audioPlayer.speak(word)
+        speakWithFallback(word)
     }
 
     /** 列表页朗读指定单词。 */
     fun speakWord(wordStr: String) {
-        audioPlayer.speak(wordStr)
+        speakWithFallback(wordStr)
+    }
+
+    /**
+     * 朗读 + 失败兜底：设备没有任何可用 TTS 引擎时（部分 ROM 默认不带），
+     * 旧版是「点了完全没反应」，用户只会以为按钮坏了。
+     * 这里用 snackbar 把原因和出路说清楚。
+     */
+    private fun speakWithFallback(text: String) {
+        if (!audioPlayer.speak(text)) {
+            _uiState.update {
+                it.copy(snackbarMessage = "本机没有可用的语音引擎：请在系统设置搜索「文字转语音」启用一个（如 Google TTS / 小爱朗读）")
+            }
+        }
     }
 
     // =========================================================================

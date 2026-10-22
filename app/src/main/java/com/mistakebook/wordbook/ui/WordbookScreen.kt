@@ -397,13 +397,11 @@ private fun StudyView(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 每日目标进度条：放在最上面一屏就要看见，
-        // 「今天还要学多少」是用户进刷题页第一个想知道的事。
-        item {
-            DailyGoalBar(studiedToday = state.studiedTodayCount, goal = state.dailyGoal)
-        }
+        // 每日目标进度条已从刷题页撤下：它把首屏占掉一截，而同样的信息
+        // （今日已学 / 目标 / 打卡）在「学习统计」页都有完整呈现——
+        // 刷题页每一寸都留给题目本身。
 
-        // 模式切换与熟词标记操作栏
+        // 模式切换 + 上一题 + 熟词标记操作栏
         item {
             Row(
                 modifier = Modifier
@@ -412,6 +410,24 @@ private fun StudyView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // 「上一题」并进这一行的最左边：原先独立占一行，
+                // 题干卡片被往下顶了一截。有历史才显示，没有就不占位。
+                if (state.hasPrevious) {
+                    TextButton(
+                        onClick = viewModel::previousQuestion,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier = Modifier.padding(end = 2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Text("上一题", fontSize = 13.sp)
+                    }
+                }
+
                 // 四个模式 chip 横向滚动：加上「拼写」后，即使把模式名
                 // 缩成「四选一/卡片/义项/拼写」，360dp 小屏上仍可能
                 // 与熟词星标挤在一起。让 chip 区自己滚动、占满剩余宽度，
@@ -456,29 +472,6 @@ private fun StudyView(
             }
         }
 
-        // 「上一题」：回看刚做过的词。历史栈为空时置灰。
-        // 放在题干卡片上方——先看到入口，再看到内容，符合回看的操作顺序。
-        if (state.hasPrevious) {
-            item(key = "prev_question") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.Start
-                ) {
-                    TextButton(onClick = viewModel::previousQuestion) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("上一题", fontSize = 14.sp)
-                    }
-                }
-            }
-        }
-
         // 单词主纸质卡片
         if (currentWord != null) {
             item {
@@ -491,10 +484,14 @@ private fun StudyView(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
                 ) {
+                    // 发音 + 收藏固定在卡片右上角：原来单独占一行把卡片
+                    // 撑高了一截，而这两个图标一年到头都长在同一个位置，
+                    // 右上角是「工具位」的常识摆放，不占正文空间。
+                    Box(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 26.dp),
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         if (state.studyMode == StudyMode.SENSE) {
@@ -542,16 +539,9 @@ private fun StudyView(
 
                             // 义项辨析模式下**不给发音入口**：发音等于直接
                             // 报答案（听到读音就能选出对应单词），练义项
-                            // 辨析的意义就没了。收藏与对错无关，照常给。
+                            // 辨析的意义就没了。收藏与对错无关，右上角照常给。
                             // 答错后展示原词时再补一个发音按钮（见下方
                             // 揭晓区），让用户对答案建立「音-义」关联。
-                            Spacer(Modifier.height(6.dp))
-                            QuestionActionRow(
-                                isFavorite = state.currentProgress?.isFavorite == true,
-                                showSpeak = false,
-                                onSpeak = {},
-                                onToggleFavorite = viewModel::toggleFavoriteCurrentWord
-                            )
 
                             // 作答后展示原词与全部释义。
                             //
@@ -720,16 +710,10 @@ private fun StudyView(
                                 }
                             }
 
-                            // 发音 + 生词本收藏。
-                            // 这里的喇叭是「听一遍」：**不自动播放**，由用户
-                            // 自己决定听不听——自动播等于直接把答案念出来，
-                            // 拼写练习就退化成听写；用户主动点才是听写练习。
-                            Spacer(Modifier.height(6.dp))
-                            QuestionActionRow(
-                                isFavorite = state.currentProgress?.isFavorite == true,
-                                onSpeak = viewModel::speakCurrentWord,
-                                onToggleFavorite = viewModel::toggleFavoriteCurrentWord
-                            )
+                            // 发音/收藏在卡片右上角。这里的喇叭是「听一遍」：
+                            // **不自动播放**，由用户自己决定听不听——自动播等于
+                            // 直接把答案念出来，拼写练习就退化成听写；用户主动点
+                            // 才是听写练习。
                         } else {
                             // 常规四选一 / 卡片模式题干
                             Text(
@@ -750,15 +734,7 @@ private fun StudyView(
                                 )
                             }
 
-                            // 发音 + 生词本收藏。放在题干卡内、单词正下方：
-                            // 朗读要贴着单词点（先听后记），收藏是「这个词我要
-                            // 重点关照」的即时动作，都在看题的动线上。
-                            Spacer(Modifier.height(6.dp))
-                            QuestionActionRow(
-                                isFavorite = state.currentProgress?.isFavorite == true,
-                                onSpeak = viewModel::speakCurrentWord,
-                                onToggleFavorite = viewModel::toggleFavoriteCurrentWord
-                            )
+                            // 发音 + 收藏已移到卡片右上角，不再占据单词正下方的空间。
 
                             // 作答后或卡片揭晓后展示完整中文释义。
                             // **答对不展示**：答对即退出本轮（380ms 自动切题），
@@ -795,6 +771,39 @@ private fun StudyView(
                                 }
                             }
                         }
+                    }
+
+                    // 右上角工具位：发音（义项辨析模式不给，发音=报答案）+ 收藏
+                    Row(
+                        modifier = Modifier.align(Alignment.TopEnd),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (state.studyMode != StudyMode.SENSE) {
+                            IconButton(
+                                onClick = viewModel::speakCurrentWord,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.VolumeUp,
+                                    contentDescription = "朗读单词",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = viewModel::toggleFavoriteCurrentWord,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            val fav = state.currentProgress?.isFavorite == true
+                            Icon(
+                                imageVector = if (fav) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = if (fav) "取消收藏" else "收进生词本",
+                                tint = if (fav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
                     }
                 }
             }
@@ -1154,50 +1163,6 @@ private fun DailyGoalBar(studiedToday: Int, goal: Int) {
     }
 }
 
-/**
- * 题干卡内的「发音 + 生词本收藏」操作行。
- *
- * 两个图标按钮并排、不加文字标签：图标语义（喇叭/书签）在工具类
- * App 里已是共识，带文字会把 36sp 大单词的视觉重心抢走。
- * 收藏态用实心书签 + 主题色，未收藏是描边书签 + 弱化色——
- * 与熟词星标（Star/StarBorder）保持同一套「实心=已标记」的视觉语言。
- *
- * @param showSpeak 义项辨析模式传 false（发音=报答案），答错后的揭晓区
- *   会单独给发音入口。
- */
-@Composable
-private fun QuestionActionRow(
-    isFavorite: Boolean,
-    onSpeak: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    showSpeak: Boolean = true
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (showSpeak) {
-            IconButton(onClick = onSpeak, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    imageVector = Icons.Default.VolumeUp,
-                    contentDescription = "朗读单词",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-        IconButton(onClick = onToggleFavorite, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = if (isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                contentDescription = if (isFavorite) "取消收藏" else "收进生词本",
-                tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
 @Composable
 private fun QuizOptionRow(
     option: QuizOption,
@@ -1380,24 +1345,37 @@ private fun QuizOptionRow(
                         modifier = Modifier.height(OPTION_MEANING_SLOT_SENSE.dp)
                     )
                 } else {
-                    // 常规四选一模式：选项呈现中文释义，词性独立成行
-                    if (option.word.pos.isNotBlank()) {
+                    // 常规四选一模式：词性内联在释义行首（「n. 金属板」），
+                    // 不再独立成行——旧版词性一行 + 释义槽 48dp，四个选项
+                    // 全都带着一截空白，把答案区顶出首屏。槽位收到 40dp
+                    // 仍然保持四个选项等高（作答瞬间不跳）。
+                    Row(verticalAlignment = Alignment.Top) {
+                        if (option.word.pos.isNotBlank()) {
+                            Text(
+                                text = option.word.pos,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = posColor,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                modifier = Modifier.padding(top = 2.dp, end = 6.dp)
+                            )
+                        }
                         Text(
-                            text = option.word.pos,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = posColor,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
+                            text = option.word.meaning,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = meaningColor,
+                            fontWeight = if (isAnswered && (option.isCorrect || option.isSelected)) FontWeight.Medium else FontWeight.Normal,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
                     }
+                    // 恒定占位：保证四个选项从始至终一样高。
                     Text(
-                        text = option.word.meaning,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = meaningColor,
-                        fontWeight = if (isAnswered && (option.isCorrect || option.isSelected)) FontWeight.Medium else FontWeight.Normal,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.height(OPTION_MEANING_SLOT_QUIZ.dp)
+                        text = "",
+                        modifier = Modifier.height(
+                            (OPTION_MEANING_SLOT_QUIZ - MEANING_LINE_HEIGHT_QUIZ).coerceAtLeast(0).dp
+                        )
                     )
                 }
             }
@@ -2175,7 +2153,10 @@ private fun WordItemCard(
  * 单行释义不塌、双行不撑，四个选项从始至终等高。
  * 详见 [QuizOptionRow] 里的注释。
  */
-private const val OPTION_MEANING_SLOT_QUIZ = 48
+private const val OPTION_MEANING_SLOT_QUIZ = 40
+
+/** bodyMedium 一行释义的近似高度（dp），用于把恒定槽位拆成「内容 + 余量」。 */
+private const val MEANING_LINE_HEIGHT_QUIZ = 20
 
 /**
  * 义项辨析选项的释义区高度（dp）。
@@ -2183,7 +2164,7 @@ private const val OPTION_MEANING_SLOT_QUIZ = 48
  * bodySmall 一行约 22 字，40dp 两行覆盖 44 字——词库最长释义
  * 43 字符，刚好全覆盖。未作答时也恒定占位，作答不改变选项高度。
  */
-private const val OPTION_MEANING_SLOT_SENSE = 40
+private const val OPTION_MEANING_SLOT_SENSE = 36
 
 /**
  * 每日目标的调整步长（词）。5 词一档：一次点一下就够用，
