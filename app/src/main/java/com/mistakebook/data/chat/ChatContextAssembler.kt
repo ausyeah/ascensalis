@@ -45,6 +45,18 @@ object ChatContextAssembler {
     /** 本次新输入。 */
     const val ID_PENDING = -3L
 
+    /** 上文摘要（上下文压缩的产物）。 */
+    const val ID_SUMMARY = -4L
+
+    /**
+     * 摘要消息在数据库里的内容前缀。
+     *
+     * 摘要是**一条真实的 SYSTEM 消息**（injected = 0，UI 看得见），
+     * 靠这个前缀把「给人看的摘要」认出来。认错的消息不会进请求体，
+     * 最坏只是压缩白做一次，不会把脏数据发给模型。
+     */
+    const val SUMMARY_PREFIX = "【上文摘要】"
+
     /**
      * 把历史切成「轮」。
      *
@@ -71,12 +83,15 @@ object ChatContextAssembler {
      * @param history 全部历史消息（含 [ChatRole.SYSTEM] 的会被剔除）。
      * @param pendingText 本次要发的新内容。**无论多大都一定发送**——
      *   悄悄截断用户的问题比直接报「上下文过长」糟糕得多。
+     * @param summary 上文摘要。非空时作为一条 system 消息插在题目上下文之后、
+     *   历史之前——被压缩掉的旧轮次靠它续上，模型才不会「忘了前面聊过什么」。
      */
     fun assemble(
         systemPrompt: String,
         questionContext: String,
         history: List<OutgoingMessage>,
-        pendingText: String = ""
+        pendingText: String = "",
+        summary: String = ""
     ): AssembledContext {
         val clean = history.filter { it.role != ChatRole.SYSTEM }
         val allRounds = groupIntoRounds(clean)
@@ -116,6 +131,10 @@ object ChatContextAssembler {
                 }
                 if (questionContext.isNotBlank()) {
                     add(OutgoingMessage(id = ID_QUESTION, role = ChatRole.SYSTEM, text = questionContext))
+                }
+                // 摘要紧跟题目上下文：位置越靠前，模型越当「既定事实」用它。
+                if (summary.isNotBlank()) {
+                    add(OutgoingMessage(id = ID_SUMMARY, role = ChatRole.SYSTEM, text = summary))
                 }
                 addAll(body)
             },

@@ -3,6 +3,8 @@ package com.mistakebook.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.data.chat.ChatAttachmentPreparer
+import com.mistakebook.data.chat.ChatContextAssembler
+import com.mistakebook.data.chat.ChatContextCompressor
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.chat.PreparedAttachment
 import com.mistakebook.data.local.entities.ChatAttachment
@@ -122,7 +124,22 @@ data class ChatUiState(
     val needsApiKey: Boolean = false,
 
     /** 最后一条助手消息失败，允许重试。 */
-    val canRetry: Boolean = false
+    val canRetry: Boolean = false,
+
+    /**
+     * 当前会话有生效中的上文摘要（上下文压缩的产物）。
+     * true 时输入栏上方显示摘要提示条。
+     */
+    val summaryActive: Boolean = false,
+
+    /** 压缩正在进行中。按钮转圈，避免连点生成多份摘要。 */
+    val compressing: Boolean = false,
+
+    /**
+     * 上一次请求的输入 token 数（服务端回报，0 表示还没问过）。
+     * 输入栏显示「上次请求 ≈ N tokens」，让用户对上下文占用有数。
+     */
+    val lastPromptTokens: Int = 0
 )
 
 /** 一次性事件。 */
@@ -146,6 +163,7 @@ class ChatViewModel(
     private val settingsStore: SettingsStore,
     private val usageStatsStore: UsageStatsStore,
     private val preparer: ChatAttachmentPreparer,
+    private val compressor: ChatContextCompressor,
     private val questionId: Long?,
 
     /** 从对话记录进来时直接指定会话；null = 新开或按题目定位。 */
@@ -213,6 +231,9 @@ class ChatViewModel(
                 _state.value = current.copy(
                     loading = false,
                     messages = messages,
+                    // 摘要消息是真实消息，observeMessages 会带上它；
+                    // 有它在 state 里就标记 summaryActive，输入栏才显示提示条。
+                    summaryActive = messages.any { it.isSummary() },
                     streamingMessageId = if (committedStream != null) null else current.streamingMessageId,
                     streamingContent = if (committedStream != null) null else current.streamingContent,
                     canRetry = messages.lastOrNull()?.status == MessageStatus.FAILED
@@ -221,6 +242,10 @@ class ChatViewModel(
             }
         }
     }
+
+    /** 上下文压缩的摘要消息判定：与 ChatContextCompressor 同一口径。 */
+    private fun ChatMessage.isSummary(): Boolean =
+        role == ChatRole.SYSTEM && content.startsWith(ChatContextAssembler.SUMMARY_PREFIX)
 
     /**
      * 把用户消息里的图片读成 data URL，供气泡显示。
@@ -347,10 +372,49 @@ class ChatViewModel(
             truncated = false
         )
 
+        // **自动压缩**：这一轮的上下文已经被 assembler 丢过旧轮次
+        // （omittedCount > 0），而会话里还没有摘要——现在补一份，
+        // 下一轮请求就能靠摘要续上被丢掉的内容。
+        // 异步跑、不 join：压缩结果只影响下一次请求，没道理让这一轮等它。
+        // 日常短会话不触发——自动压缩是安全网，不是规划。
+        if (context.omittedCount > 0 && !_state.value.summaryActive) {
+            viewModelScope.launch { compressContext() }
+        }
+
         val job = viewModelScope.launch { collectStream(profile, context.messages, assistantId) }
         streamJob = job
         job.join()
         streamJob = null
+    }
+
+    /**
+     * 手动/自动压缩上下文：把旧轮次滚成一份摘要。
+     *
+     * 失败静默——压缩只是增强，失败不该打断用户。
+     * 进行中连点直接返回，避免生成多份互相覆盖的摘要。
+     */
+    fun compressContext() {
+        val sessionId = _state.value.sessionId
+        if (sessionId == 0L || _state.value.compressing) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(compressing = true)
+            try {
+                val profile = settingsStore.settings.first().activeProfile
+                val summary = if (profile != null) {
+                    compressor.compress(sessionId, profile)
+                } else {
+                    null
+                }
+                _state.value = _state.value.copy(
+                    compressing = false,
+                    summaryActive = summary != null || _state.value.summaryActive
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (t: Throwable) {
+                _state.value = _state.value.copy(compressing = false)
+            }
+        }
     }
 
     /**
@@ -445,6 +509,11 @@ class ChatViewModel(
                     is ChatStreamEvent.Done -> {
                         promptTokens = event.promptTokens
                         completionTokens = event.completionTokens
+                        // 输入 token 数是用户唯一能看到的「上下文占用」口径，
+                        // 输到 state 上，输入栏显示「上次请求 ≈ N tokens」。
+                        if (event.promptTokens > 0) {
+                            _state.value = _state.value.copy(lastPromptTokens = event.promptTokens)
+                        }
                         // 用量记账放在这里而不是 Done 事件的发送方：一次对话
                         // （无论流式还是降级非流式）收到且仅收到一次 Done，
                         // 天然就是「一次调用」的口径。失败 / 取消不会到这儿。

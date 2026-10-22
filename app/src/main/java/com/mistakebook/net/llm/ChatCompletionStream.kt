@@ -4,6 +4,7 @@ import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.net.ApiError
 import com.mistakebook.net.ApiErrorKind
+import com.mistakebook.net.ApiResult
 import com.mistakebook.net.HttpFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
@@ -235,6 +236,30 @@ class ChatCompletionStream(
             val cachedTokens: Int = 0
         ) : RawEvent
         data class Failed(val error: ApiError) : RawEvent
+    }
+
+    // ------------------------------------------------------------ 一次性非流式
+
+    /**
+     * 一次性非流式对话，拿完整文本。
+     *
+     * 给**内部辅助场景**用（上下文压缩的摘要生成）：那种场景不需要流式，
+     * 也没有 UI 在等增量。走 [nonStreaming] 的同一条路，错误同样不抛到
+     * 调用方，只是包成 [ApiResult]。
+     */
+    suspend fun completeOnce(profile: LlmProfile, request: ChatRequest): ApiResult<String> {
+        val text = StringBuilder()
+        var error: ApiError? = null
+        nonStreaming(profile, request.copy(stream = false), deltasAlreadyEmitted = 0, null)
+            .collect { event ->
+                when (event) {
+                    is ChatStreamEvent.Delta -> text.append(event.text)
+                    is ChatStreamEvent.Failed -> error = event.error
+                    else -> Unit
+                }
+            }
+        error?.let { return ApiResult.Failure(it) }
+        return ApiResult.Success(text.toString())
     }
 
     // ------------------------------------------------------------ 流式

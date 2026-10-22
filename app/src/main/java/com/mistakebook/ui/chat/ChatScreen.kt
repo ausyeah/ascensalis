@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -73,6 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import com.mistakebook.R
+import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.ChatRole
@@ -135,6 +137,7 @@ fun ChatScreen(
             settingsStore = c.settingsStore,
             usageStatsStore = c.usageStatsStore,
             preparer = c.chatAttachmentPreparer,
+            compressor = c.chatContextCompressor,
             questionId = questionId,
             sessionId = sessionId
         )
@@ -428,6 +431,18 @@ fun ChatScreen(
                 }
             }
 
+            // 上下文状态条：摘要生效提示 + 上次请求 token 数 + 手动压缩入口。
+            // 只在「有摘要」或「问过一轮」后出现，空会话不占地方。
+            if (state.summaryActive || state.lastPromptTokens > 0) {
+                ContextStatusRow(
+                    summaryActive = state.summaryActive,
+                    compressing = state.compressing,
+                    lastPromptTokens = state.lastPromptTokens,
+                    onCompress = viewModel::compressContext
+                )
+                Spacer(Modifier.height(4.dp))
+            }
+
             ChatInputBar(
                 text = state.input,
                 streaming = state.isStreaming,
@@ -525,6 +540,62 @@ private fun OmittedNoticeRow(count: Int) {
     }
 }
 
+/**
+ * 输入栏上方的上下文状态条。
+ *
+ * 显示两件事：**摘要是否生效**、**上次请求的输入 token 数**。
+ * 后者是用户唯一能看到的上下文占用口径——不显示的话，
+ * 「AI 开始失忆」和「请求里有 60K token」之间用户没有任何感知手段。
+ * 压缩按钮常驻：自动压缩是安全网，用户想主动整理时随时可以按。
+ */
+@Composable
+private fun ContextStatusRow(
+    summaryActive: Boolean,
+    compressing: Boolean,
+    lastPromptTokens: Int,
+    onCompress: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            if (summaryActive) {
+                Text(
+                    text = stringResource(R.string.chat_summary_active),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            if (lastPromptTokens > 0) {
+                Text(
+                    text = stringResource(R.string.chat_last_prompt_tokens, lastPromptTokens),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (compressing) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+        }
+        TextButton(onClick = onCompress, enabled = !compressing) {
+            Icon(
+                Icons.Default.Compress,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = stringResource(R.string.chat_compress),
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+    }
+}
+
 @Composable
 private fun MessageBubble(
     message: ChatMessage,
@@ -537,6 +608,35 @@ private fun MessageBubble(
 ) {
     val isUser = message.role == ChatRole.USER
     val isInjected = message.injected
+
+    // 上下文压缩的摘要：渲染成居中的低调提示条。
+    // 压缩不是幕后动作——用户有权知道模型现在「记得」的是什么。
+    val isSummary = message.role == ChatRole.SYSTEM &&
+        message.content.startsWith(ChatContextAssembler.SUMMARY_PREFIX)
+    if (isSummary) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = stringResource(R.string.chat_summary_bubble_title),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(Modifier.height(4.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text(
+                    text = message.content.removePrefix(ChatContextAssembler.SUMMARY_PREFIX).trim(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+        }
+        return
+    }
 
     // 题目上下文那条是给模型看的，用一条低调的分隔样式展示，
     // 免得用户以为 AI 莫名其妙先说了一段。

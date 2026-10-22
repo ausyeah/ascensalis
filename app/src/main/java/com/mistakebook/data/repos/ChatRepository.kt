@@ -354,12 +354,21 @@ class ChatRepository(
         // 失败的、取消的消息**都保留**：它们的内容是有效的对话上下文。
         // 整条剔除会让模型看到「用户问了什么」却看不到「已经答到哪」，
         // 于是换个说法把同一段重讲一遍。
-        val history = chatDao.messagesExcludingInjected(sessionId).map { it.toOutgoing() }
+        val raw = chatDao.messagesExcludingInjected(sessionId)
+        // 上下文压缩的产物是一条 SYSTEM 摘要消息：从历史里摘出来单独传，
+        // 不留在 history 里（assembler 反正也会滤掉 SYSTEM，这里先行提取
+        // 是为了拿到文本）。
+        val summaryMessage = raw.firstOrNull {
+            it.role == ChatRole.SYSTEM &&
+                it.content.startsWith(ChatContextAssembler.SUMMARY_PREFIX)
+        }
+        val history = raw.filterNot { it.id == summaryMessage?.id }.map { it.toOutgoing() }
         return ChatContextAssembler.assemble(
             systemPrompt = ChatPrompts.SYSTEM,
             questionContext = systemContext,
             history = history,
-            pendingText = pendingText
+            pendingText = pendingText,
+            summary = summaryMessage?.content.orEmpty()
         )
     }
 

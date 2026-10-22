@@ -171,6 +171,14 @@ class AppContainer(context: Context) {
         com.mistakebook.data.chat.ChatAttachmentPreparer(appContext, files)
     }
 
+    /**
+     * 会话上下文压缩器：旧轮次滚成摘要，长对话不再「越聊越失忆」。
+     * 与 chatCompletionStream 共享同一个实例（内部各自派生 HTTP 配置，无冲突）。
+     */
+    val chatContextCompressor: com.mistakebook.data.chat.ChatContextCompressor by lazy {
+        com.mistakebook.data.chat.ChatContextCompressor(database.chatDao(), chatCompletionStream)
+    }
+
     val recognitionEngine: RecognitionEngine by lazy {
         RecognitionEngine(
             taskRepository = captureTaskRepository,

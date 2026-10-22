@@ -384,6 +384,12 @@
     <string name="chat_untitled">未命名对话</string>
 
     <string name="chat_omitted_notice">已省略 %1$d 条早期对话</string>
+
+    <!-- 上下文压缩 -->
+    <string name="chat_summary_active">上文摘要生效中</string>
+    <string name="chat_summary_bubble_title">上文摘要</string>
+    <string name="chat_last_prompt_tokens">上次请求 ≈ %1$d tokens</string>
+    <string name="chat_compress">压缩</string>
     <string name="chat_truncated_title">回答超长被截断</string>
     <string name="chat_truncated_body">回答达到了长度上限。可以让它「简短一点」，或换一个上下文更长的模型。</string>
     <string name="chat_truncated_badge">已截断</string>
