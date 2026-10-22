@@ -398,6 +398,7 @@
     <string name="chat_summary_bubble_title">上文摘要</string>
     <string name="chat_last_prompt_tokens">上次请求 ≈ %1$d tokens</string>
     <string name="chat_compress">压缩</string>
+    <string name="chat_ocr_retry">重试</string>
     <string name="chat_truncated_title">回答超长被截断</string>
     <string name="chat_truncated_body">回答达到了长度上限。可以让它「简短一点」，或换一个上下文更长的模型。</string>
     <string name="chat_truncated_badge">已截断</string>
@@ -471,6 +472,7 @@
     <!-- ========== 双核主页与背单词模块 ========== -->
     <string name="portal_mistake_book">错题本</string>
     <string name="portal_word_book">背单词</string>
+    <string name="portal_pomodoro">番茄钟</string>
     <string name="wordbook_tab_study">学习刷题</string>
     <string name="wordbook_tab_wrong">错题本</string>
     <string name="wordbook_tab_library">词库检索</string>

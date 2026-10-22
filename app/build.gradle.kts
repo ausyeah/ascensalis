@@ -81,9 +81,9 @@ android {
         applicationId = "com.mistakebook$appIdSuffix"
         minSdk = 26
         targetSdk = 35
-        // versionCode 必须单调递增：1 = v0.0.1, 2 = v0.0.2, 3 = v0.0.3, 4 = v0.0.4, 5 = v0.0.5, 6 = v0.0.6, 7 = v0.0.7, 8 = v0.0.8, 9 = v0.0.9, 10 = v0.0.10, 11 = v0.0.11, 12 = v0.0.12, 13 = v0.0.13, 14 = v0.0.14, 15 = v0.0.15, 16 = v0.0.16
-        versionCode = 16
-        versionName = "0.0.16"
+        // versionCode 必须单调递增：1 = v0.0.1, 2 = v0.0.2, 3 = v0.0.3, 4 = v0.0.4, 5 = v0.0.5, 6 = v0.0.6, 7 = v0.0.7, 8 = v0.0.8, 9 = v0.0.9, 10 = v0.0.10, 11 = v0.0.11, 12 = v0.0.12, 13 = v0.0.13, 14 = v0.0.14, 15 = v0.0.15, 16 = v0.0.16, 17 = v0.0.17, 18 = v0.0.18, 19 = v0.0.19
+        versionCode = 19
+        versionName = "0.0.19"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -202,7 +202,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
 
     // ===== Compose（BOM 2024.10.01）=====
-    val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
+    val composeBom = platform("androidx.compose:compose-bom:2025.05.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")

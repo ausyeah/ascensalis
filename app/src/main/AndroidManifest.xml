@@ -5,6 +5,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 番茄钟：息屏/切走后计时必须继续，只能靠前台服务。
+         Android 14 起 startForeground() 必须声明类型，漏了直接抛
+         MissingForegroundServiceTypeException。番茄一跑 25 分钟以上，
+         shortService（约 3 分钟上限）不够用，所以用 specialUse。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <uses-feature
         android:name="android.hardware.camera.any"
@@ -43,6 +49,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".pomodoro.PomodoroService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="番茄钟专注计时：用户主动开始后需在锁屏与切换应用期间持续计时" />
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -150,7 +150,7 @@ object MarkdownParser {
                     }
                 }
 
-                line.matches(Regex("^\\s*[-*_]{3,}\\s*$")) -> {
+                line.matches(RULE_REGEX) -> {
                     flushParagraph()
                     blocks += Block.Rule
                 }
@@ -173,7 +173,7 @@ object MarkdownParser {
 
                 isImageLine(line) -> {
                     flushParagraph()
-                    val match = Regex("!\\[([^\\]]*)\\]\\(([^)]+)\\)").find(line)
+                    val match = IMAGE_LINE_REGEX.find(line)
                     if (match != null) {
                         blocks += Block.Image(match.groupValues[2].trim(), match.groupValues[1])
                     }
@@ -222,10 +222,21 @@ object MarkdownParser {
     }
 
     private fun isListItem(line: String): Boolean =
-        Regex("^\\s*([-*+]|\\d+[.)])\\s+").containsMatchIn(line)
+        LIST_ITEM_REGEX.containsMatchIn(line)
 
     private fun isImageLine(line: String): Boolean =
-        Regex("^\\s*!\\[[^\\]]*\\]\\([^)]+\\)\\s*$").containsMatchIn(line)
+        IMAGE_LINE_REGEX.containsMatchIn(line)
+
+    /**
+     * 这几个正则**必须在顶层编译一次**。
+     *
+     * 它们对**每一行**都要跑一次。写在函数体里时，一篇 300 行的回答
+     * 就是上千次正则编译——而流式输出每 120ms 重解析一次整篇，
+     * 主线程直接被正则编译吃满，滚动和打字一起掉帧。
+     */
+    private val LIST_ITEM_REGEX = Regex("^\\s*([-*+]|\\d+[.)])\\s+")
+    private val IMAGE_LINE_REGEX = Regex("^\\s*!\\[[^\\]]*\\]\\(([^)]+)\\)\\s*$")
+    private val RULE_REGEX = Regex("^\\s*[-*_]{3,}\\s*$")
 
     private fun isPipeTableRow(line: String): Boolean =
         line.trimStart().startsWith("|") && line.trimEnd().endsWith("|") &&

@@ -363,7 +363,16 @@ fun HomeScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(displayQuestions, key = { it.id }) { question ->
+                    // 当天日期在**整个列表范围内**算一次即可。
+                    // 注意这里不能用 remember：LazyColumn 的 content 是
+                    // LazyListScope，不是 @Composable 上下文。
+                    val todayEpochDay = java.time.LocalDate.now().toEpochDay()
+
+                    items(
+                        items = displayQuestions,
+                        key = { it.id },
+                        contentType = { "question" }
+                    ) { question ->
                         // 原来这里对每道题都 firstOrNull 线性扫一遍 subjects。
                         // 列表几十项、每次重组都扫，改成外面建好的 Map 直接查。
                         val subjectName = subjectNames[question.subjectId]
@@ -373,7 +382,7 @@ fun HomeScreen(
                             modifier = Modifier.animateItem(),
                             question = question,
                             subjectName = subjectName,
-                            dueToday = state.dueCount > 0 && isDue(question),
+                            dueToday = state.dueCount > 0 && isDue(question, todayEpochDay),
                             dragging = draggedQuestionId == question.id,
                             onReorderStart = { beginQuestionDrag(question.id) },
                             onReorder = ::updateQuestionDrag,
@@ -501,10 +510,17 @@ fun HomeScreen(
     }
 }
 
-private fun isDue(question: Question): Boolean {
+/**
+ * 是否到期。
+ *
+ * `todayEpochDay` **必须由调用方传入**：原来这里直接调 `LocalDate.now()`，
+ * 而它在**每个列表项每次重组**时都会跑一遍时区与日历计算——
+ * 一屏 8 条、滚动时每帧都算 8 次，纯属浪费。
+ */
+private fun isDue(question: Question, todayEpochDay: Long): Boolean {
     val next = question.nextReviewAt ?: return false
     return question.status != com.mistakebook.domain.MasteryStatus.MASTERED &&
-        next <= java.time.LocalDate.now().toEpochDay()
+        next <= todayEpochDay
 }
 
 @Composable

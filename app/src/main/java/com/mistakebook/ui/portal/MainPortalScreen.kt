@@ -17,8 +17,12 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Book
-import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.outlined.Book
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Print
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Translate
@@ -30,6 +34,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,7 +54,7 @@ import com.mistakebook.wordbook.ui.WordbookScreen
 import kotlinx.coroutines.launch
 
 /**
- * 主门户界面：支持纸质化风格双核切换（0: 错题本, 1: 背单词，支持左右滑动手势切换）。
+ * 主门户界面：三核切换（0: 错题本, 1: 背单词, 2: 番茄钟），支持左右滑动手势。
  */
 @Composable
 fun MainPortalScreen(
@@ -66,11 +73,14 @@ fun MainPortalScreen(
     onOpenQuestion: (Long) -> Unit,
     onOpenChatList: () -> Unit = {}
 ) {
-    val pagerState = rememberPagerState(initialPage = 0) { 2 }
+    val pagerState = rememberPagerState(initialPage = 0) { 3 }
     val scope = rememberCoroutineScope()
+    // 翻页过程中 currentPage 会连续变化，直接读它会让**整个顶栏逐帧重组**
+    // （标题 + 分段控件 + 三个图标）。用 derivedStateOf 收敛成「真正变了才发」。
+    val currentPage = remember { derivedStateOf { pagerState.currentPage } }.value
 
     // 当用户处于背单词页 (page 1) 时，拦截返回键平滑回到错题本首页 (page 0)，防止误触直接退出应用
-    BackHandler(enabled = pagerState.currentPage != 0) {
+    BackHandler(enabled = currentPage != 0) {
         scope.launch {
             pagerState.animateScrollToPage(0)
         }
@@ -98,15 +108,19 @@ fun MainPortalScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (pagerState.currentPage == 0) "错题本" else "单词书",
+                        text = when (currentPage) {
+                            0 -> stringResource(R.string.portal_mistake_book)
+                            1 -> stringResource(R.string.portal_word_book)
+                            else -> stringResource(R.string.portal_pomodoro)
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.width(68.dp)
+                        modifier = Modifier.width(72.dp)
                     )
 
                     PortalSegmentedControl(
-                        selectedIndex = pagerState.currentPage,
+                        selectedIndex = currentPage,
                         onSelectIndex = { index ->
                             scope.launch {
                                 pagerState.animateScrollToPage(index)
@@ -119,10 +133,10 @@ fun MainPortalScreen(
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (pagerState.currentPage == 0) {
+                        if (currentPage == 0) {
                             IconButton(onClick = onOpenPrint, modifier = Modifier.size(36.dp)) {
                                 Icon(
-                                    imageVector = Icons.Default.Print,
+                                    imageVector = Icons.Outlined.Print,
                                     contentDescription = stringResource(R.string.home_action_print),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(20.dp)
@@ -130,7 +144,7 @@ fun MainPortalScreen(
                             }
                             IconButton(onClick = onOpenChatList, modifier = Modifier.size(36.dp)) {
                                 Icon(
-                                    imageVector = Icons.Default.Forum,
+                                    imageVector = Icons.Outlined.Forum,
                                     contentDescription = stringResource(R.string.chat_list_title),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(20.dp)
@@ -139,7 +153,7 @@ fun MainPortalScreen(
                         }
                         IconButton(onClick = onOpenSettings, modifier = Modifier.size(36.dp)) {
                             Icon(
-                                imageVector = Icons.Default.Settings,
+                                imageVector = Icons.Outlined.Settings,
                                 contentDescription = stringResource(R.string.home_action_settings),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
@@ -180,6 +194,11 @@ fun MainPortalScreen(
                         container = container
                     )
                 }
+                2 -> {
+                    com.mistakebook.pomodoro.PomodoroScreen(
+                        container = container
+                    )
+                }
             }
         }
     }
@@ -205,16 +224,23 @@ private fun PortalSegmentedControl(
         ) {
             PortalTabItem(
                 title = stringResource(R.string.portal_mistake_book),
-                icon = Icons.Default.Book,
+                icon = Icons.Outlined.Book,
                 isSelected = selectedIndex == 0,
                 onClick = { onSelectIndex(0) }
             )
             Spacer(Modifier.width(4.dp))
             PortalTabItem(
                 title = stringResource(R.string.portal_word_book),
-                icon = Icons.Default.Translate,
+                icon = Icons.Outlined.Translate,
                 isSelected = selectedIndex == 1,
                 onClick = { onSelectIndex(1) }
+            )
+            Spacer(Modifier.width(4.dp))
+            PortalTabItem(
+                title = stringResource(R.string.portal_pomodoro),
+                icon = Icons.Outlined.Timer,
+                isSelected = selectedIndex == 2,
+                onClick = { onSelectIndex(2) }
             )
         }
     }

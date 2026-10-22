@@ -23,6 +23,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -142,6 +144,29 @@ class AppContainer(context: Context) {
 
     val wordbookDatabase: com.mistakebook.wordbook.data.WordbookDatabase by lazy {
         com.mistakebook.wordbook.data.WordbookDatabase.build(appContext)
+    }
+
+    val pomodoroDao: com.mistakebook.data.local.PomodoroDao by lazy {
+        database.pomodoroDao()
+    }
+
+    /**
+     * 番茄钟计时核心：全局单例。
+     *
+     * 必须是单例——计时状态活在它里面，页面重建（旋转、切 Tab）时
+     * 计时不能跟着重置。
+     */
+    val pomodoroTimer: com.mistakebook.pomodoro.PomodoroTimer by lazy {
+        com.mistakebook.pomodoro.PomodoroTimer(appContext)
+    }
+
+    /** 学科列表（番茄钟任务挂在学科下，与错题本共用一套学科）。 */
+    val subjectsFlow: kotlinx.coroutines.flow.StateFlow<List<com.mistakebook.data.local.entities.Subject>> by lazy {
+        database.subjectDao().observeAll().stateIn(
+            appScope,
+            kotlinx.coroutines.flow.SharingStarted.Eagerly,
+            emptyList()
+        )
     }
 
     val wordbookDao: com.mistakebook.wordbook.data.WordbookDao by lazy {

@@ -31,19 +31,31 @@ val PaperOkBg = Color(0xFFF2FBF5)            // 答对暖绿底
 val PaperBad = Color(0xFFC92A2A)             // 答错红
 val PaperBadBg = Color(0xFFFFF4F2)           // 答错暖红底
 
-// 深色墨砚纸质模式（Dark Ink Paper）
-val PaperBgDark = Color(0xFF19181D)          // 深邃砚黑底色
-val PaperCardDark = Color(0xFF24232C)        // 乌木深墨卡片
-val PaperBorderDark = Color(0xFF383542)      // 暗调纸张边框线
-val PaperTextPrimaryDark = Color(0xFFECE9E2) // 柔和月白文字（避免刺眼）
-val PaperTextSecondaryDark = Color(0xFFB0ABA0)
-val PaperTextMutedDark = Color(0xFF8E8A98)   // 暗调辅助文字
-val PaperPrimaryDarkTheme = Color(0xFF748FFC)// 夜读亮靛蓝
-val PaperPrimaryTintDark = Color(0xFF26335C)
-val PaperOkDark = Color(0xFF51CF66)
-val PaperOkBgDark = Color(0xFF193324)
-val PaperBadDark = Color(0xFFFF6B6B)
-val PaperBadBgDark = Color(0xFF3D1C1C)
+// 深色模式（中性石墨 + 单一暖琥珀）
+//
+// ## 为什么不再是蓝紫系
+//
+// 旧版深色的底是偏紫的 #19181D、强调色是饱和亮靛蓝 #748FFC。
+// 在 OLED 上，高饱和蓝紫与近黑背景的亮度反差过大，长时间直视
+// 大号文字与卡片边缘会产生光晕与视觉振动；而这个 App 绝大多数
+// 使用场景正是夜间。
+//
+// 现在换成 M3 深色规范里的写法：surface 取 tone 10 附近的**中性石墨**
+// （带一点点暖，避免死灰发青），强调色只在 tone 80 附近取**一个**
+// 暖琥珀，其余一律走中性灰阶——全屏最多一个强调色，不铺渐变、
+// 不用第二组彩色。
+val PaperBgDark = Color(0xFF121212)          // 近黑石墨底
+val PaperCardDark = Color(0xFF1C1C1C)        // 石墨卡片（tone 12）
+val PaperBorderDark = Color(0xFF3A3733)      // 微暖分隔线，不用冷灰
+val PaperTextPrimaryDark = Color(0xFFEDEAE5) // 暖白正文
+val PaperTextSecondaryDark = Color(0xFFC4BFB6)
+val PaperTextMutedDark = Color(0xFF8A857D)   // 中性暖灰辅助文字
+val PaperPrimaryDarkTheme = Color(0xFFE9B95C)// 唯一强调色：暖琥珀（tone 80）
+val PaperPrimaryTintDark = Color(0xFF3D2F12) // 琥珀容器（tone 20）
+val PaperOkDark = Color(0xFF74C476)          // 柔和竹绿
+val PaperOkBgDark = Color(0xFF1E2E20)
+val PaperBadDark = Color(0xFFE8907F)         // 柔暖陶土红，不用荧光红
+val PaperBadBgDark = Color(0xFF3A211C)
 
 // 兼容既有错题本模块的色值别名（映射到全新纸质化设计）
 val BrandBlue = PaperPrimary

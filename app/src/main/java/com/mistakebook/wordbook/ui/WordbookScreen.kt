@@ -479,8 +479,12 @@ private fun StudyView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    // 圆角按「外大内小」的层级：容器 28 / 卡片 16 / 卡内元素 8~12。
+                    // 原来是 20，与内部 chip 的 12 太接近，两层边界糊在一起。
+                    shape = RoundedCornerShape(16.dp),
+                    // 不用阴影：深色下阴影几乎不可见，浅色下这点 2dp 只会让卡片
+                    // 边缘发灰。层级交给容器色阶与 1dp 描边表达。
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
                 ) {

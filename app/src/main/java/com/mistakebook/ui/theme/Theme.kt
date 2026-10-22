@@ -40,43 +40,62 @@ private val PaperLightColors = lightColorScheme(
 // 深色墨砚夜读模式（Dark Ink Paper）
 private val PaperDarkColors = darkColorScheme(
     primary = PaperPrimaryDarkTheme,
-    onPrimary = Color(0xFF141930),
+    // 琥珀是高亮色，上面的字必须压到近黑的暖棕才够对比度
+    onPrimary = Color(0xFF2A1F06),
     primaryContainer = PaperPrimaryTintDark,
-    onPrimaryContainer = Color(0xFFD6DEFC),
+    onPrimaryContainer = Color(0xFFF0DDB4),
     secondary = PaperTextSecondaryDark,
-    onSecondary = Color.White,
+    onSecondary = Color(0xFF2A1F06),
     background = PaperBgDark,
     onBackground = PaperTextPrimaryDark,
     surface = PaperCardDark,
     onSurface = PaperTextPrimaryDark,
-    surfaceVariant = Color(0xFF2C2B35),
+    // 容器色阶按 M3 的 tone 递进（12 / 16 / 22 / 28），
+    // 制造层次而不是靠阴影——深色下阴影几乎看不见
+    surfaceContainerLowest = Color(0xFF0C0C0C),
+    surfaceContainerLow = Color(0xFF161616),
+    surfaceContainer = Color(0xFF1C1C1C),
+    surfaceContainerHigh = Color(0xFF262523),
+    surfaceContainerHighest = Color(0xFF31302D),
+    surfaceVariant = Color(0xFF262523),
     onSurfaceVariant = PaperTextMutedDark,
     outline = PaperBorderDark,
+    outlineVariant = Color(0xFF2A2825),
     error = PaperBadDark,
-    onError = Color.White
+    onError = Color(0xFF3A211C)
 )
 
+/**
+ * 排版。
+ *
+ * 两条硬规则：
+ * 1. **中文行高要比英文再松一档**。M3 把中/日/韩归为「较高文字」，
+ *    正文行高至少 1.4 倍字号才不挤——中文没有西文的下伸部留白，
+ *    按英文规范排会显得糊成一片。
+ * 2. **字号越大，字距越紧**。大标题若沿用正文的字距会松散得像没排过版，
+ *    display 级收 -0.25~-0.5sp 是排版的常识，不是风格选择。
+ */
 private val MistakeBookTypography = Typography(
     titleLarge = TextStyle(
         fontWeight = FontWeight.Bold,
         fontSize = 20.sp,
-        lineHeight = 26.sp,
-        letterSpacing = 0.02.sp
+        lineHeight = 28.sp,
+        letterSpacing = (-0.2).sp
     ),
     titleMedium = TextStyle(
         fontWeight = FontWeight.SemiBold,
         fontSize = 16.sp,
-        lineHeight = 22.sp,
-        letterSpacing = 0.02.sp
+        lineHeight = 24.sp,
+        letterSpacing = 0.sp
     ),
     bodyLarge = TextStyle(
         fontSize = 16.sp,
-        lineHeight = 24.sp,
+        lineHeight = 26.sp,
         letterSpacing = 0.01.sp
     ),
     bodyMedium = TextStyle(
         fontSize = 14.sp,
-        lineHeight = 21.sp
+        lineHeight = 22.sp
     ),
     bodySmall = TextStyle(
         fontSize = 12.sp,
@@ -85,11 +104,18 @@ private val MistakeBookTypography = Typography(
     labelLarge = TextStyle(
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
-        lineHeight = 18.sp
+        lineHeight = 20.sp
     ),
     labelSmall = TextStyle(
         fontSize = 11.sp,
-        lineHeight = 15.sp
+        lineHeight = 16.sp
+    ),
+    // 番茄钟与统计里的大数字：等宽字形（tnum）让每秒跳动的数字不左右抖
+    displayLarge = TextStyle(
+        fontSize = 57.sp,
+        lineHeight = 64.sp,
+        letterSpacing = (-0.25).sp,
+        fontFeatureSettings = "tnum"
     )
 )
 

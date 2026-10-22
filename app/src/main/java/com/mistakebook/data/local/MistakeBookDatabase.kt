@@ -10,6 +10,8 @@ import com.mistakebook.data.local.entities.ChatAttachment
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.local.entities.ChatSession
 import com.mistakebook.data.local.entities.Notebook
+import com.mistakebook.data.local.entities.PomodoroSession
+import com.mistakebook.data.local.entities.PomodoroTask
 import com.mistakebook.data.local.entities.Question
 import com.mistakebook.data.local.entities.QuestionTagCrossRef
 import com.mistakebook.data.local.entities.ReviewLog
@@ -27,9 +29,11 @@ import com.mistakebook.data.local.entities.Tag
         Notebook::class,
         ChatSession::class,
         ChatMessage::class,
-        ChatAttachment::class
+        ChatAttachment::class,
+        PomodoroTask::class,
+        PomodoroSession::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -48,6 +52,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
     abstract fun notebookDao(): NotebookDao
 
     abstract fun chatDao(): ChatDao
+
+    abstract fun pomodoroDao(): PomodoroDao
 
     companion object {
         const val DB_NAME = "mistake_book.db"
@@ -193,6 +199,62 @@ abstract class MistakeBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 3 → 4：新增番茄钟两张表（任务 + 会话明细）。
+         *
+         * 建表 SQL 与实体定义**逐字对应**（列名、类型、可空性、索引名、
+         * 外键动作），否则 Room 的 schema 校验会直接失败。
+         * 任务表外键指向已有 `subjects`：学科复用错题本那套，不另起炉灶。
+         */
+        private val SQL_CREATE_POMODORO_TASKS = """
+            CREATE TABLE IF NOT EXISTS `pomodoro_tasks` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `name` TEXT NOT NULL,
+                `subjectId` INTEGER,
+                `archived` INTEGER NOT NULL,
+                `sortOrder` INTEGER NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                FOREIGN KEY(`subjectId`) REFERENCES `subjects`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL
+            )
+        """.trimIndent()
+
+        private val SQL_CREATE_POMODORO_SESSIONS = """
+            CREATE TABLE IF NOT EXISTS `pomodoro_sessions` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `taskId` INTEGER NOT NULL,
+                `mode` TEXT NOT NULL,
+                `day` TEXT NOT NULL,
+                `startedAt` INTEGER NOT NULL,
+                `endedAt` INTEGER NOT NULL,
+                `durationSec` INTEGER NOT NULL,
+                `targetSec` INTEGER NOT NULL,
+                `completed` INTEGER NOT NULL,
+                FOREIGN KEY(`taskId`) REFERENCES `pomodoro_tasks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+        """.trimIndent()
+
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(SQL_CREATE_POMODORO_TASKS)
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_pomodoro_tasks_subjectId` ON `pomodoro_tasks` (`subjectId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_pomodoro_tasks_sortOrder` ON `pomodoro_tasks` (`sortOrder`)"
+                )
+                db.execSQL(SQL_CREATE_POMODORO_SESSIONS)
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_pomodoro_sessions_taskId` ON `pomodoro_sessions` (`taskId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_pomodoro_sessions_day` ON `pomodoro_sessions` (`day`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_pomodoro_sessions_startedAt` ON `pomodoro_sessions` (`startedAt`)"
+                )
+            }
+        }
+
         fun build(context: Context): MistakeBookDatabase =
             Room.databaseBuilder(context, MistakeBookDatabase::class.java, DB_NAME)
                 // 两个都**必须**注册：漏一个，Room 就找不到那条升级路径，
@@ -205,7 +267,7 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                 //
                 // 加新版本时记得两处同步：改上面的 `version`，并在此追加 MIGRATION_n_n+1。
                 // 「定义了但忘了注册」是 Room 最常见也最致命的疏漏。
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }
