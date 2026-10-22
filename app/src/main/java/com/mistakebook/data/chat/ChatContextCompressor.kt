@@ -55,32 +55,14 @@ class ChatContextCompressor(
         if (messages.size <= KEEP_RECENT) return null
 
         val oldSummary = messages.firstOrNull { it.isSummaryMessage() }
-        // 旧摘要本身不参与转录：它的内容已经并进新摘要的提示词里。
-        val candidates = messages.filterNot { it.isSummaryMessage() }
-        val toSummarize = candidates.dropLast(KEEP_RECENT)
+        val toSummarize = CompressorLogic.pickToSummarize(messages, KEEP_RECENT)
         if (toSummarize.isEmpty()) return null
 
-        val transcript = toSummarize.joinToString("\n\n") { message ->
-            val who = if (message.role == ChatRole.USER) "用户" else "助手"
-            val body = message.content.trim().take(MAX_MESSAGE_CHARS)
-            "$who：$body"
-        }
-
-        val prompt = buildString {
-            append("把下面的对话历史压缩成一段连续性摘要，供后续对话续接上下文。\n")
-            append("要求：\n")
-            append("1. 不超过 $SUMMARY_MAX_CHARS 字；\n")
-            append("2. 保留：讨论过的题目与结论、用户明确的约束与偏好、尚未解决的问题；\n")
-            append("3. 略过：寒暄、重复的确认、已经推翻的中间尝试；\n")
-            append("4. 直接输出摘要正文，不要解释你在做什么。\n")
-            if (!oldSummary?.content.isNullOrBlank()) {
-                append("\n【已有摘要，请在其基础上合并更新，不要丢失其中的结论】\n")
-                append(oldSummary!!.content.removePrefix(ChatContextAssembler.SUMMARY_PREFIX).trim())
-                append("\n")
-            }
-            append("\n【对话历史】\n")
-            append(transcript)
-        }
+        val prompt = CompressorLogic.buildPrompt(
+            oldSummary = oldSummary?.content,
+            transcript = CompressorLogic.buildTranscript(toSummarize, MAX_MESSAGE_CHARS),
+            summaryMaxChars = SUMMARY_MAX_CHARS
+        )
 
         val request = ChatRequest(
             model = profile.model,
@@ -153,4 +135,65 @@ class ChatContextCompressor(
         /** 摘要生成的输出 token 预算：400 中文字 + 余量，远到不了截断线。 */
         const val SUMMARY_MAX_TOKENS = 1_024
     }
+}
+
+/**
+ * 压缩器的纯逻辑部分：**无 Android、无网络、无 DAO 依赖，可 JVM 单测**。
+ *
+ * 从 [ChatContextCompressor] 里抽出来，理由和 [ChatContextAssembler] 一样——
+ * 分支策略必须能单测，「选哪些消息进摘要」「转录怎么拼」错了不会报错，
+ * 只会让摘要悄悄丢内容，那种故障只有测试能拦住。
+ */
+internal object CompressorLogic {
+
+    /**
+     * 从全部消息里挑出「这次要压进摘要」的部分。
+     *
+     * - 摘要消息自身不参与（它的内容已经并进提示词）；
+     * - 最近 [keepRecent] 条保留原文，语义最强的上下文不能被压扁；
+     * - 剩下的（更早的轮次）才进摘要。
+     */
+    fun pickToSummarize(messages: List<ChatMessage>, keepRecent: Int): List<ChatMessage> {
+        val candidates = messages.filterNot { message ->
+            message.role == ChatRole.SYSTEM &&
+                message.content.startsWith(ChatContextAssembler.SUMMARY_PREFIX)
+        }
+        if (candidates.size <= keepRecent) return emptyList()
+        return candidates.dropLast(keepRecent)
+    }
+
+    /** 把选中的消息拼成转录文本。单条超长的截断，防止提示词被一条消息撑爆。 */
+    fun buildTranscript(messages: List<ChatMessage>, maxMessageChars: Int): String =
+        messages.joinToString("\n\n") { message ->
+            val who = if (message.role == ChatRole.USER) "用户" else "助手"
+            val body = message.content.trim().take(maxMessageChars)
+            "$who：$body"
+        }
+
+    /**
+     * 拼摘要提示词。
+     *
+     * [oldSummary] 非空时要求模型在旧摘要基础上**合并更新**而不是从零重写——
+     * 这是「滚动摘要」的关键：越滚越省，且更早的结论不会在每次压缩后被洗掉。
+     */
+    fun buildPrompt(oldSummary: String?, transcript: String, summaryMaxChars: Int): String =
+        buildString {
+            append("把下面的对话历史压缩成一段连续性摘要，供后续对话续接上下文。\n")
+            append("要求：\n")
+            append("1. 不超过 $summaryMaxChars 字；\n")
+            append("2. 保留：讨论过的题目与结论、用户明确的约束与偏好、尚未解决的问题；\n")
+            append("3. 略过：寒暄、重复的确认、已经推翻的中间尝试；\n")
+            append("4. 直接输出摘要正文，不要解释你在做什么。\n")
+            val existing = oldSummary
+                ?.removePrefix(ChatContextAssembler.SUMMARY_PREFIX)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+            if (existing != null) {
+                append("\n【已有摘要，请在其基础上合并更新，不要丢失其中的结论】\n")
+                append(existing)
+                append("\n")
+            }
+            append("\n【对话历史】\n")
+            append(transcript)
+        }
 }
