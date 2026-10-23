@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -155,6 +156,46 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 }
             }
         }
+        // 设置页重置了单词数据（清流水 / 清进度）：缓存、历史栈、当前题全部作废，
+        // 按数据库的新现状重载。drop(1) 跳过初始值——init 本身就要做一遍全量载入。
+        viewModelScope.launch {
+            container.wordbookEpoch.drop(1).collect {
+                reloadAfterExternalReset()
+            }
+        }
+    }
+
+    /**
+     * 外部重置（设置页）后的重载。
+     *
+     * 重置有两种口径，但 VM 侧的重载动作完全一样——数据库已经是新现状，
+     * 这里只负责把「内存里那份旧现状」全部丢掉重读：
+     * - 抽词缓存：progressCache / wrongWordsCache 重建；
+     * - 会话状态：历史栈、短期重现队列、冷却窗口清空（旧题引用的进度
+     *   可能已经不存在，留着回退会展示幽灵数据）；
+     * - 当前题：重新抽一道，让界面立刻反映「重来」。
+     */
+    private suspend fun reloadAfterExternalReset() {
+        nextQuestionJob?.cancel()
+        withContext(Dispatchers.IO) {
+            progressCache.clear()
+            progressCache.putAll(dao.observeAllProgress().first().associateBy { it.word })
+            wrongWordsCache = dao.observeWrongBook().first().map { it.word }.toSet()
+        }
+        questionHistory.clear()
+        deferQueue.clear()
+        recentWords.clear()
+        sessionAnswerCount = 0
+        _uiState.update {
+            it.copy(
+                hasPrevious = false,
+                wrongBookList = emptyList(),
+                libraryWords = emptyList()
+            )
+        }
+        refreshWeeklyStats()
+        refreshMonthlyStats()
+        prepareNextQuestion()
     }
 
     /** 修改每日学习目标（去重词数）。设置层会夹紧到合理区间。 */
@@ -366,11 +407,30 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * 切换学习模式：**保持当前单词不变**，也不碰「上一题」历史栈。
+     *
+     * 旧实现切模式时直接 `prepareNextQuestion()`——那是「抽新词」的入口，
+     * 于是出现两个 bug：
+     * 1. 从四选一切到卡片，题目变成了另一个词（用户报「四个模式切换后
+     *    不是同一个单词」）；
+     * 2. 抽新词会把当前这道题压进历史栈，而新题用户根本没做过——
+     *    回退「上一题」看到的是一堆没答过的题，「回去又要重新做」。
+     *
+     * 现在只按新模式**重新呈现当前词**（四选一重抽干扰项、卡片/拼写
+     * 切换展示形态），语义与用户预期一致：换的是考法，不是词。
+     */
     fun setStudyMode(mode: StudyMode) {
-        if (_uiState.value.studyMode != mode) {
-            _uiState.update { it.copy(studyMode = mode) }
+        if (_uiState.value.studyMode == mode) return
+        _uiState.update { it.copy(studyMode = mode) }
+        val current = _uiState.value.currentWord
+        if (current == null) {
+            // 空状态（词库抽完了）才需要真的抽新题
             prepareNextQuestion()
+            return
         }
+        nextQuestionJob?.cancel()
+        nextQuestionJob = viewModelScope.launch { presentWord(current) }
     }
 
     fun setWrongSubTab(subTab: WrongSubTab) {

@@ -40,6 +40,16 @@ interface PomodoroDao {
     @Query("UPDATE pomodoro_tasks SET archived = 1 WHERE id = :id")
     suspend fun archiveTask(id: Long)
 
+    /**
+     * 硬删任务（长按编辑里的「删除」用）。
+     *
+     * 级联由外键负责：pomodoro_sessions.taskId 是 ON DELETE CASCADE，
+     * 任务的会话记录会一起消失。这与「归档」的区别就是**统计一起没**——
+     * 归档保留历史，删除是「这个任务连同它的记录都不该存在」。
+     */
+    @Query("DELETE FROM pomodoro_tasks WHERE id = :id")
+    suspend fun deleteTask(id: Long)
+
     @Query("SELECT COUNT(*) FROM pomodoro_tasks WHERE archived = 0")
     suspend fun activeTaskCount(): Int
 
@@ -131,6 +141,31 @@ interface PomodoroDao {
     @Query("SELECT COALESCE(SUM(durationSec), 0) FROM pomodoro_sessions")
     suspend fun totalSecAll(): Long
 
+    /** 总会话次数（完成率 = completedSessionCount / sessionCountAll）。 */
+    @Query("SELECT COUNT(*) FROM pomodoro_sessions")
+    suspend fun sessionCountAll(): Int
+
+    /**
+     * 按学科聚合的累计专注（学科分布图用）。
+     *
+     * subjectId 为 null 的行是「未分类」任务——不能丢，它们的时长
+     * 也是用户实打实专注出来的。LEFT JOIN 而不是 INNER：某个学科下
+     * 一条记录都没有时也会出现 0 秒行，图上是空槽，布局稳定。
+     */
+    @Query(
+        """
+        SELECT t.subjectId AS subjectId,
+               COALESCE(SUM(s.durationSec), 0) AS sec,
+               COUNT(s.id) AS sessionCount
+        FROM pomodoro_tasks t
+        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id
+        WHERE t.archived = 0
+        GROUP BY t.subjectId
+        ORDER BY sec DESC
+        """
+    )
+    suspend fun subjectTotalsOnce(): List<SubjectTotal>
+
     @Query("SELECT COUNT(*) FROM pomodoro_sessions WHERE completed = 1")
     suspend fun completedSessionCount(): Int
 
@@ -160,6 +195,13 @@ data class DayTotal(
 data class TaskTotal(
     val taskId: Long,
     val taskName: String,
+    val subjectId: Long?,
+    val sec: Long,
+    val sessionCount: Int
+)
+
+/** 按学科聚合结果（subjectId 为 null = 未分类）。 */
+data class SubjectTotal(
     val subjectId: Long?,
     val sec: Long,
     val sessionCount: Int

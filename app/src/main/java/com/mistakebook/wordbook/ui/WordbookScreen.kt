@@ -92,6 +92,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mistakebook.di.AppContainer
+import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.theme.LocalDarkTheme
 import com.mistakebook.ui.theme.PaperBorderLight
@@ -1663,8 +1664,10 @@ private fun StatsView(
 /**
  * 连续打卡 + 每日目标设置（统计页）。
  *
- * 目标用 -5 / +5 步进而不是输入框：手机上开输入框只为改一个数字
- * 太折腾，步进按钮点两下就到位（5 词一档，5~200 词范围）。
+ * 目标用 -/+ 步进而不是输入框：手机上开输入框只为改一个数字
+ * 太折腾，步进按钮点几下就到位（5~500 词范围，步长随档位自适应：
+ * 100 以下 5 一档、200 以下 10 一档、再往上 25 一档——
+ * 否则设到 400 要按 80 下 +）。
  */
 @Composable
 private fun StreakAndGoalCard(
@@ -1731,8 +1734,8 @@ private fun StreakAndGoalCard(
                     )
                 }
                 IconButton(
-                    onClick = { onGoalChange(dailyGoal - GOAL_STEP) },
-                    enabled = dailyGoal > GOAL_STEP
+                    onClick = { onGoalChange(dailyGoal - goalStepFor(dailyGoal)) },
+                    enabled = dailyGoal > SettingsStore.MIN_WORDBOOK_DAILY_GOAL
                 ) {
                     Icon(Icons.Default.Remove, contentDescription = "减少目标")
                 }
@@ -1743,7 +1746,7 @@ private fun StreakAndGoalCard(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.widthIn(min = 40.dp)
                 )
-                IconButton(onClick = { onGoalChange(dailyGoal + GOAL_STEP) }) {
+                IconButton(onClick = { onGoalChange(dailyGoal + goalStepFor(dailyGoal)) }) {
                     Icon(Icons.Default.Add, contentDescription = "增加目标")
                 }
             }
@@ -1774,7 +1777,13 @@ private fun StreakAndGoalCard(
  *
  * 一格一天，7 列按「周一到周日」排（与国内日历习惯一致），
  * 当月 1 号不是周一就在第一行前面留空格。
- * 颜色深浅按当天学过的去重词数分四档，空格表示那天完全没学。
+ *
+ * ## 色阶为什么固定 0–200 而不是按当月最大值归一
+ *
+ * 按 max 归一会让「这个月最多才学 30 词」的月份里，第 10 天就已经
+ * 是最深档——颜色深浅完全取决于别人，跨月不可比，用户看到的就是
+ * 「才 30 个就深得发黑了」。固定刻度后深浅只取决于绝对量：
+ * 1~50 一档、51~100、101~150、150+ 满档，跟每日目标同一条尺子。
  *
  * 用 Box 画而不是 Canvas：颜色档位用 MaterialTheme 取，
  * 深浅色主题自动适配，不用处理 Canvas 里的密度换算。
@@ -1784,13 +1793,12 @@ private fun MonthlyHeatmapCard(days: List<DayStat>) {
     val primary = MaterialTheme.colorScheme.primary
     val outline = MaterialTheme.colorScheme.outline
 
-    fun heatColor(count: Int, max: Int): Color {
+    fun heatColor(count: Int): Color {
         if (count <= 0) return outline.copy(alpha = 0.22f)
-        val ratio = count.toFloat() / max.coerceAtLeast(1)
         return when {
-            ratio <= 0.25f -> primary.copy(alpha = 0.28f)
-            ratio <= 0.5f -> primary.copy(alpha = 0.50f)
-            ratio <= 0.75f -> primary.copy(alpha = 0.72f)
+            count <= HEATMAP_SCALE_MAX / 4 -> primary.copy(alpha = 0.28f)
+            count <= HEATMAP_SCALE_MAX / 2 -> primary.copy(alpha = 0.50f)
+            count <= HEATMAP_SCALE_MAX * 3 / 4 -> primary.copy(alpha = 0.72f)
             else -> primary
         }
     }
@@ -1839,11 +1847,12 @@ private fun MonthlyHeatmapCard(days: List<DayStat>) {
             }
             Spacer(Modifier.height(6.dp))
 
-            val maxCount = days.maxOfOrNull { it.studiedCount }?.coerceAtLeast(1) ?: 1
             // Calendar.DAY_OF_WEEK：周日=1 … 周六=7；转成「周一=0」的偏移
             val firstWeekday = (java.util.Calendar.getInstance().apply {
                 timeInMillis = days.first().dayMs
             }.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7
+            // 固定色阶：当月学得再多也按 0–200 这条尺子量，
+            // 跨月可比、与每日目标同口径（见 MonthlyHeatmapCard 注释）。
             val cells: List<DayStat?> = List(firstWeekday) { null } + days
 
             cells.chunked(7).forEach { week ->
@@ -1857,7 +1866,7 @@ private fun MonthlyHeatmapCard(days: List<DayStat>) {
                                 .weight(1f)
                                 .aspectRatio(1f)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(heatColor(d?.studiedCount ?: 0, maxCount))
+                                .background(heatColor(d?.studiedCount ?: 0))
                         )
                     }
                     // 最后一周不满 7 天时补空格，保证每行都是 7 格（列宽不被拉歪）
@@ -1877,19 +1886,13 @@ private fun MonthlyHeatmapCard(days: List<DayStat>) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.width(4.dp))
-                listOf(0, 1, 2, 3, 4).forEach { level ->
-                    val count = when (level) {
-                        0 -> 0
-                        1 -> (maxCount * 0.2f).toInt().coerceAtLeast(1)
-                        2 -> (maxCount * 0.4f).toInt().coerceAtLeast(1)
-                        3 -> (maxCount * 0.6f).toInt().coerceAtLeast(1)
-                        else -> maxCount
-                    }
+                // 图例五档：0 / 50 / 100 / 150 / 200+，与色阶边界一一对应
+                listOf(0, 50, 100, 150, 200).forEach { count ->
                     Box(
                         modifier = Modifier
                             .size(12.dp)
                             .clip(RoundedCornerShape(3.dp))
-                            .background(heatColor(count, maxCount))
+                            .background(heatColor(count))
                     )
                     Spacer(Modifier.width(3.dp))
                 }
@@ -2164,7 +2167,23 @@ private const val OPTION_MEANING_SLOT_QUIZ = 40
 private const val OPTION_MEANING_SLOT_SENSE = 36
 
 /**
- * 每日目标的调整步长（词）。5 词一档：一次点一下就够用，
- * 也不至于让用户点十几次才改得动。
+ * 每日目标的调整步长（词），随当前档位自适应：
+ * 100 以下 5 一档（精细），200 以下 10 一档，200 以上 25 一档。
+ *
+ * 固定 5 的话，从 200 调到 400 要按 40 下——步进器就成了体力活；
+ * 固定大步长又会让小目标用户「点一下跳 25 词」失去微调能力。
  */
-private const val GOAL_STEP = 5
+private fun goalStepFor(goal: Int): Int = when {
+    goal < 100 -> 5
+    goal < 200 -> 10
+    else -> 25
+}
+
+/**
+ * 热力图色阶的固定上限（当日去重学习词数）。
+ *
+ * 与每日目标共用 200 这条基准线：目标默认 20、封顶 500，
+ * 而 200 是「认真刷了一天」的合理刻度——超过 200 一律满档，
+ * 颜色只为「今天学没学、学得多不多」服务，不做精确编码。
+ */
+private const val HEATMAP_SCALE_MAX = 200

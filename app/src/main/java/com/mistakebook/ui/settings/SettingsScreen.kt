@@ -42,7 +42,17 @@ import kotlinx.coroutines.launch
 // 设置页：Key 与大模型配置、识别参数、打印默认项、复习提醒、数据管理。
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
+fun SettingsScreen(
+    container: AppContainer,
+    onBack: () -> Unit,
+    /**
+     * 内嵌模式（门户第 4 页）：不画自己的顶栏与返回箭头——
+     * 门户顶部 Tab 行就是它的导航，从任何一页都能一步切回来。
+     * 同时把自己那层 Scaffold 的系统栏内边距清零：门户的顶栏
+     * 已经消费过状态栏 inset，再收一次会把内容往下顶出双倍间距。
+     */
+    embedded: Boolean = false
+) {
     val viewModel: SettingsViewModel = containerViewModel(container) { SettingsViewModel(it) }
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -100,19 +110,27 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back)
-                        )
+            // 内嵌模式下顶栏由门户提供，这里连占位都不留
+            if (!embedded) {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.settings_title)) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.action_back)
+                            )
+                        }
                     }
-                }
-            )
+                )
+            }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = if (embedded) {
+            androidx.compose.foundation.layout.WindowInsets(0.dp, 0.dp, 0.dp, 0.dp)
+        } else {
+            androidx.compose.material3.ScaffoldDefaults.contentWindowInsets
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -188,6 +206,15 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                     }
                 },
                 onRestoreClick = { showRestoreConfirm = true }
+            )
+
+            // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
+            // 都要留给题目），统一收到设置里，与数据管理相邻。
+            WordbookDataSection(
+                container = container,
+                onResetDone = { message ->
+                    scope.launch { snackbarHostState.showSnackbar(message) }
+                }
             )
 
             Spacer(Modifier.height(24.dp))

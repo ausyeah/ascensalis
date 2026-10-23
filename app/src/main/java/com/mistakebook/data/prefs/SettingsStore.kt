@@ -346,7 +346,7 @@ class SettingsStore(context: Context) {
         appContext.settingsDataStore.edit { it[key] = value }
     }
 
-    private companion object {
+    internal companion object {
         const val TAG = "MistakeBookSettings"
         const val SECURE_FILE = "mistakebook_secure_prefs"
         const val SECURE_MINERU_KEY = "mineru_api_key"
@@ -374,7 +374,9 @@ class SettingsStore(context: Context) {
 
         const val DEFAULT_WORDBOOK_DAILY_GOAL = 20
         const val MIN_WORDBOOK_DAILY_GOAL = 5
-        const val MAX_WORDBOOK_DAILY_GOAL = 200
+        // 200 封顶是早期拍的：有用户一天刷 300+ 词，200 直接顶格设不上去。
+        // 500 对「雅思/托福刷词」也够用，再高就不是目标是许愿了。
+        const val MAX_WORDBOOK_DAILY_GOAL = 500
         val KEY_ACTIVE_PROFILE = stringPreferencesKey("active_llm_profile")
         val KEY_HOME_QUESTION_ORDER = stringPreferencesKey("home_question_order")
     }

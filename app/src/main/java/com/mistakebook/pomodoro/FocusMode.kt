@@ -1,17 +1,24 @@
 package com.mistakebook.pomodoro
 
 /**
- * 三种计时模式。
+ * 两种计时模式。
  *
- * 用户要的是「定时 / 倒计时 / 正向计时」，三者差别只在于**有没有终点、
- * 终点怎么定**，所以共用一个计时核心，而不是写三套计时器：
+ * ## 为什么从三种砍到两种
  *
- * - [POMODORO] 番茄：25 分钟倒计时，到点停。番茄数是统计里最核心的口径，
- *   只有这一种模式计入「完成番茄数」。
- * - [TIMER] 定时：自定义时长（默认 45 分钟）倒计时，到点停。
- *   与番茄的差别是时长自定、且不参与番茄计数。
- * - [STOPWATCH] 正计时：没有终点，用户自己按停。适合「我不知道要学多久、
- *   先学着」——这是最长情的用法，不该被逼着先填一个数字。
+ * 旧版有「番茄 / 定时 / 正计时」三种，而「定时」和「番茄」在界面上
+ * 完全是同一个东西——都是倒计时，只是默认时长不同。用户原话：
+ * 「倒计时和番茄钟重复了吧」。重复的模式按钮除了让人多按一次，
+ * 没有任何信息量。
+ *
+ * 现在：番茄钟 = 倒计时（目标时长用轮盘自定，默认 25 分钟），
+ * 正计时 = 没有终点。定时需求由「自定时长的番茄钟」覆盖——
+ * 想要 45 分钟就把轮盘拨到 45，比多一个模式按钮直观得多。
+ *
+ * ## 历史数据兼容
+ *
+ * 旧版本落库的会话里可能有 mode = 'TIMER' 的记录：[fromName] 对
+ * 无法识别的名字一律回退 [POMODORO]，统计口径（番茄数只认 POMODORO）
+ * 不受影响——定时记录本来就不该计入番茄数，回退后依然不计入。
  */
 enum class FocusMode(
     val label: String,
@@ -20,7 +27,6 @@ enum class FocusMode(
     val hasTarget: Boolean
 ) {
     POMODORO("番茄", 25, hasTarget = true),
-    TIMER("定时", 45, hasTarget = true),
     STOPWATCH("正计时", 0, hasTarget = false);
 
     /** 供统计与进度显示用的默认目标秒数。 */
@@ -30,7 +36,7 @@ enum class FocusMode(
         fun fromName(name: String): FocusMode =
             entries.firstOrNull { it.name == name } ?: POMODORO
 
-        /** 长按循环切换的顺序：番茄 → 定时 → 正计时 → 番茄。 */
+        /** 长按循环切换的顺序：番茄 → 正计时 → 番茄。 */
         fun next(current: FocusMode): FocusMode =
             entries[(current.ordinal + 1) % entries.size]
     }

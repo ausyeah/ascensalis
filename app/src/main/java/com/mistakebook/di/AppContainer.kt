@@ -151,6 +151,15 @@ class AppContainer(context: Context) {
     }
 
     /**
+     * 学科 DAO：番茄钟的「新建学科」要写 subjects 表（与错题本共用一套学科）。
+     * 单独暴露而不是每次都 database.subjectDao()——Room 的 dao() 每次调用
+     * 都会新建一个实现实例，虽然无状态，但没必要。
+     */
+    val subjectDao: com.mistakebook.data.local.SubjectDao by lazy {
+        database.subjectDao()
+    }
+
+    /**
      * 番茄钟计时核心：全局单例。
      *
      * 必须是单例——计时状态活在它里面，页面重建（旋转、切 Tab）时
@@ -172,6 +181,20 @@ class AppContainer(context: Context) {
     val wordbookDao: com.mistakebook.wordbook.data.WordbookDao by lazy {
         wordbookDatabase.wordbookDao()
     }
+
+    /**
+     * 单词数据纪元信号：设置页重置单词数据时 +1。
+     *
+     * 为什么需要它：WordbookViewModel 的抽词缓存（progressCache /
+     * wrongWordsCache）是**进程内内存**，只在 init 时全量载入一次、
+     * 之后靠答题增量维护。设置页直接删库的话，缓存不会知道，
+     * 于是出现「库里空了还在按熟词跳过抽词」的幽灵状态。
+     * 而设置页与背单词页可能持有同一个 VM 实例（门户内嵌设置页时），
+     * 也可能是两个（独立设置路由时）——所以不能用「调用 VM 方法」，
+     * 必须有一个进程级的广播让所有实例各自重载。
+     */
+    val wordbookEpoch: kotlinx.coroutines.flow.MutableStateFlow<Long> =
+        kotlinx.coroutines.flow.MutableStateFlow(0L)
 
     val vocabRepository: com.mistakebook.wordbook.data.VocabRepository by lazy {
         com.mistakebook.wordbook.data.VocabRepository(appContext)

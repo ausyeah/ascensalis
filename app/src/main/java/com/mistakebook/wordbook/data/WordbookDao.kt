@@ -56,4 +56,22 @@ interface WordbookDao {
 
     @Query("DELETE FROM word_study_log")
     suspend fun clearLogs()
+
+    /**
+     * 清空某天零点以来的作答流水（设置页「重置今日记录」用）。
+     *
+     * 只删流水不动进度：今日计数、热力图今天那一格、连续打卡回到今天之前
+     * 的状态，但熟词/错词本/生词本这些**长期判定**不该被一次重置抹掉。
+     */
+    @Query("DELETE FROM word_study_log WHERE answeredAt >= :startOfDayMs")
+    suspend fun clearLogsSince(startOfDayMs: Long)
+
+    /**
+     * 清空全部学习进度（设置页「全部重置」用）。
+     *
+     * 与 [clearLogs] 必须成对调用：只清进度不清流水的话，
+     * 统计页还会按旧流水算出学习量与打卡，进度却是全新的，两边对不上。
+     */
+    @Query("DELETE FROM word_progress")
+    suspend fun clearAllProgress()
 }

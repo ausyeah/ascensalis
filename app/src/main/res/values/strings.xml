@@ -296,6 +296,16 @@
     <string name="settings_backup_failed">导出失败：%1$s</string>
     <string name="settings_keys_saved">密钥已保存</string>
 
+    <!-- 英语单词数据重置 -->
+    <string name="settings_wordbook_reset_title">英语单词数据重置</string>
+    <string name="settings_wordbook_reset_desc">重置后不可恢复。今日重置只清掉今天的作答记录；全部重置会清空熟词、错词本、生词本与全部学习统计。</string>
+    <string name="settings_wordbook_reset_today">重置今日记录</string>
+    <string name="settings_wordbook_reset_today_body">将清空今天的作答流水：今日已学归零、热力图今天那一格清空、连续打卡回到今天之前。\n\n熟词、错词本、生词本不受影响。</string>
+    <string name="settings_wordbook_reset_today_done">今日学习记录已重置</string>
+    <string name="settings_wordbook_reset_all">全部重置</string>
+    <string name="settings_wordbook_reset_all_body">将清空全部学习进度与统计：熟词标记、错词本、生词本、连续打卡、月度热力图，全部从零开始。\n\n此操作不可恢复。</string>
+    <string name="settings_wordbook_reset_all_done">单词数据已全部重置</string>
+
     <!-- 网络错误 -->
     <string name="error_no_key">请先到设置填写 API Key</string>
     <string name="error_no_key_missing_llm">大模型接入配置（Base URL / Key / 模型）</string>

@@ -24,7 +24,9 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Whatshot
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -1168,6 +1170,130 @@ internal fun DataManageSection(
         ) {
             Text(stringResource(R.string.settings_clear_trash))
         }
+    }
+}
+
+/**
+ * 英语单词数据重置区。
+ *
+ * 两个口径分开是因为破坏力完全不同：
+ * - **重置今日记录**：只删今天的作答流水。今日已学归零、热力图今天
+ *   那一格清空、连续打卡回到今天之前；熟词/错词本/生词本全保留。
+ *   是「手滑乱点了一通」之后的橡皮擦。
+ * - **全部重置**：进度 + 流水全部清空，从零开始。确认文案必须写清楚
+ *   会没掉什么——不可逆操作里，写明白是唯一能救用户的。
+ *
+ * 删库后必须 bump `wordbookEpoch`：背单词页的抽词缓存是进程内内存
+ * （progressCache / wrongWordsCache），不广播的话它会继续按「已掌握」
+ * 跳过一堆词，而库里其实已经空了。
+ */
+@Composable
+internal fun WordbookDataSection(
+    container: com.mistakebook.di.AppContainer,
+    onResetDone: (String) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val dao = container.wordbookDao
+    var confirmToday by remember { mutableStateOf(false) }
+    var confirmAll by remember { mutableStateOf(false) }
+    val todayDoneMsg = stringResource(R.string.settings_wordbook_reset_today_done)
+    val allDoneMsg = stringResource(R.string.settings_wordbook_reset_all_done)
+
+    SettingsGroup(title = stringResource(R.string.settings_wordbook_reset_title)) {
+        Text(
+            text = stringResource(R.string.settings_wordbook_reset_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { confirmToday = true },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_wordbook_reset_today),
+                    maxLines = 1
+                )
+            }
+            OutlinedButton(
+                onClick = { confirmAll = true },
+                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                ),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_wordbook_reset_all),
+                    maxLines = 1
+                )
+            }
+        }
+    }
+
+    if (confirmToday) {
+        AlertDialog(
+            onDismissRequest = { confirmToday = false },
+            title = { Text(stringResource(R.string.settings_wordbook_reset_today)) },
+            text = { Text(stringResource(R.string.settings_wordbook_reset_today_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmToday = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            val startOfDay = java.util.Calendar.getInstance().apply {
+                                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                                set(java.util.Calendar.MINUTE, 0)
+                                set(java.util.Calendar.SECOND, 0)
+                                set(java.util.Calendar.MILLISECOND, 0)
+                            }.timeInMillis
+                            dao.clearLogsSince(startOfDay)
+                        }
+                        // 广播后再提示：背单词页先完成重载，用户切回去看到的就是新状态
+                        container.wordbookEpoch.value += 1
+                        onResetDone(todayDoneMsg)
+                    }
+                }) {
+                    Text(stringResource(R.string.action_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmToday = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (confirmAll) {
+        AlertDialog(
+            onDismissRequest = { confirmAll = false },
+            title = { Text(stringResource(R.string.settings_wordbook_reset_all)) },
+            text = { Text(stringResource(R.string.settings_wordbook_reset_all_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmAll = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            // 先清进度再清流水：反过来的话，若进程在两步之间被杀，
+                            // 会留下「有流水无进度」的中间态，统计页按旧流水
+                            // 还能算出学习量，进度却是全新的，两边对不上。
+                            dao.clearAllProgress()
+                            dao.clearLogs()
+                        }
+                        container.wordbookEpoch.value += 1
+                        onResetDone(allDoneMsg)
+                    }
+                }) {
+                    Text(stringResource(R.string.action_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmAll = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
     }
 }
 
