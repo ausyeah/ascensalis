@@ -443,34 +443,42 @@ private fun StudyView(
                     )
                 }
 
-                // 四个模式 chip 横向滚动，占满整行剩余宽度。
+                // 四个模式 chip 等宽铺满整行剩余宽度。
                 // 熟词星标已移到卡片右上角工具位（与发音/收藏并排），
                 // 不再占这一行的固定右侧位——用户反馈「别占一排的固定位置」。
+                //
+                // 「不是均衡位置」的根因：原来用 horizontalScroll + 自然宽度，
+                // 「四选一」（3 字）比「卡片」「义项」「拼写」（2 字）宽，
+                // 四个 chip 挤在左边、右边留一大块空白，看起来就歪。
+                // 改成 weight(1f) 等宽 + 文字居中，四个格子严丝合缝，
+                // 谁也不比谁宽——切换模式时选中态的移动也更好看。
                 Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     FilterChip(
+                        modifier = Modifier.weight(1f),
                         selected = state.studyMode == StudyMode.QUIZ,
                         onClick = { viewModel.setStudyMode(StudyMode.QUIZ) },
-                        label = { Text("四选一") }
+                        label = { ChipLabel("四选一") }
                     )
                     FilterChip(
+                        modifier = Modifier.weight(1f),
                         selected = state.studyMode == StudyMode.CARD,
                         onClick = { viewModel.setStudyMode(StudyMode.CARD) },
-                        label = { Text("卡片") }
+                        label = { ChipLabel("卡片") }
                     )
                     FilterChip(
+                        modifier = Modifier.weight(1f),
                         selected = state.studyMode == StudyMode.SENSE,
                         onClick = { viewModel.setStudyMode(StudyMode.SENSE) },
-                        label = { Text("义项") }
+                        label = { ChipLabel("义项") }
                     )
                     FilterChip(
+                        modifier = Modifier.weight(1f),
                         selected = state.studyMode == StudyMode.SPELL,
                         onClick = { viewModel.setStudyMode(StudyMode.SPELL) },
-                        label = { Text("拼写") }
+                        label = { ChipLabel("拼写") }
                     )
                 }
             }
@@ -960,6 +968,23 @@ private fun StudyView(
             }
         }
     }
+}
+
+/**
+ * 模式 chip 里的文字：撑满 chip 宽度并居中。
+ *
+ * 四个 chip 等宽（weight(1f)）之后，Material3 的 FilterChip 会把
+ * label 靠左排——「四选一」三个字顶着左边，「拼写」两个字也顶着左边，
+ * 视觉上又变成参差不齐。撑满 + 居中才是真正的均衡。
+ */
+@Composable
+private fun ChipLabel(text: String) {
+    Text(
+        text = text,
+        maxLines = 1,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 @Composable

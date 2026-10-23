@@ -162,7 +162,22 @@ data class ChatUiState(
      * 没有它的话，失败只进 logcat——用户看到进度条消失、
      * 模型答非所问，完全无从判断是图没传上去还是没识别出来。
      */
-    val ocrNotice: String? = null
+    val ocrNotice: String? = null,
+
+    /**
+     * 当前 provider 供应的模型列表（供对话页切换）。
+     *
+     * 一个中转站常常挂着几十个模型，用户想在 App 里直接切着用，
+     * 而不是为每个模型各建一套配置（URL 抄 N 遍）。
+     */
+    val modelOptions: List<String> = emptyList(),
+
+    /**
+     * 本会话当前选中的模型。
+     *
+     * 空串 = 用配置里的默认模型。
+     */
+    val selectedModel: String = ""
 )
 
 /** 一次性事件。 */
@@ -223,6 +238,17 @@ class ChatViewModel(
      */
     private var generationActive = false
 
+    /**
+     * 当前在途生成对应的助手消息 id（**独立于** state 里的字段）。
+     *
+     * state.streamingMessageId 会在消息落库终态时被清空，用它做追踪
+     * 会漏掉「快照丢了但数据库已终态」这一情形，所以这里单独记一份。
+     */
+    private var trackedStreamingId: Long? = null
+
+    /** 本次生成开始的时间戳（毫秒），用于「消息迟迟没进库」的兜底判定。 */
+    private var streamingStartedAt: Long = 0L
+
     /** 待发附件的本地自增 id。 */
     private var attachmentSeq = 0L
 
@@ -274,6 +300,19 @@ class ChatViewModel(
                 questionId = session.questionId,
                 title = session.title
             )
+            // **恢复输入草稿**。
+            //
+            // 用户打好的字退出会话再进来就没了——这是纯丢失，没有任何补救。
+            // 草稿按会话存，恢复时机在 `loading=false` 之前：
+            // 界面里的「首问预填」逻辑判的是 `messages.isEmpty()`，
+            // 如果草稿先恢复，预填就不会覆盖掉用户已经写的内容。
+            val draft = runCatching { settingsStore.getChatDraft(session.id) }.getOrDefault("")
+            if (draft.isNotEmpty() && _state.value.input.isBlank()) {
+                _state.value = _state.value.copy(input = draft)
+            }
+            // 模型列表：配置里可能有多个模型（一个 provider 供应多种模型），
+            // 对话页要能直接切。
+            runCatching { refreshModelOptions() }
             repository.observeMessages(session.id).collect { messages ->
                 val current = _state.value
                 val committedStream = current.streamingMessageId?.let { id ->
@@ -289,6 +328,30 @@ class ChatViewModel(
                     streamingContent = if (committedStream != null) null else current.streamingContent,
                     canRetry = messages.lastOrNull()?.status == MessageStatus.FAILED
                 )
+                // **兜底复位**：数据库里那条助手消息已经落到终态
+                // （DONE / FAILED / CANCELED），说明生成确实结束了。
+                //
+                // 为什么必须要有这条兜底：界面上「停止」按钮显示与否完全取决于
+                // `isStreaming`，而它只靠总线快照复位。总线是**进程内**的
+                // StateFlow —— 进程被系统回收后重建、或快照被下一轮覆盖时，
+                // `finished=true` 的终态快照可能永远送不到这个 ViewModel，
+                // 于是 `isStreaming` 永久停在 true：界面卡在「停止」按钮上，
+                // 而且 `send()` 的守卫会把用户的消息直接吞掉。
+                // 这正是用户报的「输出已经结束，却卡在终止按钮不让我发」。
+                //
+                // 数据库是唯一可信的事实来源，所以用它兜底。
+                val tracked = trackedStreamingId
+                val trackedMsg = tracked?.let { id -> messages.firstOrNull { it.id == id } }
+                val settled = trackedMsg != null && trackedMsg.status != MessageStatus.STREAMING
+                // 消息根本没进库（服务还没插上）也认为还没在跑，但要给服务
+                // 一点起跑时间——否则会在启动瞬间误判成「已结束」。
+                val vanished = tracked != null && trackedMsg == null &&
+                    System.currentTimeMillis() - streamingStartedAt > 1500L
+                if ((settled || vanished) && (current.isStreaming || generationActive)) {
+                    generationActive = false
+                    trackedStreamingId = null
+                    _state.value = _state.value.copy(isStreaming = false)
+                }
                 loadBubbleImages(messages)
             }
         }
@@ -303,6 +366,14 @@ class ChatViewModel(
             ChatGenerationBus.snapshot.collect { snap ->
                 if (snap == null) return@collect
                 val current = _state.value
+                // **会话隔离**：总线是进程内单例，会话 B 的界面也订阅着它。
+                // 快照带 sessionId 时只认自己会话的；不带（0）则退回老的
+                // 「按消息 id 归属」逻辑。
+                if (snap.sessionId != 0L && current.sessionId != 0L &&
+                    snap.sessionId != current.sessionId
+                ) {
+                    return@collect
+                }
                 val currentId = current.streamingMessageId
                 // 归属校验：只处理「当前这条消息」的快照。
                 // - 当前有生成中消息 → 只认同 id 的快照；
@@ -317,6 +388,7 @@ class ChatViewModel(
                 if (!mine) return@collect
                 if (snap.finished) {
                     generationActive = false
+                    trackedStreamingId = null
                     _state.value = current.copy(
                         isStreaming = false,
                         streamingContent = snap.content,
@@ -329,6 +401,7 @@ class ChatViewModel(
                     snap.errorText?.let { _events.trySend(ChatEvent.Error(it)) }
                 } else {
                     generationActive = true
+                    trackedStreamingId = snap.assistantId
                     _state.value = current.copy(
                         isStreaming = true,
                         streamingMessageId = snap.assistantId,
@@ -383,16 +456,61 @@ class ChatViewModel(
 
     fun onInputChange(text: String) {
         _state.value = _state.value.copy(input = text)
+        // 落草稿：退出再进来时能恢复。
+        // 写 DataStore 是异步 IO，放到协程里，别卡住输入框。
+        val sessionId = _state.value.sessionId
+        if (sessionId <= 0L) return
+        viewModelScope.launch {
+            runCatching { settingsStore.setChatDraft(sessionId, text) }
+        }
     }
 
     // ------------------------------------------------------------ 发送
+
+    /**
+     * 切换本会话用的模型。
+     *
+     * 一个 provider（尤其是中转站）供应多个模型，用户在对话页直接切，
+     * 不用为每个模型各建一套配置。空串 = 用配置里的默认模型。
+     */
+    fun selectModel(model: String) {
+        _state.value = _state.value.copy(selectedModel = model)
+    }
+
+    /**
+     * 刷新「当前 provider 供应哪些模型」。
+     *
+     * 从设置页返回时配置可能变了（新增了 key、填了模型列表），
+     * 所以进对话页时拉一次快照。
+     */
+    private suspend fun refreshModelOptions() {
+        val profile = settingsStore.settings.first().activeProfile ?: return
+        val options = profile.availableModels()
+        _state.value = _state.value.copy(modelOptions = options)
+    }
 
     fun send() {
         val current = _state.value
         // `generationActive` 是**本地**的在途守卫：`isStreaming` 由后台服务
         // 通过总线回报，服务启动到回报之间有几毫秒窗口——用户在这窗口里
         // 连点两下发送，就会启动两个服务、插两条助手消息、生成两遍。
-        if (current.isStreaming || current.loading || generationActive) return
+        if (current.isStreaming || current.loading || generationActive) {
+            // **僵尸守卫自愈**：本地标记说「在生成」，但服务那边其实没有
+            // 活着的任务（进程被杀、快照丢失、异常路径没清干净）。
+            // 这时必须解锁，否则用户的消息被静默吞掉——
+            // 表现就是「输出早结束了，却卡在停止按钮上不让我发」。
+            // 刚发起的几秒内服务可能还没登记，别急着解锁（否则会双发）。
+            val since = System.currentTimeMillis() - streamingStartedAt
+            if (generationActive && !ChatGenerationService.isRunning() && since > 8000L) {
+                generationActive = false
+                trackedStreamingId = null
+                if (current.isStreaming) {
+                    _state.value = current.copy(isStreaming = false)
+                }
+            } else {
+                return
+            }
+        }
         val text = current.input.trim()
         // 还在准备中的附件不算数：用户可能刚点发送就点附件
         val ready = current.pendingAttachments.filter { it.status == AttachmentStatus.READY }
@@ -411,6 +529,13 @@ class ChatViewModel(
                 truncated = false,
                 truncatedMessageId = null
             )
+            // 草稿已随消息发出，清掉（否则下次进会话会把这句话又填回来）。
+            val sessionId = current.sessionId
+            if (sessionId > 0L) {
+                viewModelScope.launch {
+                    runCatching { settingsStore.setChatDraft(sessionId, "") }
+                }
+            }
             runOnce(profile, text, ready.mapNotNull { it.prepared }, isRetry = false)
         }
     }
@@ -445,6 +570,14 @@ class ChatViewModel(
         // OCR 阶段还没有 streamJob 可停，这里一并取消，
         // 否则用户点「停止」后 MinerU 还在后台烧额度。
         ocrJob?.cancel()
+        // 本地立即解锁：服务那边取消是异步的，如果这中间用户就点了发送，
+        // 守卫会把消息吞掉。服务最终还会落一条 CANCELED 终态消息，
+        // 界面随后从数据库读到，不影响正确性。
+        generationActive = false
+        trackedStreamingId = null
+        if (_state.value.isStreaming) {
+            _state.value = _state.value.copy(isStreaming = false)
+        }
     }
 
     private suspend fun runOnce(
@@ -455,6 +588,16 @@ class ChatViewModel(
     ) {
         val sessionId = _state.value.sessionId
         if (sessionId == 0L) return
+
+        // **模型覆盖**：用户在对话页切了模型（一个 provider 供应多个模型）。
+        // 只改 model 字段，URL / Key 池 / 看图能力都沿用当前配置——
+        // 换模型时请求照样发到同一个中转站，由 resolveKey 按模型名挑 key。
+        val selected = _state.value.selectedModel
+        val effectiveProfile = if (selected.isNotBlank() && selected != profile.model) {
+            profile.copy(model = selected)
+        } else {
+            profile
+        }
 
         if (!isRetry) {
             val message = repository.insertUserMessage(sessionId, text, emptyList(), questionId)
@@ -476,7 +619,7 @@ class ChatViewModel(
         //
         // 「后台」指的是**不阻塞界面**：整个过程在协程里跑，
         // 界面照常显示进度提示，用户随时可以点「停止」取消。
-        if (!profile.supportsVision) {
+        if (!effectiveProfile.supportsVision) {
             // 直接在当前协程里跑（runOnce 本身就是 viewModelScope.launch 的协程），
             // 这样取消能自然传播：用户点「停止」→ 外层协程取消 → OCR 一起停。
             // 之前另起一个 job 再 join，取消传播是断的。
@@ -497,7 +640,7 @@ class ChatViewModel(
         val context = repository.buildContext(
             sessionId = sessionId,
             questionId = questionId,
-            supportsVision = profile.supportsVision
+            supportsVision = effectiveProfile.supportsVision
         )
         _state.value = _state.value.copy(
             omittedCount = context.omittedCount,
@@ -518,11 +661,15 @@ class ChatViewModel(
         // 模型照样把答案跑完并落库（用户诉求：「让它在后台把它跑完」）。
         // 服务负责插助手消息、收流与落库，实时预览通过 [ChatGenerationBus] 回到界面。
         generationActive = true
+        // 记下起点：助手消息是服务启动后才插库的，这里给「迟迟没进库」
+        // 的兜底判定一个参照点。
+        streamingStartedAt = System.currentTimeMillis()
         runCatching {
             ChatGenerationService.start(
                 context = appContext,
                 sessionId = sessionId,
-                questionId = questionId
+                questionId = questionId,
+                model = effectiveProfile.model
             )
         }.onFailure {
             // 起不来（比如系统拦了前台服务启动）：解除在途标记并提示，

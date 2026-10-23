@@ -70,6 +70,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
+import com.mistakebook.data.prefs.LlmKeyEntry
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.ThemeMode
@@ -527,6 +528,22 @@ internal fun ProfileRow(
     var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
     var model by remember(profile.id) { mutableStateOf(profile.model) }
 
+    // **附加 Key 池**：同一个 baseUrl 下的其他 key，各自绑定一批模型。
+    // 中转站（one-api / new-api）就是这个形态：一个 URL、多份 key，
+    // 每份 key 的可用模型与额度都不同。
+    var extraKeys by remember(profile.id) {
+        mutableStateOf(profile.extraKeys.toList())
+    }
+
+    // **本 provider 供应的模型列表**：中转站常挂着几十个模型，
+    // 用户想在 App 里直接切着用，而不是为每个模型各建一套配置。
+    var providerModelList by remember(profile.id) {
+        mutableStateOf(profile.models.toList())
+    }
+    var providerModelsText by remember(profile.id) {
+        mutableStateOf(profile.models.joinToString(", "))
+    }
+
     // 这个模型能不能直接看图。不识图的模型在对话里收到图片时，
     // 应用会先调 MinerU 把图里的字识别出来，再把文字喂给模型。
     var supportsVision by remember(profile.id) { mutableStateOf(profile.supportsVision) }
@@ -537,7 +554,9 @@ internal fun ProfileRow(
         baseUrl = baseUrl,
         apiKey = apiKey,
         model = model,
-        supportsVision = supportsVision
+        supportsVision = supportsVision,
+        models = providerModelList,
+        extraKeys = extraKeys
     )
 
     // 只有域名和 Key 齐了才能发请求；模型名**不**参与判断
@@ -605,6 +624,95 @@ internal fun ProfileRow(
                     onValueChange = { apiKey = it; onDraftChanged() }
                 )
                 Spacer(Modifier.height(8.dp))
+                // ===== 附加 Key 池 =====
+                //
+                // 用户诉求：「不能给一个 URL 配置多个 key，从而实现一个 provider
+                // 供应多种模型，适配中转站实用」。
+                //
+                // 做法：主 Key 之外可以再加若干 Key，每个 Key 声明自己管哪些模型；
+                // 发请求时按模型名反查该用哪个 Key。模型名留空 = 通用兜底 Key。
+                Text(
+                    text = stringResource(R.string.settings_extra_keys),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = stringResource(R.string.settings_extra_keys_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                extraKeys.forEachIndexed { index, entry ->
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = entry.key,
+                            onValueChange = { value ->
+                                extraKeys = extraKeys.toMutableList().also {
+                                    it[index] = entry.copy(key = value)
+                                }
+                                onDraftChanged()
+                            },
+                            label = { Text(stringResource(R.string.settings_api_key)) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = {
+                            extraKeys = extraKeys.toMutableList().also { it.removeAt(index) }
+                            onDraftChanged()
+                        }) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.settings_remove_key)
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = entry.models.joinToString(", "),
+                        onValueChange = { value ->
+                            val models = value.split(',', '，')
+                                .map { it.trim() }
+                                .filter { it.isNotEmpty() }
+                            extraKeys = extraKeys.toMutableList().also {
+                                it[index] = entry.copy(models = models)
+                            }
+                            onDraftChanged()
+                        },
+                        label = { Text(stringResource(R.string.settings_key_models_hint)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                TextButton(
+                    onClick = {
+                        extraKeys = extraKeys + LlmKeyEntry()
+                        onDraftChanged()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.settings_add_key))
+                }
+                // 这个配置实际能用哪些模型：主模型 + 各 Key 绑定的模型。
+                val providerModels = remember(extraKeys, model, providerModelList) {
+                    buildList {
+                        if (model.isNotBlank()) add(model.trim())
+                        providerModelList.filter { it.isNotBlank() }.forEach { add(it.trim()) }
+                        extraKeys.forEach { e ->
+                            e.models.filter { it.isNotBlank() }.forEach { add(it.trim()) }
+                        }
+                    }.distinct()
+                }
+                if (providerModels.size > 1) {
+                    Text(
+                        text = stringResource(R.string.settings_provider_models) + "：" +
+                            providerModels.joinToString(", "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = model,
                     onValueChange = { model = it; onDraftChanged() },
@@ -632,6 +740,25 @@ internal fun ProfileRow(
                             }
                         }
                     },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(8.dp))
+                // **本 provider 供应的模型列表**（中转站常挂几十个模型）。
+                // 填了之后，对话页就能直接切模型，不用为每个模型各建一套配置。
+                OutlinedTextField(
+                    value = providerModelsText,
+                    onValueChange = { value ->
+                        providerModelsText = value
+                        providerModelList = value.split(',', '，')
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                            .distinct()
+                        onDraftChanged()
+                    },
+                    label = { Text(stringResource(R.string.settings_provider_models)) },
+                    placeholder = { Text(stringResource(R.string.settings_provider_models_hint)) },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 

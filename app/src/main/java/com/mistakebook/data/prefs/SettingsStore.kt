@@ -246,6 +246,37 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ===== 对话输入草稿（临时状态，存 DataStore 不进 Room）=====
+
+    /**
+     * 键里带 session id：每个会话各自保存一份草稿。
+     *
+     * 为什么要有这个：用户打了一大段字，退出会话再进来发现输入框空了，
+     * 得重打一遍——这是「草稿丢失」类 bug 的典型表现。
+     * 会话 id 是自增主键，不会冲突；空会话（还没发过消息）也有 id，
+     * 所以草稿能覆盖「新建对话但还没发送」这种情况。
+     */
+    private fun chatDraftKey(sessionId: Long) = stringPreferencesKey("chat_draft_$sessionId")
+
+    /** 读某个会话的输入草稿；没有则返回空串。 */
+    suspend fun getChatDraft(sessionId: Long): String {
+        if (sessionId <= 0L) return ""
+        val key = chatDraftKey(sessionId)
+        return appContext.settingsDataStore.data.first()[key].orEmpty()
+    }
+
+    /**
+     * 写草稿。空串表示**清掉**草稿（已发送），顺手把键删掉，
+     * 不然 DataStore 里会攒一堆空字符串。
+     */
+    suspend fun setChatDraft(sessionId: Long, text: String) {
+        if (sessionId <= 0L) return
+        val key = chatDraftKey(sessionId)
+        appContext.settingsDataStore.edit { prefs ->
+            if (text.isEmpty()) prefs.remove(key) else prefs[key] = text
+        }
+    }
+
     // ===== 裁剪会话（临时编辑状态，存 DataStore 不进 Room）=====
 
     suspend fun getCropSession(imagePath: String): CropSessionRecord? {

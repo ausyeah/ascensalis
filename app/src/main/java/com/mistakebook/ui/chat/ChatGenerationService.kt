@@ -79,13 +79,20 @@ class ChatGenerationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                job?.cancel()
+                // 用**进程级**的 job，而不是本实例的 job：
+                // 停止动作到达时，服务实例可能已被系统重建，
+                // 本实例的 job 是新的空壳，取消它等于什么都没停。
+                currentJob?.cancel()
+                currentJob = null
+                runningSessionId = 0L
                 return START_NOT_STICKY
             }
         }
 
         val sessionId = intent?.getLongExtra(EXTRA_SESSION_ID, 0L) ?: 0L
         val questionId = intent?.getLongExtra(EXTRA_QUESTION_ID, -1L) ?: -1L
+        // 本次请求用的模型；空表示用配置里的默认模型
+        val modelOverride = intent?.getStringExtra(EXTRA_MODEL)?.takeIf { it.isNotBlank() }
         if (sessionId == 0L) {
             stopSelf()
             return START_NOT_STICKY
@@ -97,8 +104,16 @@ class ChatGenerationService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
 
         job = scope.launch {
-            runGeneration(sessionId, questionId.takeIf { it >= 0 })
+            runGeneration(sessionId, questionId.takeIf { it >= 0 }, modelOverride)
         }
+        // 记到**进程级**的静态槽位：停止动作是静态方法，拿不到服务实例。
+        //
+        // 之前靠「总线快照是否 finished」判断要不要发停止动作，
+        // 那玩意儿有两个洞：快照为 null 时（还没发第一帧、或已被新一轮覆盖）
+        // 会当成「没有生成」→ 点停止毫无反应；快照属于别的会话时
+        // 又会停错对象。现在以**服务自己手里的 job** 为准。
+        currentJob = job
+        runningSessionId = sessionId
         return START_NOT_STICKY
     }
 
@@ -118,13 +133,20 @@ class ChatGenerationService : Service() {
      */
     private suspend fun runGeneration(
         sessionId: Long,
-        questionId: Long?
+        questionId: Long?,
+        modelOverride: String? = null
     ) {
         val app = application as? MistakeBookApp ?: return
         val container = app.container
         val repository = container.chatRepository
 
-        val profile = container.settingsStore.settings.first().activeProfile
+        val baseProfile = container.settingsStore.settings.first().activeProfile
+        // 模型覆盖：用户在本轮临时切了模型（一个 provider 供应多个模型）。
+        // 只改 model 字段，URL / Key 池 / 看图能力都沿用当前配置。
+        val profile = baseProfile?.let { p ->
+            if (modelOverride.isNullOrBlank() || modelOverride == p.model) p
+            else p.copy(model = modelOverride)
+        }
         if (profile == null || !profile.isConfigured()) {
             // 连模型都没配，就不留一条空助手消息了——直接在库里记一条失败。
             val failedId = repository.insertStreamingAssistantMessage(sessionId, profile?.model ?: "")
@@ -132,8 +154,10 @@ class ChatGenerationService : Service() {
                 assistantId = failedId,
                 content = "",
                 status = MessageStatus.FAILED,
-                errorText = "未配置模型"
+                errorText = "未配置模型",
+                sessionId = sessionId
             )
+            clearRunningSlot(sessionId)
             return
         }
 
@@ -147,7 +171,7 @@ class ChatGenerationService : Service() {
         // 发一条「开始」快照：界面据此把气泡切到生成中，
         // 也让「停止」按钮能判断出当前确有活跃生成。
         ChatGenerationBus.publish(
-            ChatGenerationBus.Snapshot(assistantId = assistantId, content = "")
+            ChatGenerationBus.Snapshot(assistantId = assistantId, content = "", sessionId = sessionId)
         )
 
         val request = ChatRequest(
@@ -197,7 +221,8 @@ class ChatGenerationService : Service() {
             ChatGenerationBus.publish(
                 ChatGenerationBus.Snapshot(
                     assistantId = assistantId,
-                    content = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString())
+                    content = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString()),
+                    sessionId = sessionId
                 )
             )
         }
@@ -269,7 +294,8 @@ class ChatGenerationService : Service() {
                         promptTokens = promptTokens,
                         truncated = wasTruncated,
                         failed = status == MessageStatus.FAILED,
-                        errorText = errorText
+                        errorText = errorText,
+                        sessionId = sessionId
                     )
                 )
             }
@@ -278,6 +304,12 @@ class ChatGenerationService : Service() {
             // 「没有前台通知的空服务」，被系统按后台服务限制杀掉。
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
+            // 清掉进程级的在途标记，否则下一次生成前「停止」会误判成
+            // 「还有生成在跑」，而实际上早就跑完了。
+            if (runningSessionId == sessionId) {
+                currentJob = null
+                runningSessionId = 0L
+            }
         }
     }
 
@@ -286,7 +318,8 @@ class ChatGenerationService : Service() {
         assistantId: Long,
         content: String,
         status: MessageStatus,
-        errorText: String?
+        errorText: String?,
+        sessionId: Long
     ) {
         val app = application as? MistakeBookApp ?: return
         withContext(NonCancellable) {
@@ -303,7 +336,8 @@ class ChatGenerationService : Service() {
                     content = content,
                     finished = true,
                     failed = status == MessageStatus.FAILED,
-                    errorText = errorText
+                    errorText = errorText,
+                    sessionId = sessionId
                 )
             )
         }
@@ -391,6 +425,43 @@ class ChatGenerationService : Service() {
         const val EXTRA_ASSISTANT_ID = "assistantId"
         const val EXTRA_QUESTION_ID = "questionId"
 
+        /**
+         * 本次请求要用的模型（覆盖配置里的默认模型）。
+         *
+         * 一个 provider（尤其是中转站）常常挂着多个模型，用户想在对话中
+         * 直接切换。模型名由界面通过 Intent 传进来，**不下发给服务**。
+         */
+        const val EXTRA_MODEL = "model"
+
+        /**
+         * 进程级的「在途生成」标记。
+         *
+         * 「停止」是静态入口（通知栏动作 / 界面按钮），拿不到服务实例，
+         * 所以这里放一份静态引用。判断「有没有生成在跑」不能只看
+         * 总线快照——快照为 null（还没发第一帧、或已被新一轮覆盖）时
+         * 会误判成「没在跑」，点停止毫无反应。
+         */
+        @Volatile
+        private var currentJob: Job? = null
+
+        /** [currentJob] 正在为哪个会话生成。0 表示无。 */
+        @Volatile
+        private var runningSessionId: Long = 0L
+
+        /** 清掉在途标记（只在确实是这个会话收尾时清）。 */
+        private fun clearRunningSlot(sessionId: Long) {
+            if (runningSessionId == sessionId) {
+                currentJob = null
+                runningSessionId = 0L
+            }
+        }
+
+        /** 当前是否有生成在跑。 */
+        fun isRunning(): Boolean = currentJob != null && currentJob!!.isActive
+
+        /** 当前正在生成的会话 id；0 表示无。 */
+        fun runningSession(): Long = runningSessionId
+
         private const val CHANNEL_ID = "chat_generation"
         private const val NOTIFICATION_ID = 4202
         private const val REQUEST_STOP = 4203
@@ -409,10 +480,11 @@ class ChatGenerationService : Service() {
          * 用 `startForegroundService`：生成要活过界面生命周期，
          * 而普通 `startService` 在后台会被系统立刻掐掉。
          */
-        fun start(context: Context, sessionId: Long, questionId: Long?) {
+        fun start(context: Context, sessionId: Long, questionId: Long?, model: String? = null) {
             val intent = Intent(context, ChatGenerationService::class.java).apply {
                 putExtra(EXTRA_SESSION_ID, sessionId)
                 putExtra(EXTRA_QUESTION_ID, questionId ?: -1L)
+                if (!model.isNullOrBlank()) putExtra(EXTRA_MODEL, model)
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
@@ -422,7 +494,15 @@ class ChatGenerationService : Service() {
             // 没有活跃生成时不发：否则会**凭空启动一个服务实例**，
             // 而它没有前台通知，几秒后被系统的后台服务限制杀掉——
             // 白白制造一个「服务莫名消失」的怪现象。
-            if (ChatGenerationBus.snapshot.value?.finished != false) return
+            //
+            // 判据用「在途 job 是否活跃」，而不是总线快照：
+            // 快照为 null（还没发第一帧）时会把正在跑的任务误判成没在跑。
+            val job = currentJob ?: return
+            if (!job.isActive) {
+                currentJob = null
+                runningSessionId = 0L
+                return
+            }
             val intent = Intent(context, ChatGenerationService::class.java).apply { action = ACTION_STOP }
             runCatching { context.startService(intent) }
         }

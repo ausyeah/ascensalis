@@ -423,7 +423,7 @@ class ChatCompletionStream(
         val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
-                authorization = "Bearer ${profile.apiKey}",
+                authorization = "Bearer ${profile.resolveKey(profile.model)}",
                 request = body
             )
         } catch (cancelled: CancellationException) {
@@ -476,7 +476,7 @@ class ChatCompletionStream(
         val payload = json.encodeToString(ChatRequest.serializer(), body)
         return Request.Builder()
             .url(profile.chatCompletionsUrl())
-            .header("Authorization", "Bearer ${profile.apiKey}")
+            .header("Authorization", "Bearer ${profile.resolveKey(profile.model)}")
             .header("Accept", if (streaming) "text/event-stream" else "application/json")
             .header("Cache-Control", "no-cache")
             .post(payload.toRequestBody(JSON_MEDIA_TYPE))

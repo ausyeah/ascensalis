@@ -516,8 +516,15 @@ class PomodoroViewModel(
      *
      * 每行按「分类 / 任务名 / 时长」归档：学科与任务不存在就按名字
      * 自动建（复用错题本那套学科），时长按秒落一条会话流水，
-     * 日期列认不出就归到今天。导入的是「已经发生过的事」，
-     * 所以记为未完成（completed = false）——不替用户虚报番茄数。
+     * 日期列认不出就归到今天。
+     *
+     * 支持番茄TODO 的导出格式：它的 .xls 前面有 5 行元信息、表头在
+     * 第 6 行，列是「专注时间 / 待办名称 / 专注时长(分钟) / 心得 /
+     * 状态 / 完成度」。解析器认表头不认第一行，所以直接能用。
+     *
+     * 「已放弃」的记录不导入——那段时间用户没在专注，算进去虚报时长。
+     * 「状态」列说完成就记完成（completed），没说就按未完成处理，
+     * 不替用户虚报番茄数。
      */
     fun importCsv(uri: android.net.Uri) {
         viewModelScope.launch {
@@ -550,6 +557,12 @@ class PomodoroViewModel(
 
             var inserted = 0
             val today = LocalDate.now().toString()
+            // 任务名 → 任务 id 的本地缓存。
+            //
+            // 番茄TODO 一次能导出上千行，但任务名只有几十个——没有缓存
+            // 的话每行都要查一次库再比对一次，白白多几千次 SQL。
+            val taskCache = HashMap<String, Long>()
+
             result.rows.forEach { row ->
                 // 学科：按名字找，没有就建
                 var subjectId: Long? = null
@@ -563,9 +576,11 @@ class PomodoroViewModel(
                     }
                 }
                 // 任务：同学科下同名复用，否则新建
-                val task = dao.findTasksByName(row.taskName)
-                    .firstOrNull { it.subjectId == subjectId }
-                    ?: run {
+                val cacheKey = "${subjectId ?: -1} ${row.taskName}"
+                val taskId = taskCache[cacheKey] ?: run {
+                    val existing = dao.findTasksByName(row.taskName)
+                        .firstOrNull { it.subjectId == subjectId }
+                    val id = existing?.id ?: run {
                         val newId = dao.insertTask(
                             PomodoroTask(
                                 name = row.taskName,
@@ -573,24 +588,30 @@ class PomodoroViewModel(
                                 sortOrder = 0
                             )
                         )
-                        PomodoroTask(id = newId, name = row.taskName, subjectId = subjectId)
+                        newId
                     }
+                    taskCache[cacheKey] = id
+                    id
+                }
 
                 val day = row.day ?: today
+                // 开始时刻：源文件给了「16:48 至 17:39」就用真的，
+                // 没给就摆在中午前——只是让时间轴不至于全挤在正午。
                 val startedAt = runCatching {
-                    LocalDate.parse(day).atTime(12, 0)
+                    val minute = row.startMinute ?: 12 * 60
+                    LocalDate.parse(day).atTime(minute / 60, minute % 60)
                         .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 }.getOrDefault(System.currentTimeMillis())
                 dao.insertSession(
                     com.mistakebook.data.local.entities.PomodoroSession(
-                        taskId = task.id,
+                        taskId = taskId,
                         mode = "POMODORO",
                         day = day,
                         startedAt = startedAt,
                         endedAt = startedAt + row.durationSec * 1000L,
                         durationSec = row.durationSec,
                         targetSec = 0L,
-                        completed = false
+                        completed = row.completed == true
                     )
                 )
                 inserted++

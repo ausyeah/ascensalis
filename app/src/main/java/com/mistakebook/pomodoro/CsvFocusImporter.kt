@@ -25,7 +25,18 @@ object CsvFocusImporter {
         val subject: String?,
         val taskName: String,
         val durationSec: Long,
-        val day: String?
+        val day: String?,
+        /**
+         * 当天的开始时刻（自 00:00 起的分钟数）。为空 = 不知道，
+         * 调用方按中午 12 点摆。番茄TODO 这类带「16:48 至 17:39」
+         * 时间段的导出能填上，导入后时间轴才是真的。
+         */
+        val startMinute: Int? = null,
+        /**
+         * 该条记录在源文件里是否算「完成」。为空 = 源文件没说，
+         * 调用方按未完成处理（导入的是已经发生过的事，不虚报）。
+         */
+        val completed: Boolean? = null
     )
 
     data class ParseResult(
@@ -50,6 +61,25 @@ object CsvFocusImporter {
     )
     private val DATE_KEYS = listOf("日期", "时间", "date", "day")
 
+    /**
+     * 状态列。番茄TODO 导出带「状态」（已完成 / 已放弃）。
+     *
+     * 已放弃的记录**不导入**：那段时间用户实际上没在专注，
+     * 算进去会虚报专注时长。注意番茄TODO 自己的汇总行也写了
+     * 「不包含已放弃的记录」——它自己就不算，我们跟着它。
+     */
+    private val STATUS_KEYS = listOf("状态", "status", "state")
+
+    /** 状态文本里出现这些词 = 这条记录作废。 */
+    private val ABANDONED_MARKERS = listOf("放弃", "取消", "abandon", "cancel", "discard")
+
+    /**
+     * 状态文本里出现这些词 = 这条记录算完成。
+     *
+     * 不含裸的「完成」——「未完成」也含这两个字，会把没做完的当完成。
+     */
+    private val DONE_MARKERS = listOf("已完成", "done", "complete", "finished")
+
     /** 单条专注时长上限：超过 24 小时的一律视为脏数据。 */
     private const val MAX_SEC = 24 * 3600L
 
@@ -58,6 +88,32 @@ object CsvFocusImporter {
 
     /** 序列值合法上界：9999-12-31。 */
     private const val MAX_EXCEL_SERIAL = 2958465L
+
+    /**
+     * 完成度列。番茄TODO 导出带「完成度」（100%）。
+     *
+     * 没有「状态」列时才用它兜底——「状态」更权威（明确说了完成/放弃）。
+     */
+    private val COMPLETION_KEYS = listOf("完成度", "完成率", "进度", "progress", "completion")
+
+    /**
+     * 表头行探测的扫描上限：前多少行里允许找表头。
+     *
+     * 番茄TODO 的 .xls 导出前面有 5 行元信息（用户、导出范围、时长共计、
+     * 记录条数），表头在第 6 行。给 30 行余量足够，再多就当成脏数据。
+     */
+    private const val HEADER_SCAN_LIMIT = 30
+
+    /**
+     * 单元格文本里出现「像日期的东西」→ 这行是数据行，不是表头。
+     *
+     * 元信息行里写着「导出范围:2026-03-01 至 2026-10-24」，用它把这行
+     * 排除在表头候选之外。
+     */
+    private val RE_DATE_IN_TEXT = Regex("""\d{4}[-/.]\d{1,2}[-/.]\d{1,2}""")
+
+    /** 单元格文本里的「HH:mm」→ 当天第几分钟。 */
+    private val RE_CLOCK = Regex("""(\d{1,2}):(\d{2})""")
 
     fun parse(text: String): ParseResult {
         val table = text.lineSequence()
@@ -69,7 +125,12 @@ object CsvFocusImporter {
     }
 
     /**
-     * 表格解析（CSV 与 XLS 共用）：[table] 第一行是表头，其余是数据行。
+     * 表格解析（CSV 与 XLS 共用）。
+     *
+     * **表头不一定在第一行**：番茄TODO 的导出前面塞了 5 行元信息
+     * （用户、导出范围、时长共计、记录条数），表头在第 6 行。所以这里
+     * 先在前 [HEADER_SCAN_LIMIT] 行里探测真正的表头行——判据是
+     * 「同时含任务列与时长列」，且该行不含日期样式的文本（排除元信息行）。
      *
      * @param allowSerialDate XLS 路径传 true——单元格里的纯数字可能是
      *   Excel 日期序列值（如 45581 = 2024-10-23），按序列值换算归档；
@@ -84,29 +145,38 @@ object CsvFocusImporter {
             return ParseResult(emptyList(), 0, headerUnrecognized = true)
         }
 
-        val header = rows.first()
+        val headerIdx = findHeaderRow(rows)
+        if (headerIdx < 0) {
+            return ParseResult(emptyList(), 0, headerUnrecognized = true)
+        }
+        val header = rows[headerIdx]
+
         val subjectCol = header.indexOfFirst { it.matchesAny(SUBJECT_KEYS) }
         val taskCol = header.indexOfFirst { it.matchesAny(TASK_KEYS) }
         val durationCol = header.indexOfFirst { it.matchesAny(DURATION_KEYS) }
         val dateCol = header.indexOfFirst { it.matchesAny(DATE_KEYS) }
-
-        // 任务名 + 时长是最小集：缺一个这文件就没法按任务归档
-        if (taskCol < 0 || durationCol < 0) {
-            return ParseResult(emptyList(), 0, headerUnrecognized = true)
-        }
+        val statusCol = header.indexOfFirst { it.matchesAny(STATUS_KEYS) }
+        val completionCol = header.indexOfFirst { it.matchesAny(COMPLETION_KEYS) }
 
         val out = mutableListOf<Row>()
         var skipped = 0
         val durationHeader = header.getOrNull(durationCol).orEmpty()
 
-        rows.drop(1).forEach { cells ->
+        rows.drop(headerIdx + 1).forEach { cells ->
             val taskName = cells.getOrNull(taskCol)?.trim().orEmpty()
             val rawDuration = cells.getOrNull(durationCol)?.trim().orEmpty()
             val subject = cells.getOrNull(subjectCol)?.trim()?.takeIf { it.isNotEmpty() }
-            val day = cells.getOrNull(dateCol)?.trim()?.takeIf { it.isNotEmpty() }
+            val rawDate = cells.getOrNull(dateCol)?.trim().orEmpty()
+            val day = rawDate.takeIf { it.isNotEmpty() }
                 ?.let { normalizeDay(it, allowSerialDate) }
 
             if (taskName.isEmpty()) {
+                skipped++
+                return@forEach
+            }
+            // 状态是「已放弃」→ 那段时间用户没在专注，不算专注时长
+            val statusText = cells.getOrNull(statusCol)?.trim().orEmpty()
+            if (statusText.containsAnyOf(ABANDONED_MARKERS)) {
                 skipped++
                 return@forEach
             }
@@ -120,7 +190,9 @@ object CsvFocusImporter {
                     subject = subject,
                     taskName = taskName,
                     durationSec = sec.coerceAtMost(MAX_SEC),
-                    day = day
+                    day = day,
+                    startMinute = parseStartMinute(rawDate),
+                    completed = resolveCompleted(statusText, statusCol, cells, completionCol)
                 )
             )
         }
@@ -128,6 +200,78 @@ object CsvFocusImporter {
     }
 
     // ------------------------------------------------------------ 内部实现
+
+    /**
+     * 探测真正的表头行，返回它在 [rows] 里的下标；找不到返回 -1。
+     *
+     * 判据（三个都要满足）：
+     * 1. 同时含**任务列**与**时长列**——缺一个这文件就没法按任务归档；
+     * 2. 不含日期样式的文本——番茄TODO 的元信息行写着
+     *    「导出范围:2026-03-01 至 2026-10-24」，带日期，不是表头；
+     * 3. 在前 [HEADER_SCAN_LIMIT] 行内——再往下多半是数据区，
+     *    硬找容易把某条数据当表头（比如任务名里带「时长」二字）。
+     *
+     * 第 3 条还有个隐含好处：普通 CSV（表头在第一行）走同一条路径，
+     * 只是第 0 行就命中，行为与从前完全一致。
+     */
+    private fun findHeaderRow(rows: List<List<String>>): Int {
+        val limit = minOf(rows.size, HEADER_SCAN_LIMIT)
+        for (i in 0 until limit) {
+            val row = rows[i]
+            val hasTask = row.any { it.matchesAny(TASK_KEYS) }
+            val hasDuration = row.any { it.matchesAny(DURATION_KEYS) }
+            if (!hasTask || !hasDuration) continue
+            if (row.any { RE_DATE_IN_TEXT.containsMatchIn(it) }) continue
+            return i
+        }
+        return -1
+    }
+
+    /**
+     * 从「2026-10-23 16:48 至 2026-10-23 17:39」这类文本里取**开始时刻**。
+     *
+     * 取的是**前**一个时间点（开始），不是结束——番茄TODO 的记录是一段
+     * 连续专注，起止都在同一天（跨夜的极少）。没有 HH:mm 就返回 null，
+     * 调用方按中午 12 点摆。
+     */
+    internal fun parseStartMinute(raw: String): Int? {
+        if (raw.isBlank()) return null
+        val m = RE_CLOCK.find(raw) ?: return null
+        val h = m.groupValues[1].toIntOrNull() ?: return null
+        val mi = m.groupValues[2].toIntOrNull() ?: return null
+        if (h !in 0..23 || mi !in 0..59) return null
+        return h * 60 + mi
+    }
+
+    /**
+     * 判定一条记录在源文件里算不算完成。
+     *
+     * 优先看「状态」列（「已完成」/「已放弃」）；没有状态列时退化到
+     * 「完成度」列（100% 算完成）。都拿不到就返回 null——调用方按
+     * 未完成处理，不替用户虚报番茄数。
+     */
+    private fun resolveCompleted(
+        statusText: String,
+        statusCol: Int,
+        cells: List<String>,
+        completionCol: Int
+    ): Boolean? {
+        if (statusCol >= 0 && statusText.isNotBlank()) {
+            return statusText.containsAnyOf(DONE_MARKERS)
+        }
+        if (completionCol >= 0) {
+            val raw = cells.getOrNull(completionCol)?.trim().orEmpty()
+            if (raw.isBlank()) return null
+            val pct = raw.removeSuffix("%").trim().toDoubleOrNull() ?: return null
+            return pct >= 99.5
+        }
+        return null
+    }
+
+    private fun String.containsAnyOf(keys: List<String>): Boolean {
+        val lower = lowercase()
+        return keys.any { lower.contains(it) }
+    }
 
     private fun String.matchesAny(keys: List<String>): Boolean {
         val lower = lowercase()

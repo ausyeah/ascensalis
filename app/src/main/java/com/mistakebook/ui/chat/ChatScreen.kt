@@ -12,6 +12,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,10 +48,12 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -78,10 +82,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
@@ -229,8 +234,13 @@ fun ChatScreen(
     // 而 Flow 还没吐出第一帧时 messages 同样是空的——
     // 于是**打开一个已有对话时也会弹出一段预填草稿**，
     // 用户以为自己之前打的字没了。
+    //
+    // 还要判 input 为空：恢复了历史草稿的会话不能再被预填覆盖，
+    // 否则用户上次打的字照样会丢（只是丢的方式换了）。
     LaunchedEffect(state.sessionId, state.loading) {
-        if (state.sessionId != 0L && !state.loading && state.messages.isEmpty() && questionId != null) {
+        if (state.sessionId != 0L && !state.loading && state.messages.isEmpty() &&
+            questionId != null && state.input.isBlank()
+        ) {
             viewModel.onInputChange(ChatViewModel.PREFILL_QUESTION)
         }
     }
@@ -478,6 +488,20 @@ fun ChatScreen(
             // 进度条会消失，失败原因不能跟着消失——否则用户只看到模型答非所问。
             state.ocrNotice?.let { notice ->
                 OcrNoticeBar(notice = notice, onRetry = viewModel::retryOcr)
+                Spacer(Modifier.height(4.dp))
+            }
+
+            // 模型切换行：只在当前 provider 供应多个模型时出现。
+            //
+            // 一个中转站常挂着几十个模型，用户想在对话中直接切，
+            // 而不是为每个模型各建一套配置（URL 抄 N 遍）。
+            if (state.modelOptions.size > 1) {
+                ModelPickerRow(
+                    models = state.modelOptions,
+                    selected = state.selectedModel,
+                    enabled = !state.isStreaming,
+                    onSelect = viewModel::selectModel
+                )
                 Spacer(Modifier.height(4.dp))
             }
 
@@ -812,16 +836,23 @@ private fun MessageBubble(
 private const val BUBBLE_IMAGE_MAX_PX = 1280
 
 /**
- * 流式输出指示器：三点弹性跳动 + 整体呼吸。
+ * 流式输出指示器：三点从左到右依次弹跳 + 整体呼吸。
  *
- * 用户原话「有一个蓝点在下面，我希望它能在输出的时候有呼吸效果加上
- * 三个点的动画弹性运动特效」。做法（单动画源驱动，省掉每点各起一条
- * 无限动画的开销）：
- * - 一个 [rememberInfiniteTransition] 的 phase 进度 0→1 线性循环（1200ms）；
- * - 三个点共用 phase，各错开 1/6 周期。用 sin 曲线取正半周做弹跳量，
- *   位移与缩放都跟它走——「弹性」感来自同一条曲线同时驱动 scale 与
- *   translateY，且相邻点错峰形成追上去又落下来的波浪；
- * - 容器 alpha 单独一条慢周期（1800ms，Reverse 往复）做呼吸。
+ * 用户原话「加载的时候的三个点只显示了下半，跳起来的时候被挡住了，
+ * 从左到右跳比较好」。三个问题分别对应三处修法：
+ *
+ * 1. **只显示下半 / 被挡住**：原来三个点直接放在 Row 里，Row 的高度
+ *    被点的 6dp 撑死，而点要向上跳 3dp、还要放大到 1.1 倍——超出
+ *    自身 bounds 的部分被父容器裁掉，看起来只剩一条下沿。
+ *    修法：给每个点套一个 16dp 高、`contentAlignment = Center` 的
+ *    容器，跳动用 `graphicsLayer` 的 `translationY`（不参与布局，
+ *    不会被裁），容器本身留足上下空间。
+ * 2. **从左到右**：相位差从 1/6 周期改成 1/3 周期，三个点依次
+ *    达到波峰，形成清晰的「左→中→右」接力。
+ * 3. **呼吸**：容器整体 alpha 走一条 1800ms 的往复曲线。
+ *
+ * 位移与缩放共用同一条 sin 曲线——「弹性」感来自二者同源，
+ * 相邻点错峰形成追上去又落下来的波浪。
  */
 @Composable
 private fun StreamingDotsIndicator(color: Color) {
@@ -842,24 +873,36 @@ private fun StreamingDotsIndicator(color: Color) {
         )
     )
     Row(
-        modifier = Modifier.alpha(breathe),
+        modifier = Modifier
+            .alpha(breathe)
+            .height(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         for (i in 0 until 3) {
-            // 相位错开 1/6 周期：相邻点错峰，波浪感
-            val t = (phase + i / 6f) % 1f
-            // sin 取正半周（0..π 对应一个周期前半）→ 只在「上抛后落下」时有量
+            // 相位差 1/3 周期：左点先跳，中点接力，右点再接力
+            val t = (phase + i / 3f) % 1f
+            // sin 取正半周 → 只在「上抛后落下」时有量
             val bounce = sin(t * 2f * PI.toFloat()).coerceAtLeast(0f)
             val scale = 0.65f + 0.45f * bounce
             Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .offset(y = (-3).dp * bounce)
-                    .scale(scale)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(color)
-            )
+                modifier = Modifier.size(6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        // translationY 走 graphicsLayer：不参与测量，
+                        // 向上跳出去也不会被父容器裁掉
+                        .graphicsLayer {
+                            translationY = -3f * bounce * density
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(color)
+                )
+            }
         }
     }
 }
@@ -1166,6 +1209,51 @@ private fun OcrNoticeBar(notice: String, onRetry: () -> Unit) {
                     style = MaterialTheme.typography.labelMedium
                 )
             }
+        }
+    }
+}
+
+/**
+ * 模型切换行：一排可横向滚动的 chip。
+ *
+ * 只在 provider 供应多个模型时显示（由调用方判断）。
+ * 生成中禁用——换模型会让「这一轮用哪个模型」变得不可追溯。
+ */
+@Composable
+private fun ModelPickerRow(
+    models: List<String>,
+    selected: String,
+    enabled: Boolean,
+    onSelect: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Default.SmartToy,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        models.forEach { model ->
+            FilterChip(
+                selected = selected.isBlank() && model == models.firstOrNull() ||
+                    selected == model,
+                onClick = { onSelect(model) },
+                enabled = enabled,
+                label = {
+                    Text(
+                        text = model,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            )
         }
     }
 }

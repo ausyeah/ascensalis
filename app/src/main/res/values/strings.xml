@@ -246,6 +246,14 @@
     <string name="settings_api_key">API Key</string>
     <string name="settings_model">模型名称</string>
     <string name="settings_model_hint">点右侧按钮自动获取，也可手填</string>
+    <!-- 多 Key：中转站场景，一个 URL 配多个 key，各管不同模型 -->
+    <string name="settings_extra_keys">附加 Key（同一个 URL 下多 Key）</string>
+    <string name="settings_extra_keys_hint">中转站常用：一个 URL 下多个 Key，各自可用模型不同。填了模型名就绑定到该 Key，留空则作兜底。</string>
+    <string name="settings_add_key">添加 Key</string>
+    <string name="settings_key_models_hint">该 Key 负责的模型（逗号分隔）</string>
+    <string name="settings_remove_key">删除该 Key</string>
+    <string name="settings_provider_models">本配置可用的模型</string>
+    <string name="settings_provider_models_hint">逗号分隔。填了之后对话页可直接切换模型</string>
     <string name="settings_supports_vision">该模型支持图片</string>
     <string name="settings_supports_vision_on">直接发送图片给模型</string>
     <string name="settings_supports_vision_off">不识图：先用 MinerU 识别图片文字再发送</string>

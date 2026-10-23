@@ -128,7 +128,7 @@ class LlmClient(private val api: LlmApi) {
         val response = runCatching {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
-                authorization = "Bearer ${profile.apiKey}",
+                authorization = "Bearer ${profile.resolveKey(profile.model)}",
                 request = request
             )
         }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
@@ -188,7 +188,7 @@ class LlmClient(private val api: LlmApi) {
         val response = runCatching {
             api.listModels(
                 url = profile.modelsUrl(),
-                authorization = "Bearer ${profile.apiKey}"
+                authorization = "Bearer ${profile.resolveKey(profile.model)}"
             )
         }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
         if (!response.isSuccessful) {
@@ -216,7 +216,7 @@ class LlmClient(private val api: LlmApi) {
         val response = runCatching {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
-                authorization = "Bearer ${profile.apiKey}",
+                authorization = "Bearer ${profile.resolveKey(profile.model)}",
                 request = request
             )
         }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
@@ -235,7 +235,7 @@ class LlmClient(private val api: LlmApi) {
         val response = runCatching {
             api.listModels(
                 url = profile.modelsUrl(),
-                authorization = "Bearer ${profile.apiKey}"
+                authorization = "Bearer ${profile.resolveKey(profile.model)}"
             )
         }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
         return if (response.isSuccessful) {

@@ -44,7 +44,21 @@ object ChatGenerationBus {
         val promptTokens: Int = 0,
         val truncated: Boolean = false,
         val failed: Boolean = false,
-        val errorText: String? = null
+        val errorText: String? = null,
+
+        /**
+         * 这个快照属于**哪个会话**。
+         *
+         * ## 为什么必须有它
+         *
+         * 总线是**进程内单例**。服务在后台给会话 A 生成时，会话 B 的界面
+         * 也订阅着同一个 Flow。不带会话 id 的话，B 会把 A 的快照当成自己的：
+         * 表现是「在 B 里点发送，界面却显示 A 正在生成」，甚至 B 的界面
+         * 被 A 的终态快照复位。带上 id 之后才算真正隔离。
+         *
+         * 0 表示「不知道属于谁」，此时界面按老逻辑处理（不参与隔离）。
+         */
+        val sessionId: Long = 0L
     )
 
     private val _snapshot = MutableStateFlow<Snapshot?>(null)

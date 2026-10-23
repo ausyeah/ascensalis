@@ -240,6 +240,7 @@ object XlsTableReader {
         var pos = 0
         var collecting = false // 正处于第一个工作片子流里
         var done = false
+        var sheetSeen = false // 是否已经进过第一个工作表
         var guard = 0
         while (pos + 4 <= stream.size && guard++ < 5_000_000) {
             val id = u16(stream, pos)
@@ -252,8 +253,29 @@ object XlsTableReader {
             when (id) {
                 0x0809 -> { // BOF
                     val dt = if (len >= 4) u16(stream, dataStart + 2) else 0
-                    if (dt == 0x0020 && !done) collecting = true
-                    else if (collecting) { collecting = false; done = true }
+                    when (dt) {
+                        // 工作簿全局段：SST 共享字符串表在这里，但**格子不在**
+                        0x0005 -> collecting = false
+                        // 工作表段 / 宏表段：格数据在这里。
+                        // 0x0010 = 工作表，0x0040 = 宏表。
+                        0x0010, 0x0040 -> {
+                            if (sheetSeen) {
+                                // 第二张表：不要，只取第一张
+                                collecting = false
+                                done = true
+                            } else {
+                                collecting = true
+                                sheetSeen = true
+                            }
+                        }
+                        // 其它段（0x0020 = 图表、0x0006 = VB 模块…）：跳过
+                        else -> {
+                            if (collecting) {
+                                collecting = false
+                                done = true
+                            }
+                        }
+                    }
                 }
                 0x000A -> { // EOF
                     if (collecting) { collecting = false; done = true }
@@ -346,9 +368,20 @@ object XlsTableReader {
     /**
      * 解析共享字符串表（含跨 CONTINUE 续写）。
      *
-     * 最阴间的一点：字符串的字符数据可以断在 CONTINUE 边界上，而每个
-     * CONTINUE 块的开头一字节是**新的编码标志**（0=单字节，1=UTF-16）——
-     * 同一个字符串后半段的字符宽度可能和前半段不一样。这里一次到位。
+     * ## CONTINUE 块的编码标志字节（这里最容易错）
+     *
+     * MS-XLS 规定：字符串的字符数据可以断在 CONTINUE 边界上，而
+     * **只有字符数据被切断时**，新 CONTINUE 块的第一字节才是编码
+     * 标志（0 = 单字节压缩，1 = UTF-16）。如果上一块恰好结束在
+     * **字符串边界**上（上一个字符串读完了、下一个字符串还没开始），
+     * CONTINUE 块**没有**标志字节——它直接从下一个字符串的
+     * header（cch 2 字节 + flags 1 字节）开始。
+     *
+     * 无条件吞掉首字节的后果：一旦遇到「边界对齐」的 CONTINUE，
+     * 后面全部错位。实测番茄TODO 导出的 .xls 就是这种：1459 个
+     * 字符串只能解出 507 个，后半张表全成了空单元格。
+     *
+     * 所以规则是：**header 字段跨块不消费标志字节，字符数据跨块才消费。**
      */
     private fun parseSst(chunks: List<ByteArray>): List<String> {
         val first = chunks.firstOrNull() ?: return emptyList()
@@ -360,14 +393,14 @@ object XlsTableReader {
         cur.pos = 8
         val out = ArrayList<String>(unique)
         repeat(unique) {
-            val cch = cur.u16()
+            val cch = cur.rawU16()
             if (cch < 0) return@repeat
-            val flags = cur.u8()
+            val flags = cur.rawU8()
             if (flags < 0) return@repeat
             val fRich = (flags and 0x08) != 0
             val fExt = (flags and 0x04) != 0
-            val cRun = if (fRich) cur.u16() else 0
-            val cbExt = if (fExt) cur.u32() else 0L
+            val cRun = if (fRich) cur.rawU16() else 0
+            val cbExt = if (fExt) cur.rawU32() else 0L
             val text = cur.readChars(cch, (flags and 0x01) != 0)
             if (fRich) cur.skipRaw(cRun * 4)
             if (fExt) cur.skipRaw(cbExt.toInt())
@@ -376,78 +409,111 @@ object XlsTableReader {
         return out
     }
 
-    /** SST/字符串读取游标：跨 CONTINUE 块时按新编码标志继续。 */
+    /**
+     * SST/字符串读取游标。
+     *
+     * 两类读取的跨块语义不同，这是全部难点所在：
+     * - [rawU8] / [rawU16] / [rawU32] / [skipRaw]：header 与富文本
+     *   附加数据。跨块时**直接续读**，不碰编码标志字节；
+     * - [readChars]：字符数据。跨块时**必须先读掉**新块的编码标志
+     *   字节，再按新宽度继续。
+     */
     private class ChunkCursor(private val chunks: List<ByteArray>) {
         var ci = 0
         var pos = 0
         private fun chunk() = chunks.getOrNull(ci)
         private fun available() = chunk()?.let { pos < it.size } == true
-        fun u8(): Int {
-            if (!available()) return -1
+
+        /** 换到下一块（不消费任何字节）。 */
+        private fun advance(): Boolean {
+            ci++
+            if (ci >= chunks.size) return false
+            pos = 0
+            return true
+        }
+
+        /**
+         * 读一个字节；块用尽时**直接续读下一块**，不消费编码标志。
+         * 用于 header 字段（cch / flags / cRun / cbExt）。
+         */
+        fun rawU8(): Int {
+            if (!available() && !advance()) return -1
             val b = chunks[ci][pos].toInt() and 0xFF
             pos++
             return b
         }
-        fun u16(): Int {
-            val b0 = u8()
+
+        fun rawU16(): Int {
+            val b0 = rawU8()
             if (b0 < 0) return -1
-            val b1 = u8()
+            val b1 = rawU8()
             if (b1 < 0) return -1
             return b0 or (b1 shl 8)
         }
-        fun u32(): Long {
+
+        fun rawU32(): Long {
             var v = 0L
             for (i in 0 until 4) {
-                val b = u8()
+                val b = rawU8()
                 if (b < 0) return -1L
                 v = v or (b.toLong() shl (8 * i))
             }
             return v
         }
-        /** 跨到下一块；返回新块开头的编码标志字节（-1 = 没有更多块）。 */
-        fun nextChunk(): Int {
-            ci++
-            if (ci >= chunks.size) return -1
-            pos = 0
-            return u8()
-        }
-        /** 读 n 个字符；中途换块时按新标志决定字符宽度（1 或 2 字节）。 */
+
+        /**
+         * 读 n 个字符。
+         *
+         * 跨块时先吃掉新块的编码标志字节（0=单字节 / 1=UTF-16），
+         * 后续字符按新宽度读——同一个字符串的前后半段字符宽度可能不同。
+         */
         fun readChars(n: Int, fHigh: Boolean): String {
             val sb = StringBuilder()
             var high = fHigh
             var left = n
             while (left > 0) {
                 if (!available()) {
-                    val g = nextChunk()
-                    if (g < 0) break
-                    high = (g and 0x01) != 0
+                    if (!advance()) break
+                    high = readOptionFlag()
                     continue
                 }
                 if (high) {
                     if (chunks[ci].size - pos < 2) {
                         // 差 1 字节凑不齐一个 UTF-16 字符：换块按新宽度续读
-                        val g = nextChunk()
-                        if (g < 0) break
-                        high = (g and 0x01) != 0
+                        if (!advance()) break
+                        high = readOptionFlag()
                         continue
                     }
-                    sb.append(u16().toChar())
+                    sb.append(rawU16().toChar())
                 } else {
-                    sb.append(u8().toChar())
+                    sb.append(rawU8().toChar())
                 }
                 left--
             }
             return sb.toString()
         }
-        /** 跳过原始字节（rich text runs / ext rst）；换块同样先吞标志字节。 */
+
+        /**
+         * 跳过原始字节（rich text runs / ext rst）。
+         *
+         * 这些是二进制结构，跨块时**没有**编码标志字节——直接续读。
+         */
         fun skipRaw(n: Int) {
             var left = n
             while (left > 0) {
-                if (!available()) { if (nextChunk() < 0) return }
+                if (!available() && !advance()) return
                 val step = minOf(left, chunks[ci].size - pos)
                 pos += step
                 left -= step
             }
+        }
+
+        /** 读掉新块开头的编码标志字节，返回是否 UTF-16。 */
+        private fun readOptionFlag(): Boolean {
+            if (!available()) return false
+            val flag = chunks[ci][pos].toInt() and 0xFF
+            pos++
+            return (flag and 0x01) != 0
         }
     }
 

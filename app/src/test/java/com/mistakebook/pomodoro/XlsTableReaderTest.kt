@@ -278,7 +278,7 @@ class XlsTableReaderTest {
             eof
 
         // ---- 第一个工作表
-        val sheet1 = bof(0x0020) +
+        val sheet1 = bof(0x0010) +
             labelsst(0, 0, 0) + labelsst(0, 1, 1) + labelsst(0, 2, 2) + labelsst(0, 3, 7) +
             labelsst(1, 0, 3) + labelsst(1, 1, 4) + number(1, 2, 25.0) +
             labelsst(2, 0, 5) + labelsst(2, 1, 6) + rk(2, 2, rkInt(30)) +
@@ -287,7 +287,7 @@ class XlsTableReaderTest {
             eof
 
         // ---- 第二个工作表：内容必须被丢弃
-        val sheet2 = bof(0x0020) + labelsst(0, 0, 8) + number(0, 1, 999.0) + eof
+        val sheet2 = bof(0x0010) + labelsst(0, 0, 8) + number(0, 1, 999.0) + eof
 
         return globals + sheet1 + sheet2
     }
@@ -386,7 +386,7 @@ class XlsTableReaderTest {
             sst.write(u16(it.length)); sst.write(byteArrayOf(0x01)); sst.write(it.toByteArray(Charsets.UTF_16LE))
         }
         val wb = bof(0x0005) + rec(0x00FC, sst.toByteArray()) + eof +
-            bof(0x0020) +
+            bof(0x0010) +
             labelsst(0, 0, 0) + labelsst(0, 1, 1) + labelsst(0, 2, 2) +
             number(1, 0, 45581.0) + labelsst(1, 1, 3) + number(1, 2, 25.0) +
             eof
