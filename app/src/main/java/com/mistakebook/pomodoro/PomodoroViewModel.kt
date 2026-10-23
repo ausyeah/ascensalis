@@ -512,7 +512,7 @@ class PomodoroViewModel(
     }
 
     /**
-     * 从外部 CSV 导入专注记录。
+     * 从外部表格导入专注记录（CSV / .xls）。
      *
      * 每行按「分类 / 任务名 / 时长」归档：学科与任务不存在就按名字
      * 自动建（复用错题本那套学科），时长按秒落一条会话流水，
@@ -521,17 +521,28 @@ class PomodoroViewModel(
      */
     fun importCsv(uri: android.net.Uri) {
         viewModelScope.launch {
-            val text = withContext(Dispatchers.IO) {
+            val bytes = withContext(Dispatchers.IO) {
                 runCatching {
                     getApplication<android.app.Application>().contentResolver
-                        .openInputStream(uri)?.bufferedReader()?.readText()
+                        .openInputStream(uri)?.use { it.readBytes() }
                 }.getOrNull()
             }
-            if (text.isNullOrBlank()) {
+            if (bytes == null || bytes.isEmpty()) {
                 message.value = "打不开这个文件，换一个试试"
                 return@launch
             }
-            val result = CsvFocusImporter.parse(text)
+            // 按文件头分流：OLE2 复合文档（.xls）走 BIFF 解析，
+            // 其余按文本 CSV 走编码兜底解码
+            val result = if (XlsTableReader.looksLikeXls(bytes)) {
+                val table = XlsTableReader.readTable(bytes)
+                if (table.isNullOrEmpty()) {
+                    message.value = "这个 .xls 里没读到数据，换一个试试"
+                    return@launch
+                }
+                CsvFocusImporter.parseTable(table, allowSerialDate = true)
+            } else {
+                CsvFocusImporter.parse(CsvFocusImporter.decodeText(bytes))
+            }
             if (result.headerUnrecognized || result.rows.isEmpty()) {
                 message.value = "没认出可导入的列：需要含「任务名」和「时长」"
                 return@launch

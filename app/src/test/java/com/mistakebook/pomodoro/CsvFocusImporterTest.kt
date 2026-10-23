@@ -135,4 +135,58 @@ class CsvFocusImporterTest {
         assertEquals(1, r.rows.size)
         assertEquals(1500L, r.rows[0].durationSec)
     }
+
+    // ------------------------------------------------------------ XLS 共用路径
+
+    @Test
+    fun `parseTable 直接吃二维表格并跳过全空行`() {
+        val table = listOf(
+            listOf("分类", "任务名", "时长"),
+            listOf("", "", ""),          // XLS 读出来的全空行
+            listOf("数学", "刷题", "25"),
+            listOf("英语", "背单词", "30")
+        )
+        val r = CsvFocusImporter.parseTable(table)
+        assertEquals(2, r.rows.size)
+        assertEquals(0, r.skipped)
+        assertEquals(1500L, r.rows[0].durationSec)
+        assertTrue(CsvFocusImporter.parseTable(emptyList()).headerUnrecognized)
+    }
+
+    @Test
+    fun `Excel 日期序列值换算`() {
+        // 45581 = 2024-10-16（1900 日期系统，25569 偏移）
+        assertEquals("2024-10-16", CsvFocusImporter.normalizeDay("45581", allowSerialDate = true))
+        assertEquals("2023-01-01", CsvFocusImporter.normalizeDay("44927", allowSerialDate = true))
+        // CSV 路径不开序列值：「45581」不是日期，返回 null 归今天
+        assertNull(CsvFocusImporter.normalizeDay("45581", allowSerialDate = false))
+        // 越界与负数不当日期
+        assertNull(CsvFocusImporter.normalizeDay("99999999", allowSerialDate = true))
+        assertNull(CsvFocusImporter.normalizeDay("-5", allowSerialDate = true))
+        // 正常日期字符串两种模式都认
+        assertEquals("2026-10-23", CsvFocusImporter.normalizeDay("2026-10-23", allowSerialDate = true))
+    }
+
+    @Test
+    fun `字节解码 UTF-8 优先 GBK 兜底`() {
+        val utf8 = "分类,任务名,时长\n数学,刷真题,25\n".toByteArray(Charsets.UTF_8)
+        assertEquals("分类,任务名,时长\n数学,刷真题,25\n", CsvFocusImporter.decodeText(utf8))
+
+        val bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + utf8
+        assertEquals("分类,任务名,时长\n数学,刷真题,25\n", CsvFocusImporter.decodeText(bom))
+
+        // GBK 字节流（0xC8 0xCE ... 不是合法 UTF-8）→ 兜底 GBK 解回中文
+        val gbk = "任务,时长\n刷题,25\n".toByteArray(java.nio.charset.Charset.forName("GBK"))
+        assertEquals("任务,时长\n刷题,25\n", CsvFocusImporter.decodeText(gbk))
+    }
+
+    @Test
+    fun `GBK 编码的整份 CSV 端到端导入`() {
+        val gbk = "分类,任务名,时长\n数学,刷真题,25分钟\n"
+            .toByteArray(java.nio.charset.Charset.forName("GBK"))
+        val r = CsvFocusImporter.parse(CsvFocusImporter.decodeText(gbk))
+        assertEquals(1, r.rows.size)
+        assertEquals("数学", r.rows[0].subject)
+        assertEquals(1500L, r.rows[0].durationSec)
+    }
 }

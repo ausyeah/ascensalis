@@ -60,6 +60,24 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     private val questionHistory = ArrayDeque<QuestionSnapshot>()
     private val HISTORY_LIMIT = 30
 
+    /**
+     * 每个出题模式（四选一 / 义项）最近一道题的现场存档。
+     *
+     * ## 为什么需要它
+     *
+     * 切模式（四选一 → 卡片 → 四选一）走的是 [setStudyMode] →
+     * [presentWord] **重新构题**：干扰项重抽、isAnswered/选中全清。
+     * 用户实测：「回退到 radical 时作答状态还在，点了几下选项、
+     * 再回到四选一模式，之前的选择状态就消失了」——模式绕一圈回来，
+     * 题还是那道题，作答痕迹却被洗掉了。
+     *
+     * 现在离开一个模式前先把它的现场按模式存下来，切回来时**同一个词
+     * 直接重放**（选项不洗牌、选中与对错原样恢复），与「上一题」回退
+     * 共用同一套快照语义。词变了（抽了新题）存档自然失效——重放前
+     * 校验 word 相等。
+     */
+    private val modeSnapshots = mutableMapOf<StudyMode, QuestionSnapshot>()
+
     /** 错词本列表的刷新防抖：答题写库很密集，没必要每次都重建列表。 */
     private val WRONG_LIST_DEBOUNCE_MS = 500L
 
@@ -126,6 +144,55 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         _uiState.update { it.copy(hasPrevious = questionHistory.isNotEmpty()) }
     }
 
+    /**
+     * 把当前这道题的现场按**当前出题模式**存档（四选一 / 义项）。
+     *
+     * 卡片 / 拼写模式没有选项可存，不入档。调用时机：呈现新题后、
+     * 作答后、模式切换离开前——任何让界面发生变化的地方都存一遍，
+     * 存档永远是「这个模式最近一次的可见状态」。
+     */
+    private fun captureModeSnapshot() {
+        val s = _uiState.value
+        if (s.studyMode != StudyMode.QUIZ && s.studyMode != StudyMode.SENSE) return
+        val word = s.currentWord ?: return
+        modeSnapshots[s.studyMode] = QuestionSnapshot(
+            word = word,
+            progress = s.currentProgress,
+            sense = s.currentSense,
+            options = s.options,
+            selectedOptionIndex = s.selectedOptionIndex,
+            isAnswered = s.isAnswered,
+            isCardRevealed = s.isCardRevealed,
+            spellInput = s.spellInput,
+            spellSubmitted = s.spellSubmitted,
+            spellCorrect = s.spellCorrect
+        )
+    }
+
+    /**
+     * 原样重放一道题的存档现场：不重新构题、不洗牌。
+     *
+     * 「上一题」回退与「切模式回来」共用——两条路径的诉求完全一致：
+     * 看到的就是当时那道题，一个像素都不要变。
+     */
+    private fun replaySnapshot(snapshot: QuestionSnapshot) {
+        _uiState.update {
+            it.copy(
+                currentWord = snapshot.word,
+                currentProgress = snapshot.progress,
+                currentSense = snapshot.sense,
+                options = snapshot.options,
+                selectedOptionIndex = snapshot.selectedOptionIndex,
+                isAnswered = snapshot.isAnswered,
+                isCardRevealed = snapshot.isCardRevealed,
+                spellInput = snapshot.spellInput,
+                spellSubmitted = snapshot.spellSubmitted,
+                spellCorrect = snapshot.spellCorrect,
+                isLoading = false
+            )
+        }
+    }
+
     init {
         viewModelScope.launch {
             vocabRepo.ensureLoaded()
@@ -183,6 +250,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             wrongWordsCache = dao.observeWrongBook().first().map { it.word }.toSet()
         }
         questionHistory.clear()
+        modeSnapshots.clear()
         deferQueue.clear()
         recentWords.clear()
         sessionAnswerCount = 0
@@ -417,11 +485,16 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
      * 2. 抽新词会把当前这道题压进历史栈，而新题用户根本没做过——
      *    回退「上一题」看到的是一堆没答过的题，「回去又要重新做」。
      *
-     * 现在只按新模式**重新呈现当前词**（四选一重抽干扰项、卡片/拼写
-     * 切换展示形态），语义与用户预期一致：换的是考法，不是词。
+     * 后来改成按新模式重新呈现当前词，但又洗掉了作答状态（用户报
+     * 「再回到四选一模式，之前的选择状态就消失了」）。现在分两种：
+     * - 这个模式**见过这道题**（有存档且词没变）→ 原样重放，
+     *   选项不洗牌、选中与对错原样恢复；
+     * - 没见过 → 才按新模式构建（四选一重抽干扰项、义项重挑辨析点）。
      */
     fun setStudyMode(mode: StudyMode) {
         if (_uiState.value.studyMode == mode) return
+        // 离开当前模式前存档：四选一 → 卡片 → 四选一能原样回来的前提
+        captureModeSnapshot()
         _uiState.update { it.copy(studyMode = mode) }
         val current = _uiState.value.currentWord
         if (current == null) {
@@ -430,6 +503,11 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
         nextQuestionJob?.cancel()
+        val replay = modeSnapshots[mode]
+        if (replay != null && replay.word.word == current.word) {
+            replaySnapshot(replay)
+            return
+        }
         nextQuestionJob = viewModelScope.launch { presentWord(current) }
     }
 
@@ -548,6 +626,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                         isLoading = false
                     )
                 }
+                captureModeSnapshot()
             } else {
                 // 极端兜底：绝不降级四选一穿帮破坏题意，呈现清晰空状态
                 _uiState.update {
@@ -593,6 +672,8 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 isLoading = false
             )
         }
+        // 新题入库存档：之后切模式再切回来，重放的是这道新题
+        captureModeSnapshot()
     }
 
     /**
@@ -632,6 +713,8 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 hasPrevious = questionHistory.isNotEmpty()
             )
         }
+        // 回退重放后也刷新一次存档：从上一题再切模式，回来还是这道题的状态
+        captureModeSnapshot()
     }
 
     /** 历史栈里还有可回退的题时 UI 才显示「上一题」按钮。 */
@@ -756,6 +839,8 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 options = updatedOptions
             )
         }
+        // 作答痕迹入存档：切模式逛一圈回来，看到的还是「刚选的这个」
+        captureModeSnapshot()
 
         viewModelScope.launch(Dispatchers.IO) {
             try {

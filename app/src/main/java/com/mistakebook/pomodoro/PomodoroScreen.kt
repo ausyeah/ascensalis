@@ -207,6 +207,7 @@ fun PomodoroScreen(container: AppContainer) {
                                 "text/comma-separated-values",
                                 "text/csv",
                                 "text/plain",
+                                "application/vnd.ms-excel",
                                 "*/*"
                             )
                         )
@@ -1474,7 +1475,7 @@ private fun StatsTab(
         item {
             StatsCard(title = "导入外部记录") {
                 Text(
-                    text = "从其他计时软件导出的 CSV 导入：识别「任务分类 / 任务名 / 时长」列，" +
+                    text = "从其他计时软件导出的表格导入（CSV / .xls）：识别「任务分类 / 任务名 / 时长」列，" +
                         "日期列认不出就归到今天。学科与任务不存在会自动创建。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1483,7 +1484,7 @@ private fun StatsTab(
                 OutlinedButton(onClick = onImportCsv, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("选择 CSV 文件导入")
+                    Text("选择 CSV / XLS 文件导入")
                 }
             }
         }

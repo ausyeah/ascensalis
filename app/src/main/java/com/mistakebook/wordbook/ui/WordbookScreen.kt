@@ -32,9 +32,9 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -411,22 +411,36 @@ private fun StudyView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 「上一题」并进这一行的最左边：原先独立占一行，
-                // 题干卡片被往下顶了一截。有历史才显示，没有就不占位。
-                if (state.hasPrevious) {
-                    TextButton(
-                        onClick = viewModel::previousQuestion,
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        modifier = Modifier.padding(end = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = null,
-                            modifier = Modifier.size(15.dp)
+                // 「上一题」：常驻圆形撤回按钮。
+                //
+                // 三个实测反馈一次解决：
+                // (a) 形态：原来是带箭头的文字 TextButton，太宽。现在 36dp
+                //     正圆 + 一枚撤回（Undo）图标，窄而不突兀；
+                // (b) 布局：**永远占位**。过去只有存在历史时才渲染，
+                //     它一出现右侧四个模式 chip 就被推着位移；现在灰态
+                //     也占住同一个位置，整行布局纹丝不动；
+                // (c) 状态：没有上一个词时置灰（底色与图标同时降透明度），
+                //     且点击禁用——看得见「有这个东西」，也看得出「现在
+                //     还不能用」。
+                val hasPrev = state.hasPrevious
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (hasPrev) MaterialTheme.colorScheme.surfaceContainerHighest
+                            else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f)
                         )
-                        Spacer(Modifier.width(2.dp))
-                        Text("上一题", fontSize = 13.sp)
-                    }
+                        .clickable(enabled = hasPrev, onClick = viewModel::previousQuestion),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Undo,
+                        contentDescription = "上一题",
+                        tint = if (hasPrev) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
 
                 // 四个模式 chip 横向滚动：加上「拼写」后，即使把模式名
