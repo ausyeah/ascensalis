@@ -363,11 +363,16 @@ fun DetailScreen(
             title = { Text(stringResource(R.string.detail_delete)) },
             text = { Text(stringResource(R.string.detail_delete_confirm)) },
             confirmButton = {
-                TextButton(onClick = {
-                    showDeleteDialog = false
-                    viewModel.delete()
-                    onBack()
-                }) { Text(stringResource(R.string.action_confirm)) }
+                // 两步确认：删除题目不可恢复，确认键再点一次才执行
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.action_confirm),
+                    confirmText = stringResource(R.string.detail_delete_confirm_action),
+                    onConfirm = {
+                        showDeleteDialog = false
+                        viewModel.delete()
+                        onBack()
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) {

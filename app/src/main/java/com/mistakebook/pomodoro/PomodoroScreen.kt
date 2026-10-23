@@ -1179,15 +1179,15 @@ private fun EditTaskDialog(
             title = { Text("删除任务") },
             text = { Text("「${task.name}」及其全部专注记录将一并删除，且无法恢复。确认删除？") },
             confirmButton = {
-                TextButton(
-                    onClick = {
+                // 两步确认：任务及其专注记录不可恢复，确认键再点一次才执行
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = "删除",
+                    confirmText = "确认删除",
+                    onConfirm = {
                         confirmDelete = false
                         onDelete()
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("删除")
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text("取消") }
@@ -1254,15 +1254,15 @@ private fun EditSubjectDialog(
             title = { Text("删除学科") },
             text = { Text("「${subject.name}」将被删除，其下的任务移至「未分类」，专注记录保留。确认删除？") },
             confirmButton = {
-                TextButton(
-                    onClick = {
+                // 两步确认：学科删除不可恢复，确认键再点一次才执行
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = "删除",
+                    confirmText = "确认删除",
+                    onConfirm = {
                         confirmDelete = false
                         onDelete()
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("删除")
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text("取消") }
@@ -1498,15 +1498,15 @@ private fun StatsTab(
             title = { Text("重置统计数据") },
             text = { Text("将清空全部专注记录，所有统计图表归零。任务与学科保留。此操作无法恢复，确认重置？") },
             confirmButton = {
-                TextButton(
-                    onClick = {
+                // 两步确认：不可恢复操作，确认键也要再点一次才执行
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = "重置",
+                    confirmText = "确认重置",
+                    onConfirm = {
                         confirmReset = false
                         onResetStats()
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("重置")
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { confirmReset = false }) { Text("取消") }

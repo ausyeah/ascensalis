@@ -1,5 +1,6 @@
 package com.mistakebook.ui.chat
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -190,7 +191,16 @@ class ChatViewModel(
     private val questionId: Long?,
 
     /** 从对话记录进来时直接指定会话；null = 新开或按题目定位。 */
-    private val sessionId: Long? = null
+    private val sessionId: Long? = null,
+
+    /**
+     * 应用上下文：启动后台生成服务（前台服务）需要它。
+     *
+     * 生成之所以要放到服务里，是因为 `viewModelScope` 的协程
+     * 虽然能活过「切后台」，却活不过「进程被回收」——前台服务给进程
+     * 前台优先级，模型才能在后台把答案跑完。
+     */
+    private val appContext: Context
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -203,6 +213,15 @@ class ChatViewModel(
     private val partSerializer = ListSerializer(ChatContentPart.serializer())
 
     private var streamJob: Job? = null
+
+    /**
+     * 本地「在途生成」标记。
+     *
+     * `isStreaming` 是后台服务通过 [ChatGenerationBus] 回报的，
+     * 从点发送到服务回报之间有几毫秒窗口。这段时间里连点两下发送，
+     * 会启动两个服务、插两条助手消息、生成两遍——所以本地自己记一份。
+     */
+    private var generationActive = false
 
     /** 待发附件的本地自增 id。 */
     private var attachmentSeq = 0L
@@ -240,7 +259,13 @@ class ChatViewModel(
             }
             // 进程上次被杀时那条消息永远停在 STREAMING，不收拾的话界面会一直转圈，
             // 而且用户没有任何办法让它停下来。
-            repository.recoverStaleStreaming(session.id)
+            //
+            // **但如果此刻真有生成在跑**（后台服务还活着），那条消息不是「陈旧」的——
+            // 它正在被写入。此时把它标成 CANCELED 会把一次正常进行中的生成
+            // 误判为中断（用户退出再回来就会看到）。
+            if (ChatGenerationBus.snapshot.value?.finished != false) {
+                repository.recoverStaleStreaming(session.id)
+            }
             if (questionId != null) {
                 repository.ensureQuestionContext(session.id, questionId)
             }
@@ -265,6 +290,51 @@ class ChatViewModel(
                     canRetry = messages.lastOrNull()?.status == MessageStatus.FAILED
                 )
                 loadBubbleImages(messages)
+            }
+        }
+
+        // 订阅后台生成的实时预览。
+        //
+        // 生成跑在 [ChatGenerationService]（前台服务）里——它不随界面销毁，
+        // 所以用户切后台、甚至划掉任务，模型照样把答案跑完并落库。
+        // 这里订阅总线，把增量内容盖到那条助手消息上（打字机效果），
+        // 并在终态时更新「可重试 / 被截断 / 输入 token 数」。
+        viewModelScope.launch {
+            ChatGenerationBus.snapshot.collect { snap ->
+                if (snap == null) return@collect
+                val current = _state.value
+                val currentId = current.streamingMessageId
+                // 归属校验：只处理「当前这条消息」的快照。
+                // - 当前有生成中消息 → 只认同 id 的快照；
+                // - 当前没有生成中消息 → 只认「刚开始」的快照（finished=false），
+                //   已结束的旧快照（上一轮残留）直接忽略，否则会拿它去覆盖
+                //   本轮的状态（把「可重试」「被截断」写到不相干的会话上）。
+                val mine = if (currentId != null) {
+                    currentId == snap.assistantId
+                } else {
+                    !snap.finished
+                }
+                if (!mine) return@collect
+                if (snap.finished) {
+                    generationActive = false
+                    _state.value = current.copy(
+                        isStreaming = false,
+                        streamingContent = snap.content,
+                        truncated = snap.truncated,
+                        truncatedMessageId = if (snap.truncated) snap.assistantId else null,
+                        canRetry = snap.failed,
+                        lastPromptTokens = if (snap.promptTokens > 0) snap.promptTokens
+                        else current.lastPromptTokens
+                    )
+                    snap.errorText?.let { _events.trySend(ChatEvent.Error(it)) }
+                } else {
+                    generationActive = true
+                    _state.value = current.copy(
+                        isStreaming = true,
+                        streamingMessageId = snap.assistantId,
+                        streamingContent = snap.content
+                    )
+                }
             }
         }
     }
@@ -319,7 +389,10 @@ class ChatViewModel(
 
     fun send() {
         val current = _state.value
-        if (current.isStreaming || current.loading) return
+        // `generationActive` 是**本地**的在途守卫：`isStreaming` 由后台服务
+        // 通过总线回报，服务启动到回报之间有几毫秒窗口——用户在这窗口里
+        // 连点两下发送，就会启动两个服务、插两条助手消息、生成两遍。
+        if (current.isStreaming || current.loading || generationActive) return
         val text = current.input.trim()
         // 还在准备中的附件不算数：用户可能刚点发送就点附件
         val ready = current.pendingAttachments.filter { it.status == AttachmentStatus.READY }
@@ -366,6 +439,8 @@ class ChatViewModel(
     }
 
     fun stop() {
+        // 生成跑在服务里：停止 = 让服务取消这次任务（内容保留、状态记为已取消）
+        ChatGenerationService.stop(appContext)
         streamJob?.cancel()
         // OCR 阶段还没有 streamJob 可停，这里一并取消，
         // 否则用户点「停止」后 MinerU 还在后台烧额度。
@@ -413,16 +488,18 @@ class ChatViewModel(
             }
         }
 
+        // 这里只取「省略了多少轮历史」，真正的请求上下文由**服务**构建。
+        //
+        // 为什么不在这里构建后传过去：助手消息（status=STREAMING）是在
+        // 构建上下文**之后**才插入的——顺序反了的话，那条空的助手消息
+        // 会被算进历史，模型会收到一条莫名其妙的空回复。
+        // 让服务在插入助手消息之前自己构建，顺序天然正确。
         val context = repository.buildContext(
             sessionId = sessionId,
             questionId = questionId,
             supportsVision = profile.supportsVision
         )
-        val assistantId = repository.insertStreamingAssistantMessage(sessionId, profile.model)
         _state.value = _state.value.copy(
-            isStreaming = true,
-            streamingMessageId = assistantId,
-            streamingContent = "",
             omittedCount = context.omittedCount,
             canRetry = false,
             truncated = false
@@ -437,10 +514,24 @@ class ChatViewModel(
             viewModelScope.launch { compressContext() }
         }
 
-        val job = viewModelScope.launch { collectStream(profile, context.messages, assistantId) }
-        streamJob = job
-        job.join()
-        streamJob = null
+        // **生成交给前台服务跑**：切后台 / 划掉任务时进程不会被回收，
+        // 模型照样把答案跑完并落库（用户诉求：「让它在后台把它跑完」）。
+        // 服务负责插助手消息、收流与落库，实时预览通过 [ChatGenerationBus] 回到界面。
+        generationActive = true
+        runCatching {
+            ChatGenerationService.start(
+                context = appContext,
+                sessionId = sessionId,
+                questionId = questionId
+            )
+        }.onFailure {
+            // 起不来（比如系统拦了前台服务启动）：解除在途标记并提示，
+            // 否则界面永远停在「没有生成也没有错误」的怪状态。
+            generationActive = false
+            _events.trySend(ChatEvent.Error("无法启动后台生成：${it.message ?: it.javaClass.simpleName}"))
+        }
+        // 停止动作靠通知上的「停止」按钮，或界面上的停止按钮（见 [stop]）。
+        // 这里不再 join：界面生命周期与生成解耦，界面先走也没关系。
     }
 
     /**
@@ -651,161 +742,6 @@ class ChatViewModel(
         }
     }
 
-    /**
-     * 收流并节流落库。
-     *
-     * 每收到一段就写一次库的话，一次回复能产生上千次写 + 上千次 Flow 发射，
-     * 列表反复重组。节流到 [WRITE_THROTTLE_MS] 一次，肉眼看不出差别。
-     */
-    private suspend fun collectStream(
-        profile: LlmProfile,
-        outgoing: List<OutgoingMessage>,
-        assistantId: Long
-    ) {
-        val request = ChatRequest(
-            model = profile.model,
-            messages = outgoing.map { it.toLlm() },
-            temperature = ChatCompletionStream.TEMPERATURE,
-            max_tokens = ChatCompletionStream.MAX_TOKENS,
-            responseFormat = null,
-            stream = true
-        )
-
-        val buffer = StringBuilder()
-        val thinking = StringBuilder()
-        val fullAnswer = StringBuilder()
-        val fullThinking = StringBuilder()
-        var lastWriteAt = 0L
-        var lastPreviewAt = 0L
-        var status = MessageStatus.DONE
-        var errorText: String? = null
-        var promptTokens = 0
-        var completionTokens = 0
-        var wasTruncated = false
-        fun joinThinkingAndAnswer(answer: String, thought: String): String = when {
-            thought.isBlank() -> answer
-            answer.isBlank() -> ChatThinking.tags(thought)
-            else -> ChatThinking.tags(thought) + "\n\n" + answer
-        }
-
-        suspend fun publishPreview() {
-            val now = System.currentTimeMillis()
-            if (now - lastPreviewAt < PREVIEW_THROTTLE_MS) return
-            lastPreviewAt = now
-            _state.value = _state.value.copy(
-                streamingMessageId = assistantId,
-                streamingContent = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString())
-            )
-        }
-
-        /**
-         * 把「攒着的增量」写进库。
-         *
-         * 思考过程与正文**用 `<think>` 标记隔开、共用一列**，而不是加两个数据库字段：
-         * - 不需要 DB 迁移（迁移要写 SQL、升版本号，是这个项目最容易翻车的一步）；
-         * - `<think>…</think>` 是 DeepSeek / Qwen 的**通用约定**，
-         *   导出的对话在别家前端里也能被正确识别成思考过程。
-         *
-         * 正文先到、思考后到（或反过来）都能拼对：思考永远放在最前面。
-         */
-        suspend fun flush() {
-            if (buffer.isEmpty() && thinking.isEmpty()) return
-            buffer.setLength(0)
-            thinking.setLength(0)
-            lastWriteAt = System.currentTimeMillis()
-            val fullContent = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString())
-            repository.updateAssistantContent(assistantId, fullContent)
-        }
-
-        try {
-            stream.complete(
-                profile,
-                request,
-                settingsStore.settings.first().reasoningEffort
-            ).collect { event ->
-                when (event) {
-                    is ChatStreamEvent.Thinking -> {
-                        if (event.text.isNotEmpty()) {
-                            thinking.append(event.text)
-                            fullThinking.append(event.text)
-                            publishPreview()
-                            if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
-                        }
-                    }
-
-                    is ChatStreamEvent.Delta -> {
-                        buffer.append(event.text)
-                        fullAnswer.append(event.text)
-                        publishPreview()
-                        if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
-                    }
-
-                    is ChatStreamEvent.Done -> {
-                        promptTokens = event.promptTokens
-                        completionTokens = event.completionTokens
-                        // 输入 token 数是用户唯一能看到的「上下文占用」口径，
-                        // 输到 state 上，输入栏显示「上次请求 ≈ N tokens」。
-                        if (event.promptTokens > 0) {
-                            _state.value = _state.value.copy(lastPromptTokens = event.promptTokens)
-                        }
-                        // 用量记账放在这里而不是 Done 事件的发送方：一次对话
-                        // （无论流式还是降级非流式）收到且仅收到一次 Done，
-                        // 天然就是「一次调用」的口径。失败 / 取消不会到这儿。
-                        usageStatsStore.recordLlm(
-                            promptTokens = event.promptTokens,
-                            completionTokens = event.completionTokens,
-                            cachedTokens = event.cachedTokens
-                        )
-                        // length = 被 max_tokens 截断。它和「模型胡乱输出」在下游一样，
-                        // 但处理方式不同：要提示用户换个更大的模型或分次问。
-                        wasTruncated = event.finishReason == FINISH_REASON_LENGTH
-                        if (wasTruncated) truncatedMessageId = assistantId
-                    }
-
-                    is ChatStreamEvent.Failed -> {
-                        status = if (event.error.kind == ApiErrorKind.CANCELLED) {
-                            MessageStatus.CANCELED
-                        } else {
-                            MessageStatus.FAILED
-                        }
-                        errorText = event.error.serverMessage.takeIf { it.isNotBlank() }
-                    }
-                }
-            }
-        } catch (cancelled: CancellationException) {
-            // 用户按了停止：不是失败，保留已收到的内容。
-            status = MessageStatus.CANCELED
-            throw cancelled
-        } finally {
-            // 收尾必须放 finally：取消时 CancellationException 已经抛出去了，
-            // 放在 try 之后的那段代码根本不会执行——
-            // 表现是「按了停止，缓冲区里最后半句永久丢失，状态卡在生成中」。
-            // NonCancellable 保证这一段能跑完。
-            withContext(NonCancellable) {
-                flush()
-                // 最终预览先保留，等 Room 发出终态行后再清除，避免回退到旧内容。
-                _state.value = _state.value.copy(
-                    streamingMessageId = assistantId,
-                    streamingContent = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString())
-                )
-                repository.finishAssistantMessage(
-                    id = assistantId,
-                    status = status,
-                    errorMessage = errorText,
-                    promptTokens = promptTokens,
-                    completionTokens = completionTokens
-                )
-            }
-            // StateFlow 写入不是挂起函数，取消态下仍可执行。
-            _state.value = _state.value.copy(
-                isStreaming = false,
-                truncated = wasTruncated,
-                truncatedMessageId = if (wasTruncated) truncatedMessageId else null,
-                canRetry = status == MessageStatus.FAILED
-            )
-            errorText?.let { _events.trySend(ChatEvent.Error(it)) }
-        }
-    }
 
     // ------------------------------------------------------------ 附件
 

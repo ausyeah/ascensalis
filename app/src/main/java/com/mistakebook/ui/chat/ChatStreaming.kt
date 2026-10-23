@@ -5,7 +5,7 @@ package com.mistakebook.ui.chat
  *
  * ## 为什么要有这个
  *
- * 流式期间模型是逐 chunk 吐字的，公式经常停在半截：`$$x^2`、`$a+b`。
+ * 流式期间模型是逐 chunk 吐字的，公式经常停在半截：`$$x^2`、`$a+b`、`\(a+b`。
  * 这时候 Markdown 解析器要么把未闭合的 `$$` 产出成 `complete=false` 的块
  * （RichText 里会按 `"$$" + latex` 源码显示），要么把未配对的 `$` 原样
  * 混进文本流——于是界面出现"先显示一段时间的源码、拼完才突然变成公式"，
@@ -18,6 +18,11 @@ package com.mistakebook.ui.chat
  *
  * 只处理尾部：中途的 `$` 一旦配对就按公式走，不会误伤。
  *
+ * ## 定界符覆盖面
+ *
+ * `$$`、`$`、`\(` `\)`、`\[` `\]` 四种都管——模型混用定界符是常态
+ * （DeepSeek/o 系偏爱 `\(..\)`），漏一种就会在流式期间闪对应源码。
+ *
  * ## 与 [parseInline] 的分工
  *
  * `parseInline` 只负责把"完整的文本"切成 span；它不知道文本是不是流式的。
@@ -27,27 +32,42 @@ package com.mistakebook.ui.chat
 fun trimIncompleteTrailingFormula(text: String): String {
     if (text.isEmpty()) return text
     var i = 0
-    var pendingDollarStart = -1
+    var pendingStart = -1
     while (i < text.length) {
-        if (text[i] != '$') {
-            i++
-            continue
-        }
-        val isPair = i + 1 < text.length && text[i + 1] == '$'
-        val openLen = if (isPair) 2 else 1
-        // 优先匹配 `$$`，与 parseInline 的判定顺序一致（先试 `$$` 再试 `$`）。
-        val closeIdx = if (isPair) {
-            text.indexOf("$$", i + openLen)
-        } else {
-            text.indexOf('$', i + openLen)
-        }
-        if (closeIdx >= 0) {
-            i = closeIdx + openLen
-        } else {
-            // 从这个 `$` 开始到结尾都是未闭合公式的内容，整段隐藏。
-            pendingDollarStart = i
-            break
+        when {
+            text[i] == '$' -> {
+                val isPair = i + 1 < text.length && text[i + 1] == '$'
+                val openLen = if (isPair) 2 else 1
+                // 优先匹配 `$$`，与 parseInline 的判定顺序一致（先试 `$$` 再试 `$`）。
+                val closeIdx = if (isPair) {
+                    text.indexOf("$$", i + openLen)
+                } else {
+                    text.indexOf('$', i + openLen)
+                }
+                if (closeIdx >= 0) {
+                    i = closeIdx + openLen
+                } else {
+                    // 未闭合：从这里到结尾都是半截公式，整段隐藏。
+                    pendingStart = i
+                    break
+                }
+            }
+
+            // `\(` / `\[`：与 parseInline 的 LaTeX 分支同样找配对闭符
+            text[i] == '\\' && i + 1 < text.length &&
+                (text[i + 1] == '(' || text[i + 1] == '[') -> {
+                val closeToken = if (text[i + 1] == '(') "\\)" else "\\]"
+                val closeIdx = text.indexOf(closeToken, i + 2)
+                if (closeIdx >= 0) {
+                    i = closeIdx + 2
+                } else {
+                    pendingStart = i
+                    break
+                }
+            }
+
+            else -> i++
         }
     }
-    return if (pendingDollarStart >= 0) text.substring(0, pendingDollarStart) else text
+    return if (pendingStart >= 0) text.substring(0, pendingStart) else text
 }

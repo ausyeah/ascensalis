@@ -59,6 +59,20 @@
                 android:value="番茄钟专注计时：用户主动开始后需在锁屏与切换应用期间持续计时" />
         </service>
 
+        <!--
+            后台 AI 生成：生成必须活过界面生命周期（切后台、划掉任务），
+            否则进程被回收时正在收的流会断，模型那半截回答就废了。
+            与番茄钟同理，用 specialUse（附 property 说明用途）。
+        -->
+        <service
+            android:name=".ui.chat.ChatGenerationService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="AI 对话生成：用户主动发送后需在切换应用与退出界面期间继续生成并落库" />
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

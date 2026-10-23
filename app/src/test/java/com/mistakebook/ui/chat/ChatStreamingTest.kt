@@ -56,4 +56,44 @@ class ChatStreamingTest {
         assertEquals("", trimIncompleteTrailingFormula(""))
         assertEquals("   ", trimIncompleteTrailingFormula("   "))
     }
+
+    // ---- LaTeX 标准定界符（v0.0.24） ----
+
+    @Test
+    fun completedLatexInlineFormulaIsKept() {
+        val text = "解是 \\(x=1\\)。"
+        assertEquals(text, trimIncompleteTrailingFormula(text))
+    }
+
+    @Test
+    fun trailingIncompleteLatexInlineFormulaIsTrimmed() {
+        assertEquals("解是 ", trimIncompleteTrailingFormula("解是 \\(x=1"))
+    }
+
+    @Test
+    fun trailingIncompleteLatexDisplayFormulaIsTrimmed() {
+        assertEquals("推导：", trimIncompleteTrailingFormula("推导：\\[x^2+"))
+    }
+
+    @Test
+    fun completedLatexFormulaBeforeIncompleteTailKeepsBothSides() {
+        assertEquals(
+            "前半 \\(a\\) 后半 ",
+            trimIncompleteTrailingFormula("前半 \\(a\\) 后半 \\(b+")
+        )
+    }
+
+    @Test
+    fun mixedDelimitersAllGateTheirOwnTail() {
+        assertEquals(
+            "a \$x\$ b \\(y\\) c ",
+            trimIncompleteTrailingFormula("a \$x\$ b \\(y\\) c \\[z+")
+        )
+    }
+
+    @Test
+    fun loneBackslashInTextDoesNotTriggerTrim() {
+        val text = "Windows 路径 C:\\dir\\file 正常显示"
+        assertEquals(text, trimIncompleteTrailingFormula(text))
+    }
 }

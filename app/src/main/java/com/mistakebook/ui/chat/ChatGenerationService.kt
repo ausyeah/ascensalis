@@ -1,0 +1,430 @@
+package com.mistakebook.ui.chat
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import com.mistakebook.MainActivity
+import com.mistakebook.MistakeBookApp
+import com.mistakebook.R
+import com.mistakebook.data.chat.OutgoingMessage
+import com.mistakebook.domain.ChatRole
+import com.mistakebook.domain.MessageStatus
+import com.mistakebook.net.ApiErrorKind
+import com.mistakebook.net.llm.ChatCompletionStream
+import com.mistakebook.net.llm.ChatContentPart
+import com.mistakebook.net.llm.ChatRequest
+import com.mistakebook.net.llm.ChatStreamEvent
+import com.mistakebook.net.llm.ImageUrl
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+
+/**
+ * 后台生成（前台服务）。
+ *
+ * ## 为什么必须有它
+ *
+ * 用户反馈：「处于后台就停止模型输出的问题仍然没有解决……不要求你能够
+ * 继续，只要求你能让它在后台把它跑完」。
+ *
+ * 根因不在网络，而在**进程优先级**：
+ * - 流式请求原本跑在 `viewModelScope` 里。切后台时 Activity 只是 `stop`，
+ *   ViewModel 与协程都还活着——但**进程随时会被系统回收**（后台无服务、
+ *   内存吃紧时先杀它）。进程一死，正在收的流直接断，模型那半截回答就废了。
+ * - 退出 App（划掉任务）时 ViewModel 被销毁，协程被取消，生成彻底停掉。
+ *
+ * 前台服务解决这两点：进程因此拿到**前台优先级**，系统不会随手回收；
+ * 而服务不随界面销毁——**用户划掉任务，生成照跑，跑完落库**，
+ * 回来打开会话就能看到完整答案。
+ *
+ * ## 职责划分
+ *
+ * - 生成（请求、收流、落库）在本服务里；
+ * - 实时预览通过 [ChatGenerationBus] 交给界面；
+ * - 最终内容以数据库为准，界面本来就在观察 Room 的消息流，
+ *   所以「生成完成 → 界面出现完整消息」是自动的，不需要额外通知。
+ *
+ * ## 通知为什么常驻
+ *
+ * 它不是「一条通知」，而是「用户主动发起的一次持续任务」——
+ * 和番茄钟同理（见 `PomodoroService`）：静默、常驻、带一个「停止」动作，
+ * 让用户随时能掐掉这次生成。
+ */
+class ChatGenerationService : Service() {
+
+    /** 服务自己的作用域：与界面生命周期无关，界面死了它照样跑。 */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** 当前这次生成的任务；「停止」动作取消它。 */
+    private var job: Job? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_STOP -> {
+                job?.cancel()
+                return START_NOT_STICKY
+            }
+        }
+
+        val sessionId = intent?.getLongExtra(EXTRA_SESSION_ID, 0L) ?: 0L
+        val questionId = intent?.getLongExtra(EXTRA_QUESTION_ID, -1L) ?: -1L
+        if (sessionId == 0L) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        // 必须先 startForeground 再做耗时工作：
+        // Android 要求 startForegroundService 后 5 秒内调用 startForeground，
+        // 否则系统抛 ANR/异常。
+        startForeground(NOTIFICATION_ID, buildNotification())
+
+        job = scope.launch {
+            runGeneration(sessionId, questionId.takeIf { it >= 0 })
+        }
+        return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    /**
+     * 跑完一次生成：组装上下文 → 插助手消息 → 收流 → 节流落库 → 落终态。
+     *
+     * 与原先写在 ViewModel 里的 `collectStream` 是同一套逻辑，只是
+     * 「往哪写预览」从 ViewModel 的 state 换成了 [ChatGenerationBus]。
+     *
+     * **顺序要紧**：先构建上下文、后插助手消息。反了的话那条空的
+     * STREAMING 助手消息会被算进历史，模型收到一条莫名其妙的空回复。
+     */
+    private suspend fun runGeneration(
+        sessionId: Long,
+        questionId: Long?
+    ) {
+        val app = application as? MistakeBookApp ?: return
+        val container = app.container
+        val repository = container.chatRepository
+
+        val profile = container.settingsStore.settings.first().activeProfile
+        if (profile == null || !profile.isConfigured()) {
+            // 连模型都没配，就不留一条空助手消息了——直接在库里记一条失败。
+            val failedId = repository.insertStreamingAssistantMessage(sessionId, profile?.model ?: "")
+            finishWith(
+                assistantId = failedId,
+                content = "",
+                status = MessageStatus.FAILED,
+                errorText = "未配置模型"
+            )
+            return
+        }
+
+        val context = repository.buildContext(
+            sessionId = sessionId,
+            questionId = questionId,
+            supportsVision = profile.supportsVision
+        )
+        val assistantId = repository.insertStreamingAssistantMessage(sessionId, profile.model)
+
+        // 发一条「开始」快照：界面据此把气泡切到生成中，
+        // 也让「停止」按钮能判断出当前确有活跃生成。
+        ChatGenerationBus.publish(
+            ChatGenerationBus.Snapshot(assistantId = assistantId, content = "")
+        )
+
+        val request = ChatRequest(
+            model = profile.model,
+            messages = context.messages.map { it.toLlm() },
+            temperature = ChatCompletionStream.TEMPERATURE,
+            max_tokens = ChatCompletionStream.MAX_TOKENS,
+            responseFormat = null,
+            stream = true
+        )
+
+        val buffer = StringBuilder()
+        val thinking = StringBuilder()
+        val fullAnswer = StringBuilder()
+        val fullThinking = StringBuilder()
+        var lastWriteAt = 0L
+        var lastPreviewAt = 0L
+        var status = MessageStatus.DONE
+        var errorText: String? = null
+        var promptTokens = 0
+        var completionTokens = 0
+        var wasTruncated = false
+
+        fun joinThinkingAndAnswer(answer: String, thought: String): String = when {
+            thought.isBlank() -> answer
+            answer.isBlank() -> ChatThinking.tags(thought)
+            else -> ChatThinking.tags(thought) + "\n\n" + answer
+        }
+
+        suspend fun flush() {
+            if (buffer.isEmpty() && thinking.isEmpty()) return
+            buffer.setLength(0)
+            thinking.setLength(0)
+            lastWriteAt = System.currentTimeMillis()
+            repository.updateAssistantContent(
+                assistantId,
+                joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString())
+            )
+        }
+
+        suspend fun publishPreview() {
+            // 预览节流：每个 delta 都发一次 StateFlow 会让界面每个 token 重组一次。
+            // 与原实现同口径（PREVIEW_THROTTLE_MS）。
+            val now = System.currentTimeMillis()
+            if (now - lastPreviewAt < PREVIEW_THROTTLE_MS) return
+            lastPreviewAt = now
+            ChatGenerationBus.publish(
+                ChatGenerationBus.Snapshot(
+                    assistantId = assistantId,
+                    content = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString())
+                )
+            )
+        }
+
+        try {
+            container.chatCompletionStream.complete(
+                profile,
+                request,
+                container.settingsStore.settings.first().reasoningEffort
+            ).collect { event ->
+                when (event) {
+                    is ChatStreamEvent.Thinking -> {
+                        if (event.text.isNotEmpty()) {
+                            thinking.append(event.text)
+                            fullThinking.append(event.text)
+                            publishPreview()
+                            if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
+                        }
+                    }
+
+                    is ChatStreamEvent.Delta -> {
+                        buffer.append(event.text)
+                        fullAnswer.append(event.text)
+                        publishPreview()
+                        if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
+                    }
+
+                    is ChatStreamEvent.Done -> {
+                        promptTokens = event.promptTokens
+                        completionTokens = event.completionTokens
+                        container.usageStatsStore.recordLlm(
+                            promptTokens = event.promptTokens,
+                            completionTokens = event.completionTokens,
+                            cachedTokens = event.cachedTokens
+                        )
+                        wasTruncated = event.finishReason == FINISH_REASON_LENGTH
+                    }
+
+                    is ChatStreamEvent.Failed -> {
+                        status = if (event.error.kind == ApiErrorKind.CANCELLED) {
+                            MessageStatus.CANCELED
+                        } else {
+                            MessageStatus.FAILED
+                        }
+                        errorText = event.error.serverMessage.takeIf { it.isNotBlank() }
+                    }
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            // 用户按了停止 / 服务被销毁：不是失败，保留已收到的内容。
+            status = MessageStatus.CANCELED
+            throw cancelled
+        } finally {
+            // 收尾必须放 finally：取消时 CancellationException 已经抛出去了。
+            withContext(NonCancellable) {
+                flush()
+                repository.finishAssistantMessage(
+                    id = assistantId,
+                    status = status,
+                    errorMessage = errorText,
+                    promptTokens = promptTokens,
+                    completionTokens = completionTokens
+                )
+                ChatGenerationBus.publish(
+                    ChatGenerationBus.Snapshot(
+                        assistantId = assistantId,
+                        content = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString()),
+                        finished = true,
+                        promptTokens = promptTokens,
+                        truncated = wasTruncated,
+                        failed = status == MessageStatus.FAILED,
+                        errorText = errorText
+                    )
+                )
+            }
+            // 撤通知 + 停服务放在 finally 里：取消路径会 rethrow，
+            // 写在 try 之后的那段代码根本不会执行——服务会变成
+            // 「没有前台通知的空服务」，被系统按后台服务限制杀掉。
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
+
+    /** 失败收尾：直接落终态并停服务。 */
+    private suspend fun finishWith(
+        assistantId: Long,
+        content: String,
+        status: MessageStatus,
+        errorText: String?
+    ) {
+        val app = application as? MistakeBookApp ?: return
+        withContext(NonCancellable) {
+            app.container.chatRepository.finishAssistantMessage(
+                id = assistantId,
+                status = status,
+                errorMessage = errorText,
+                promptTokens = 0,
+                completionTokens = 0
+            )
+            ChatGenerationBus.publish(
+                ChatGenerationBus.Snapshot(
+                    assistantId = assistantId,
+                    content = content,
+                    finished = true,
+                    failed = status == MessageStatus.FAILED,
+                    errorText = errorText
+                )
+            )
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    // ------------------------------------------------------------ 通知
+
+    private fun buildNotification(): Notification {
+        ensureChannel()
+        val openIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("正在生成回复…")
+            .setContentText("可以切到别的应用，生成会在后台继续")
+            // 常驻、静默：它是用户主动发起的持续任务，不是一条「通知」
+            .setOngoing(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(openIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .addAction(
+                0,
+                "停止",
+                PendingIntent.getService(
+                    this,
+                    REQUEST_STOP,
+                    Intent(this, ChatGenerationService::class.java).apply { action = ACTION_STOP },
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+            )
+            .build()
+    }
+
+    private fun ensureChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "AI 生成", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "后台生成 AI 回复时的常驻提示"
+                setShowBadge(false)
+            }
+        )
+    }
+
+    // ------------------------------------------------------------ 转换
+
+    private fun OutgoingMessage.toLlm() = com.mistakebook.net.llm.ChatMessage(
+        role = when (role) {
+            ChatRole.USER -> "user"
+            ChatRole.ASSISTANT -> "assistant"
+            ChatRole.SYSTEM -> "system"
+        },
+        content = if (images.isEmpty()) {
+            JsonPrimitive(text)
+        } else {
+            val parts = buildList {
+                add(ChatContentPart(type = ChatContentPart.TYPE_TEXT, text = text.ifBlank { "（见下图）" }))
+                images.forEach {
+                    add(ChatContentPart(type = ChatContentPart.TYPE_IMAGE, imageUrl = ImageUrl(it)))
+                }
+            }
+            json.parseToJsonElement(json.encodeToString(partSerializer, parts))
+        }
+    )
+
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val partSerializer = kotlinx.serialization.builtins.ListSerializer(ChatContentPart.serializer())
+
+    companion object {
+        const val ACTION_STOP = "com.mistakebook.chat.STOP"
+
+        const val EXTRA_SESSION_ID = "sessionId"
+        const val EXTRA_ASSISTANT_ID = "assistantId"
+        const val EXTRA_QUESTION_ID = "questionId"
+
+        private const val CHANNEL_ID = "chat_generation"
+        private const val NOTIFICATION_ID = 4202
+        private const val REQUEST_STOP = 4203
+
+        /** 落库节流：与原实现一致，肉眼无差别但少几千次写。 */
+        private const val WRITE_THROTTLE_MS = 500L
+
+        /** 预览节流：与原实现一致，避免每个 token 都让界面重组。 */
+        private const val PREVIEW_THROTTLE_MS = 220L
+
+        private const val FINISH_REASON_LENGTH = "length"
+
+        /**
+         * 启动一次后台生成。
+         *
+         * 用 `startForegroundService`：生成要活过界面生命周期，
+         * 而普通 `startService` 在后台会被系统立刻掐掉。
+         */
+        fun start(context: Context, sessionId: Long, questionId: Long?) {
+            val intent = Intent(context, ChatGenerationService::class.java).apply {
+                putExtra(EXTRA_SESSION_ID, sessionId)
+                putExtra(EXTRA_QUESTION_ID, questionId ?: -1L)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** 停止当前这次生成（界面的「停止」按钮与通知的「停止」动作都走这里）。 */
+        fun stop(context: Context) {
+            // 没有活跃生成时不发：否则会**凭空启动一个服务实例**，
+            // 而它没有前台通知，几秒后被系统的后台服务限制杀掉——
+            // 白白制造一个「服务莫名消失」的怪现象。
+            if (ChatGenerationBus.snapshot.value?.finished != false) return
+            val intent = Intent(context, ChatGenerationService::class.java).apply { action = ACTION_STOP }
+            runCatching { context.startService(intent) }
+        }
+    }
+}

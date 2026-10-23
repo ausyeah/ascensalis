@@ -76,7 +76,18 @@ class ParseInlineTest {
         "\$\$\$\$",
         "\$\$a\$$",
         "开头就是 \$\$ 只有前导没有闭合",
-        "\$\$ 带前导空格 \$x\$ 结尾"
+        "\$\$ 带前导空格 \$x\$ 结尾",
+        // ↓ LaTeX 标准定界符（v0.0.24 新增分支）
+        "inline 定界符：\\(a+b\\) 在句子里。",
+        "display 定界符：\\[a^2+b^2=c^2\\] 后面还有字。",
+        "两个 inline：\\(x\\) 与 \\(y\\) 并列。",
+        "两个 display：\\[x\\] 之后 \\[y\\]。",
+        "混合定界符：\\(a\\) 与 \$b\$ 与 \\[c\\] 与 \$\$d\$\$ 同在。",
+        "未闭合的 inline：\\(a+b 后面没有了",
+        "未闭合的 display：\\[a+b 后面没有了",
+        "闭合符在前面：a+b\\) 这句话先出现闭符",
+        "定界符里嵌美元：\\(\\frac{a}{b}\\)",
+        "display 定界符嵌公式环境：\\[\\begin{aligned}a&=b\\\\c&=d\\end{aligned}\\]"
     )
 
     /**
@@ -282,6 +293,32 @@ class ParseInlineTest {
                     cursor += 1
                 }
 
+                // v0.0.24 起新增的 LaTeX 标准定界符分支（与 parseInline 同步）：
+                // `\[...\]` display、`\(...\)` inline。定界符本身不进公式内容。
+                rest.startsWith("\\[") -> {
+                    val end = rest.indexOf("\\]", 2)
+                    if (end > 2) {
+                        flush()
+                        spans += InlineSpan.Math(rest.substring(2, end).trim(), display = true)
+                        cursor += end + 2
+                    } else {
+                        buffer.append('\\')
+                        cursor++
+                    }
+                }
+
+                rest.startsWith("\\(") -> {
+                    val end = rest.indexOf("\\)", 2)
+                    if (end > 2) {
+                        flush()
+                        spans += InlineSpan.Math(rest.substring(2, end).trim())
+                        cursor += end + 2
+                    } else {
+                        buffer.append('\\')
+                        cursor++
+                    }
+                }
+
                 rest.startsWith("$$") -> {
                     val end = rest.indexOf("$$", 2)
                     if (end > 2) {
@@ -332,5 +369,70 @@ class ParseInlineTest {
         }
         flush()
         return spans
+    }
+
+    // ------------------------------------------------------------------
+    // 三、LaTeX 标准定界符（v0.0.24：`\(..\)` 与 `\[..\]`）
+    //
+    // 背景：模型输出公式时四种定界符混用是常态，只认 `$` 会让满屏
+    // LaTeX 源码以文本形式显示。用户反馈「很基本的公式都没渲染出来」。
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `inline 定界符产出公式 span`() {
+        val spans = parseInline("看这个 \\(a+b\\) 公式")
+        val math = spans.filterIsInstance<InlineSpan.Math>()
+        assertEquals(1, math.size)
+        assertEquals("a+b", math[0].latex)
+        assertEquals(false, math[0].display)
+        // 定界符本身不残留
+        assertTrue(spans.none { it is InlineSpan.Text && it.text.contains("\\(") })
+    }
+
+    @Test
+    fun `display 定界符产出 display 公式 span`() {
+        val spans = parseInline("公式 \\[x^2+y^2=z^2\\] 结束")
+        val math = spans.filterIsInstance<InlineSpan.Math>()
+        assertEquals(1, math.size)
+        assertEquals("x^2+y^2=z^2", math[0].latex)
+        assertEquals(true, math[0].display)
+    }
+
+    @Test
+    fun `display 定界符内容按原样保留换行与环境`() {
+        val spans = parseInline("\\[\\begin{aligned}a&=b\\\\c&=d\\end{aligned}\\]")
+        val math = spans.filterIsInstance<InlineSpan.Math>().single()
+        assertEquals("\\begin{aligned}a&=b\\\\c&=d\\end{aligned}", math.latex)
+        assertEquals(true, math.display)
+    }
+
+    @Test
+    fun `未闭合的 LaTeX 定界符按普通字符处理`() {
+        // 没有闭符时不产公式 span，`\` 原样进文本（流式藏尾由 ChatStreaming 负责）
+        val inline = parseInline("半截 \\(a+b 后面没了")
+        assertTrue(inline.filterIsInstance<InlineSpan.Math>().isEmpty())
+        val display = parseInline("半截 \\[a+b 后面没了")
+        assertTrue(display.filterIsInstance<InlineSpan.Math>().isEmpty())
+    }
+
+    @Test
+    fun `闭符出现在开头不当成公式`() {
+        val spans = parseInline("a+b\\) 这句话先出现闭符")
+        assertTrue(spans.filterIsInstance<InlineSpan.Math>().isEmpty())
+    }
+
+    @Test
+    fun `定界符与美元符号混排各归各位`() {
+        // `$$..$$` 行内混排时沿用旧语义：display=false（块级化只发生在独占一行/整段时）
+        val spans = parseInline("\\(a\\) 和 \$b\$ 和 \\[c\\] 和 \$\$d\$\$")
+        val math = spans.filterIsInstance<InlineSpan.Math>().map { it.latex to it.display }
+        assertEquals(listOf("a" to false, "b" to false, "c" to true, "d" to false), math)
+    }
+
+    @Test
+    fun `反斜杠不是定界符时照常当普通字符`() {
+        // Windows 路径里的 `\` 不该触发任何公式分支
+        val spans = parseInline("路径 C:\\dir\\file 结尾")
+        assertTrue(spans.filterIsInstance<InlineSpan.Math>().isEmpty())
     }
 }

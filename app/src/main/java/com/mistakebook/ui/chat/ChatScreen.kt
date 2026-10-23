@@ -1,6 +1,13 @@
 package com.mistakebook.ui.chat
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -14,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -69,6 +77,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -85,6 +95,8 @@ import com.mistakebook.ui.common.ApiKeyRequiredDialog
 import com.mistakebook.ui.common.RichText
 import com.mistakebook.ui.common.containerViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlin.math.PI
+import kotlin.math.sin
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Psychology
@@ -93,6 +105,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -144,7 +157,8 @@ fun ChatScreen(
             compressor = c.chatContextCompressor,
             imageOcr = c.chatImageOcr,
             questionId = questionId,
-            sessionId = sessionId
+            sessionId = sessionId,
+            appContext = c.appContext
         )
     }
 
@@ -267,10 +281,15 @@ fun ChatScreen(
             title = { Text(stringResource(R.string.chat_delete_confirm_title)) },
             text = { Text(stringResource(R.string.chat_delete_confirm_body)) },
             confirmButton = {
-                TextButton(onClick = {
-                    showDeleteDialog = false
-                    viewModel.deleteMessage(pendingDeleteId)
-                }) { Text(stringResource(R.string.chat_confirm)) }
+                // 两步确认：删除消息不可恢复，确认键再点一次才执行
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.chat_confirm),
+                    confirmText = stringResource(R.string.chat_delete_confirm_action),
+                    onConfirm = {
+                        showDeleteDialog = false
+                        viewModel.deleteMessage(pendingDeleteId)
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) {
@@ -767,13 +786,8 @@ private fun MessageBubble(
                 }
                 if (message.status == MessageStatus.STREAMING) {
                     Spacer(Modifier.height(6.dp))
-                    // 光标：流式时末尾的小圆点
-                    Box(
-                        Modifier
-                            .size(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(MaterialTheme.colorScheme.primary)
-                    )
+                    // 流式输出指示器：三点弹性跳动 + 整体呼吸（原来是 6dp 静态蓝点）
+                    StreamingDotsIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -796,6 +810,59 @@ private fun MessageBubble(
  * 列表滚动时必然被 GC 拖住。降到 1280 上限，肉眼无损，内存差一个数量级。
  */
 private const val BUBBLE_IMAGE_MAX_PX = 1280
+
+/**
+ * 流式输出指示器：三点弹性跳动 + 整体呼吸。
+ *
+ * 用户原话「有一个蓝点在下面，我希望它能在输出的时候有呼吸效果加上
+ * 三个点的动画弹性运动特效」。做法（单动画源驱动，省掉每点各起一条
+ * 无限动画的开销）：
+ * - 一个 [rememberInfiniteTransition] 的 phase 进度 0→1 线性循环（1200ms）；
+ * - 三个点共用 phase，各错开 1/6 周期。用 sin 曲线取正半周做弹跳量，
+ *   位移与缩放都跟它走——「弹性」感来自同一条曲线同时驱动 scale 与
+ *   translateY，且相邻点错峰形成追上去又落下来的波浪；
+ * - 容器 alpha 单独一条慢周期（1800ms，Reverse 往复）做呼吸。
+ */
+@Composable
+private fun StreamingDotsIndicator(color: Color) {
+    val transition = rememberInfiniteTransition()
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing)
+        )
+    )
+    val breathe by transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        )
+    )
+    Row(
+        modifier = Modifier.alpha(breathe),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        for (i in 0 until 3) {
+            // 相位错开 1/6 周期：相邻点错峰，波浪感
+            val t = (phase + i / 6f) % 1f
+            // sin 取正半周（0..π 对应一个周期前半）→ 只在「上抛后落下」时有量
+            val bounce = sin(t * 2f * PI.toFloat()).coerceAtLeast(0f)
+            val scale = 0.65f + 0.45f * bounce
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .offset(y = (-3).dp * bounce)
+                    .scale(scale)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(color)
+            )
+        }
+    }
+}
 
 /**
  * 按目标边长降采样解码。

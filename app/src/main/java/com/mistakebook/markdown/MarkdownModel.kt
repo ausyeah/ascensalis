@@ -150,6 +150,22 @@ object MarkdownParser {
                     }
                 }
 
+                // 单行 `\[ ... \]`：LaTeX display 定界符。与 `$$` 同权——
+                // 模型（尤其 DeepSeek/o 系）输出独立公式时发 `\[..\]` 是常态，
+                // 只认 `$$` 会让整块公式以源码形式躺在段落里。
+                line.trimStart().startsWith("\\[") -> {
+                    flushParagraph()
+                    val closeAt = line.indexOf("\\]", 2)
+                    if (closeAt > 2) {
+                        val latex = line.trim().substring(2, closeAt).trim()
+                        if (latex.isNotEmpty()) blocks += Block.Math(latex, true)
+                        val rest = line.substring(closeAt + 2).trim()
+                        if (rest.isNotBlank()) paragraph.append(rest)
+                    }
+                    // 未闭合：不建状态机，落进 else 按正文走——parseInline 里
+                    // 同样认 `\[`，闭合后自然升级成公式；流式藏尾见 ChatStreaming。
+                }
+
                 line.matches(RULE_REGEX) -> {
                     flushParagraph()
                     blocks += Block.Rule
@@ -217,6 +233,13 @@ object MarkdownParser {
             text.count { it == '$' } == 2
         ) {
             return Block.Math(text.removePrefix("$").removeSuffix("$").trim(), false)
+        }
+        // LaTeX 标准定界符的整段形态：`\[ ... \]` display、`\( ... \)` inline
+        if (text.startsWith("\\[") && text.endsWith("\\]") && text.length > 4) {
+            return Block.Math(text.substring(2, text.length - 2).trim(), true)
+        }
+        if (text.startsWith("\\(") && text.endsWith("\\)") && text.length > 4) {
+            return Block.Math(text.substring(2, text.length - 2).trim(), false)
         }
         return Block.Paragraph(text)
     }

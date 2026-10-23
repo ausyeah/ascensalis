@@ -67,7 +67,32 @@ fun ChatListScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<ChatListItemUi?>(null) }
     var renameText by remember { mutableStateOf("") }
+    // 单条会话删除：删除不可恢复，先弹窗再两步确认
+    var pendingDeleteSession by remember { mutableStateOf<Long?>(null) }
     val untitled = stringResource(R.string.chat_untitled)
+
+    pendingDeleteSession?.let { sessionId ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteSession = null },
+            title = { Text(stringResource(R.string.chat_delete_message)) },
+            text = { Text(stringResource(R.string.chat_delete_session_confirm_body)) },
+            confirmButton = {
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.chat_confirm),
+                    confirmText = stringResource(R.string.chat_delete_confirm_action),
+                    onConfirm = {
+                        pendingDeleteSession = null
+                        viewModel.delete(sessionId)
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteSession = null }) {
+                    Text(stringResource(R.string.chat_cancel))
+                }
+            }
+        )
+    }
 
     if (showClearConfirm) {
         AlertDialog(
@@ -75,10 +100,15 @@ fun ChatListScreen(
             title = { Text(stringResource(R.string.chat_list_clear_confirm_title)) },
             text = { Text(stringResource(R.string.chat_list_clear_confirm_body)) },
             confirmButton = {
-                TextButton(onClick = {
-                    showClearConfirm = false
-                    viewModel.clearAll()
-                }) { Text(stringResource(R.string.chat_confirm)) }
+                // 两步确认：清空全部对话不可恢复，确认键再点一次才执行
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.chat_confirm),
+                    confirmText = stringResource(R.string.chat_list_clear_confirm_action),
+                    onConfirm = {
+                        showClearConfirm = false
+                        viewModel.clearAll()
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirm = false }) {
@@ -200,7 +230,7 @@ fun ChatListScreen(
                         renameText = item.session.title
                         renaming = item
                     },
-                    onDelete = { viewModel.delete(item.session.id) }
+                    onDelete = { pendingDeleteSession = item.session.id }
                 )
                 HorizontalDivider()
             }

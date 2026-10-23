@@ -133,4 +133,24 @@ class TableCellPlainTextTest {
     fun `空单元格安全`() {
         assertEquals("", tableCellToPlainText(""))
     }
+
+    // ------------------------------------- LaTeX 标准定界符（v0.0.24）
+
+    @Test
+    fun `inline 定界符降级成可读文本`() {
+        assertEquals("a/b", tableCellToPlainText("\\(\\frac{a}{b}\\)"))
+    }
+
+    @Test
+    fun `display 定界符降级成可读文本`() {
+        assertEquals("a/b", tableCellToPlainText("\\[\\frac{a}{b}\\]"))
+    }
+
+    @Test
+    fun `定界符与美元混排都降级`() {
+        assertEquals(
+            "x 与 y",
+            tableCellToPlainText("\\(x\\) 与 \$y\$")
+        )
+    }
 }

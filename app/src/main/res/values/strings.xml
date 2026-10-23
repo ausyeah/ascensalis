@@ -173,6 +173,7 @@
     <string name="detail_edit">编辑</string>
     <string name="detail_delete">删除</string>
     <string name="detail_delete_confirm">删除后可在回收站保留 30 天，确认删除这道题？</string>
+    <string name="detail_delete_confirm_action">确认删除</string>
     <string name="detail_mark_mastered">标记已掌握</string>
     <string name="detail_mastered_hint">已掌握 🎉</string>
     <string name="detail_add_to_print">加入打印清单</string>
@@ -223,6 +224,7 @@
     <string name="settings_usage_mineru_calls">MinerU 解析</string>
     <string name="settings_usage_mineru_pages">解析页数（计费额度按页算）</string>
     <string name="settings_usage_reset">清零重算</string>
+    <string name="settings_usage_reset_confirm">确认清零</string>
     <string name="settings_usage_hint">仅统计本机，自上次清零起累计；缓存命中部分的单价低于普通输入</string>
 
     <!-- 思考强度 -->
@@ -288,6 +290,7 @@
     <string name="settings_export_backup">导出备份</string>
     <string name="settings_restore_backup">从备份恢复</string>
     <string name="settings_clear_trash">清空回收站</string>
+    <string name="settings_clear_trash_confirm">确认清空</string>
     <string name="settings_restore_confirm_title">恢复备份</string>
     <string name="settings_restore_confirm_body">恢复会覆盖当前全部错题与图片，且无法撤销。确认继续？</string>
     <string name="settings_restore_done">恢复完成，已重新载入 %1$d 题</string>
@@ -300,9 +303,11 @@
     <string name="settings_wordbook_reset_title">英语单词数据重置</string>
     <string name="settings_wordbook_reset_desc">重置后不可恢复。今日重置只清掉今天的作答记录；全部重置会清空熟词、错词本、生词本与全部学习统计。</string>
     <string name="settings_wordbook_reset_today">重置今日记录</string>
+    <string name="settings_wordbook_reset_today_confirm">确认重置</string>
     <string name="settings_wordbook_reset_today_body">将清空今天的作答流水：今日已学归零、热力图今天那一格清空、连续打卡回到今天之前。\n\n熟词、错词本、生词本不受影响。</string>
     <string name="settings_wordbook_reset_today_done">今日学习记录已重置</string>
     <string name="settings_wordbook_reset_all">全部重置</string>
+    <string name="settings_wordbook_reset_all_confirm">确认重置</string>
     <string name="settings_wordbook_reset_all_body">将清空全部学习进度与统计：熟词标记、错词本、生词本、连续打卡、月度热力图，全部从零开始。\n\n此操作不可恢复。</string>
     <string name="settings_wordbook_reset_all_done">单词数据已全部重置</string>
 
@@ -375,6 +380,9 @@
     <string name="chat_list_new">新对话</string>
     <string name="chat_list_clear_all">清空全部</string>
     <string name="chat_list_clear_confirm_title">清空全部对话？</string>
+    <string name="chat_list_clear_confirm_action">确认清空</string>
+    <string name="chat_delete_confirm_action">确认删除</string>
+    <string name="chat_delete_session_confirm_body">删除后该对话及其消息将无法恢复，确认删除？</string>
     <string name="chat_list_clear_confirm_body">所有对话记录都会被删除，此操作不可恢复。</string>
     <string name="chat_list_item_messages">%1$d 条消息</string>
     <string name="chat_list_bound_question">题目：%1$s</string>

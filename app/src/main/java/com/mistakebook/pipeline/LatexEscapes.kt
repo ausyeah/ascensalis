@@ -205,6 +205,18 @@ object LatexEscapes {
                 i++
                 continue
             }
+            // LaTeX 标准定界符 `\( \)` `\[ \]`：与 `$` 一样切换数学区。
+            // 只认 `$` 的话，`\( a<TAB>b \)` 里的制表符不会被还原，
+            // 公式到了 KaTeX 就是解析失败。
+            if (mathOnly && ch == '\\' && i + 1 < text.length &&
+                (text[i + 1] == '(' || text[i + 1] == ')' ||
+                    text[i + 1] == '[' || text[i + 1] == ']')
+            ) {
+                inMath = !inMath
+                out.append(ch).append(text[i + 1])
+                i += 2
+                continue
+            }
             // 只处理 8..13 里的非换行字符，且**后接 ASCII 字母**。
             // 后接字母这一条是关键判据：反斜杠被吃掉后命令名还在
             // （`\to` -> TAB+`o`），而正常中文排版里的制表符后面跟的是汉字。

@@ -863,25 +863,29 @@ internal fun MineruUsageSection(container: com.mistakebook.di.AppContainer) {
     }
 }
 
-/** 两个用量区共用的「清零重算」按钮：重置后把最新快照回传给调用方刷新界面。 */
+/**
+ * 两个用量区共用的「清零重算」按钮：重置后把最新快照回传给调用方刷新界面。
+ *
+ * 两步确认（首击变全红 + 「确认清零」，再击才执行）——清零不可恢复，
+ * 误触一次整段用量历史就没了。见 [com.mistakebook.ui.common.TwoStepConfirmButton]。
+ */
 @Composable
 private fun ResetUsageButton(
     container: com.mistakebook.di.AppContainer,
     scope: kotlinx.coroutines.CoroutineScope,
     onReset: (UsageSnapshot) -> Unit
 ) {
-    TextButton(
-        onClick = {
+    com.mistakebook.ui.common.TwoStepConfirmButton(
+        text = stringResource(R.string.settings_usage_reset),
+        confirmText = stringResource(R.string.settings_usage_reset_confirm),
+        icon = Icons.Default.Refresh,
+        onConfirm = {
             scope.launch {
                 withContext(Dispatchers.IO) { container.usageStatsStore.reset() }
                 onReset(container.usageStatsStore.snapshot())
             }
         }
-    ) {
-        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(stringResource(R.string.settings_usage_reset))
-    }
+    )
 }
 
 @Composable
@@ -1183,15 +1187,13 @@ internal fun DataManageSection(
             }
         }
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = viewModel::clearTrash,
-            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
-                contentColor = MaterialTheme.colorScheme.error
-            ),
+        // 两步确认：清空回收站不可恢复，首击变全红 + 「确认清空」，再击才执行
+        com.mistakebook.ui.common.TwoStepConfirmButton(
+            text = stringResource(R.string.settings_clear_trash),
+            confirmText = stringResource(R.string.settings_clear_trash_confirm),
+            onConfirm = viewModel::clearTrash,
             modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.settings_clear_trash))
-        }
+        )
     }
 }
 
@@ -1259,25 +1261,27 @@ internal fun WordbookDataSection(
             title = { Text(stringResource(R.string.settings_wordbook_reset_today)) },
             text = { Text(stringResource(R.string.settings_wordbook_reset_today_body)) },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmToday = false
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            val startOfDay = java.util.Calendar.getInstance().apply {
-                                set(java.util.Calendar.HOUR_OF_DAY, 0)
-                                set(java.util.Calendar.MINUTE, 0)
-                                set(java.util.Calendar.SECOND, 0)
-                                set(java.util.Calendar.MILLISECOND, 0)
-                            }.timeInMillis
-                            dao.clearLogsSince(startOfDay)
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.action_confirm),
+                    confirmText = stringResource(R.string.settings_wordbook_reset_today_confirm),
+                    onConfirm = {
+                        confirmToday = false
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                val startOfDay = java.util.Calendar.getInstance().apply {
+                                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                                    set(java.util.Calendar.MINUTE, 0)
+                                    set(java.util.Calendar.SECOND, 0)
+                                    set(java.util.Calendar.MILLISECOND, 0)
+                                }.timeInMillis
+                                dao.clearLogsSince(startOfDay)
+                            }
+                            // 广播后再提示：背单词页先完成重载，用户切回去看到的就是新状态
+                            container.wordbookEpoch.value += 1
+                            onResetDone(todayDoneMsg)
                         }
-                        // 广播后再提示：背单词页先完成重载，用户切回去看到的就是新状态
-                        container.wordbookEpoch.value += 1
-                        onResetDone(todayDoneMsg)
                     }
-                }) {
-                    Text(stringResource(R.string.action_confirm))
-                }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { confirmToday = false }) {
@@ -1293,22 +1297,24 @@ internal fun WordbookDataSection(
             title = { Text(stringResource(R.string.settings_wordbook_reset_all)) },
             text = { Text(stringResource(R.string.settings_wordbook_reset_all_body)) },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmAll = false
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            // 先清进度再清流水：反过来的话，若进程在两步之间被杀，
-                            // 会留下「有流水无进度」的中间态，统计页按旧流水
-                            // 还能算出学习量，进度却是全新的，两边对不上。
-                            dao.clearAllProgress()
-                            dao.clearLogs()
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.action_confirm),
+                    confirmText = stringResource(R.string.settings_wordbook_reset_all_confirm),
+                    onConfirm = {
+                        confirmAll = false
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                // 先清进度再清流水：反过来的话，若进程在两步之间被杀，
+                                // 会留下「有流水无进度」的中间态，统计页按旧流水
+                                // 还能算出学习量，进度却是全新的，两边对不上。
+                                dao.clearAllProgress()
+                                dao.clearLogs()
+                            }
+                            container.wordbookEpoch.value += 1
+                            onResetDone(allDoneMsg)
                         }
-                        container.wordbookEpoch.value += 1
-                        onResetDone(allDoneMsg)
                     }
-                }) {
-                    Text(stringResource(R.string.action_confirm))
-                }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { confirmAll = false }) {

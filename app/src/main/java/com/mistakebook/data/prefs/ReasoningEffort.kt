@@ -33,6 +33,7 @@ enum class ReasoningEffort(val key: String?) {
 
     companion object {
         fun fromKey(key: String?): ReasoningEffort = when (key?.lowercase()) {
+            "off" -> OFF // SettingsStore.setReasoningEffort 把 OFF 写成字符串 "off"，这里必须认
             "low" -> LOW
             "medium" -> MEDIUM
             "high" -> HIGH

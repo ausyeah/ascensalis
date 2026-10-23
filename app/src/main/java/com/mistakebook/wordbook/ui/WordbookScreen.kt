@@ -402,7 +402,7 @@ private fun StudyView(
         // （今日已学 / 目标 / 打卡）在「学习统计」页都有完整呈现——
         // 刷题页每一寸都留给题目本身。
 
-        // 模式切换 + 上一题 + 熟词标记操作栏
+        // 模式切换 + 上一题操作栏（熟词/生词标记已并入卡片右上角工具位）
         item {
             Row(
                 modifier = Modifier
@@ -443,10 +443,9 @@ private fun StudyView(
                     )
                 }
 
-                // 四个模式 chip 横向滚动：加上「拼写」后，即使把模式名
-                // 缩成「四选一/卡片/义项/拼写」，360dp 小屏上仍可能
-                // 与熟词星标挤在一起。让 chip 区自己滚动、占满剩余宽度，
-                // 星标固定在右侧，两边都不被挤掉。
+                // 四个模式 chip 横向滚动，占满整行剩余宽度。
+                // 熟词星标已移到卡片右上角工具位（与发音/收藏并排），
+                // 不再占这一行的固定右侧位——用户反馈「别占一排的固定位置」。
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -472,16 +471,6 @@ private fun StudyView(
                         selected = state.studyMode == StudyMode.SPELL,
                         onClick = { viewModel.setStudyMode(StudyMode.SPELL) },
                         label = { Text("拼写") }
-                    )
-                }
-
-                // 熟词标记按钮
-                val isMastered = state.currentProgress?.isMastered == true
-                IconButton(onClick = viewModel::toggleMasterCurrentWord) {
-                    Icon(
-                        imageVector = if (isMastered) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = "熟词标记",
-                        tint = if (isMastered) PaperLv1 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -792,11 +781,24 @@ private fun StudyView(
                         }
                     }
 
-                    // 右上角工具位：发音（义项辨析模式不给，发音=报答案）+ 收藏
+                    // 右上角工具位：熟词星标 + 发音（义项辨析模式不给，发音=报答案）+ 收藏。
+                    // 三个标记/工具按钮并排在一处，不各占一行的固定位。
                     Row(
                         modifier = Modifier.align(Alignment.TopEnd),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val isMastered = state.currentProgress?.isMastered == true
+                        IconButton(
+                            onClick = viewModel::toggleMasterCurrentWord,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isMastered) Icons.Default.Star else Icons.Default.StarBorder,
+                                contentDescription = if (isMastered) "取消熟词标记" else "标记熟词",
+                                tint = if (isMastered) PaperLv1 else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
                         if (state.studyMode != StudyMode.SENSE) {
                             IconButton(
                                 onClick = viewModel::speakCurrentWord,

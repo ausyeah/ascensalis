@@ -168,4 +168,56 @@ class MarkdownDisplayMathTest {
         assertTrue(items[0].text.contains(first))
         assertEquals(0, blocks.count { it is MarkdownParser.Block.Math })
     }
+
+    // ------------------------------------------- LaTeX 标准定界符（v0.0.24）
+
+    @Test
+    fun `单行 display 定界符产出块级公式`() {
+        val blocks = parse("\\[a^2+b^2=c^2\\] 后面还有字")
+        val math = blocks.filterIsInstance<MarkdownParser.Block.Math>()
+        assertEquals(1, math.size)
+        assertEquals("a^2+b^2=c^2", math[0].latex)
+        assertEquals(true, math[0].display)
+        assertTrue("闭合后的正文不能丢", blocks.any { it is MarkdownParser.Block.Paragraph })
+    }
+
+    @Test
+    fun `行内混排的 display 定界符留在段落由 parseInline 切分`() {
+        // 行首不是 `\[`（前面有文字）：不进块级分支，整段保留，
+        // 行内公式 span 由 RichText 的 parseInline 切——两级解析各司其职。
+        val blocks = parse("看这个：\\[a^2+b^2=c^2\\] 后面还有字")
+        assertEquals(0, blocks.count { it is MarkdownParser.Block.Math })
+        val paragraph = blocks.filterIsInstance<MarkdownParser.Block.Paragraph>().single()
+        assertTrue(paragraph.text.contains("\\[a^2+b^2=c^2\\]"))
+    }
+
+    @Test
+    fun `整段只是一个 display 定界符公式`() {
+        val blocks = parse("\\[\\frac{1}{2}\\]")
+        val math = blocks.filterIsInstance<MarkdownParser.Block.Math>().single()
+        assertEquals("\\frac{1}{2}", math.latex)
+        assertEquals(true, math.display)
+    }
+
+    @Test
+    fun `整段只是一个 inline 定界符公式`() {
+        val blocks = parse("\\(x\\to0\\)")
+        val math = blocks.filterIsInstance<MarkdownParser.Block.Math>().single()
+        assertEquals("x\\to0", math.latex)
+        assertEquals(false, math.display)
+    }
+
+    @Test
+    fun `未闭合的 display 定界符不建块按正文走`() {
+        val blocks = parse("半截 \\[a+b 后面没有了")
+        assertEquals(0, blocks.count { it is MarkdownParser.Block.Math })
+    }
+
+    @Test
+    fun `段落里混排的 inline 定界符仍留在段落文本`() {
+        // 行内混排不进块级分支，由 parseInline 在段落内切公式 span
+        val blocks = parse("设 \\(x=1\\) 时成立")
+        assertEquals(0, blocks.count { it is MarkdownParser.Block.Math })
+        assertTrue(blocks[0] is MarkdownParser.Block.Paragraph)
+    }
 }

@@ -279,10 +279,14 @@ private fun collectMathKeys(blocks: List<MarkdownParser.Block>): List<String> {
     return keys.toList()
 }
 
-/** 与 InlineRow 保持一致：逐个行内公式单独作为 key。 */
+/** 与 InlineRow 保持一致：逐个行内公式单独作为 key；`\[..\]` 走 display 前缀。 */
 private fun segmentMathKeys(text: String): List<String> =
     parseInline(text).filterIsInstance<InlineSpan.Math>()
-        .map { "i:${it.latex}" }
+        .map { mathKey(it) }
+
+/** 公式的缓存键前缀：display 定界符 `\[..\]` 与块级 `$$` 共用 `d:` 渲染尺寸。 */
+internal fun mathKey(span: InlineSpan.Math): String =
+    if (span.display) "d:${span.latex}" else "i:${span.latex}"
 
 /**
  * 一张表格。
@@ -336,6 +340,9 @@ private fun TableBlock(block: MarkdownParser.Block.Table) {
 // 一个 5×8 的表格就是 240 次编译，而流式输出每来一块都要重算一遍整张表。
 private val RE_TABLE_DISPLAY_MATH = Regex("""\$\$([^$]+)\$\$""")
 private val RE_TABLE_INLINE_MATH = Regex("""\$([^$]+)\$""")
+// LaTeX 标准定界符：`\( ... \)` 与 `\[ ... \]`，内容同样只留可读部分
+private val RE_TABLE_LATEX_INLINE = Regex("""\\\(([^)]+)\\\)""")
+private val RE_TABLE_LATEX_DISPLAY = Regex("""\\\[([^\]]+)\\\]""")
 private val RE_TABLE_CODE = Regex("""`+([^`]*)`+""")
 private val RE_TABLE_FRAC = Regex("""\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}""")
 private val RE_TABLE_COMMAND = Regex("""\\([a-zA-Z]+)""")
@@ -346,6 +353,9 @@ internal fun tableCellToPlainText(raw: String): String {
     // 先取公式内容（`$x$` / `$$x$$`），把美元符号丢掉
     text = text.replace(RE_TABLE_DISPLAY_MATH, "$1")
     text = text.replace(RE_TABLE_INLINE_MATH, "$1")
+    // LaTeX 定界符 `\(..\)` / `\[..\]`：同样只留内容
+    text = text.replace(RE_TABLE_LATEX_INLINE, "$1")
+    text = text.replace(RE_TABLE_LATEX_DISPLAY, "$1")
     // **落单的那个**也去掉。
     //
     // 流式输出到一半时表格单元格可能只收到 `$x^2`（闭合标记还没到），
@@ -543,8 +553,15 @@ private fun InlineRow(
                 spans.forEachIndexed { index, span ->
                     when (span) {
                         is InlineSpan.Math -> {
-                            val rendered = mathCache["i:${span.latex}"]
+                            // `\[..\]` 用块级渲染缓存与更大的高度上限：
+                            // display 公式（求和/积分/矩阵）按行内高度压就剩一线，没法看。
+                            val rendered = mathCache[mathKey(span)]
                             val image = rendered?.bitmap
+                            val maxHeightPx = if (span.display) {
+                                com.mistakebook.math.MathLayout.displayMathMaxHeightPx(targetFontPx)
+                            } else {
+                                inlineMathMaxHeightPx
+                            }
                             // 渲染失败时按一个正文字号的空位占位，
                             // 让回退出来的源码文字还能正常参与换行。
                             val fitted = if (rendered != null && image != null) {
@@ -554,13 +571,16 @@ private fun InlineRow(
                                     srcFontPx = rendered.fontPx,
                                     targetFontPx = com.mistakebook.math.MathLayout.letterTargetPx(targetFontPx),
                                     maxWidthPx = availableWidthPx,
-                                    maxHeightPx = inlineMathMaxHeightPx
+                                    maxHeightPx = maxHeightPx
                                 )
                             } else {
                                 null
                             }
                             val w = fitted?.width ?: targetFontPx
-                            val h = fitted?.height ?: (targetFontPx * 0.9f)
+                            // 占位高度一律不超行高：行内 display 公式（`\[..\]` 混排时）
+                            // 的 3.2 倍上限高于行框 2.45 倍，超高会与上下行重叠。
+                            val h = (fitted?.height ?: (targetFontPx * 0.9f))
+                                .coerceAtMost(lineHeightPx)
                             put(
                                 "math$index",
                                 InlineTextContent(
@@ -688,7 +708,13 @@ sealed interface InlineSpan {
         val code: Boolean = false
     ) : InlineSpan
 
-    data class Math(val latex: String) : InlineSpan
+    /**
+     * 行内公式。
+     *
+     * @param display true 表示 `\[...\]`（display 定界符）——按块级尺寸渲染，
+     *   不走行内压缩。默认 false 对应 `$...$` 与 `\(...\)`。
+     */
+    data class Math(val latex: String, val display: Boolean = false) : InlineSpan
     data class Image(val path: String, val alt: String) : InlineSpan
 }
 
@@ -767,6 +793,25 @@ fun parseInline(input: String): List<InlineSpan> {
         return -1
     }
 
+    /**
+     * 从 cursor + [startRel] 起找第一个 [token]，返回其**相对 cursor** 的下标；找不到返回 -1。
+     *
+     * 与 [indexOfPairFrom] 同族，供 `\(` `\)` / `\[` `\]` 这类两个字符的定界符用。
+     */
+    fun indexOfTokenFrom(token: String, startRel: Int): Int {
+        var i = cursor + startRel
+        val last = input.length - token.length
+        while (i <= last) {
+            var hit = true
+            for (j in token.indices) {
+                if (input[i + j] != token[j]) { hit = false; break }
+            }
+            if (hit) return i - cursor
+            i++
+        }
+        return -1
+    }
+
     while (cursor < input.length) {
         when {
             startsWithAt("**") -> {
@@ -779,6 +824,35 @@ fun parseInline(input: String): List<InlineSpan> {
                 flush()
                 code = !code
                 cursor += 1
+            }
+
+            // LaTeX 标准定界符：`\[ ... \]`（display）与 `\( ... \)`（inline）。
+            // 模型输出公式时四种定界符（$$、$、\(\)、\[\]）混用是常态——
+            // o1/DeepSeek/GPT 系普遍发 `\(...\)`，只认 `$` 会让满屏 LaTeX 源码
+            // 直接以文本形式显示（用户反馈"很基本的公式都没渲染出来"）。
+            // 分支放在 `$$` 之前：`\` 开头不可能是其他任何分支。
+            startsWithAt("\\[") -> {
+                val end = indexOfTokenFrom("\\]", 2)
+                if (end > 2) {
+                    flush()
+                    spans += InlineSpan.Math(slice(2, end).trim(), display = true)
+                    cursor += end + 2
+                } else {
+                    buffer.append('\\')
+                    cursor++
+                }
+            }
+
+            startsWithAt("\\(") -> {
+                val end = indexOfTokenFrom("\\)", 2)
+                if (end > 2) {
+                    flush()
+                    spans += InlineSpan.Math(slice(2, end).trim())
+                    cursor += end + 2
+                } else {
+                    buffer.append('\\')
+                    cursor++
+                }
             }
 
             startsWithAt("$$") -> {
