@@ -249,11 +249,21 @@ class VocabRepository(private val context: Context? = null) {
     suspend fun buildSenseQuestion(targetWord: Word? = null): SenseQuestion? {
         ensureLoaded()
         val multiWords = getMultiSenseWords()
-        if (multiWords.isEmpty()) return null
 
-        val word = if (targetWord != null && splitSenses(targetWord.meaning).size >= 2) {
+        // **锚定当前词**。
+        //
+        // 早先这里写的是「targetWord 义项数 < 2 就随机换一个多义词」——
+        // 于是「切换到义项辨析」会莫名其妙把当前单词换掉：用户盯着
+        // radical，切一下模式，题面变成另一个词了。
+        //
+        // 现在：只要传了词就用它（≥1 个义项即可），不传才从多义词池随机。
+        // 只有一个义项的词也能出题——题干是那唯一的义项，
+        // 答案唯一性由「排除释义含同一义项的干扰项」保证。
+        val word = if (targetWord != null) {
+            if (splitSenses(targetWord.meaning).isEmpty()) return null
             targetWord
         } else {
+            if (multiWords.isEmpty()) return null
             multiWords.random(Random)
         }
 

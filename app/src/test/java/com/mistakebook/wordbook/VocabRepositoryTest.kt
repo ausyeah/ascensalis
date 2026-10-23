@@ -160,14 +160,29 @@ class VocabRepositoryTest {
     }
 
     @Test
-    fun `buildSenseQuestion with single-sense word gracefully falls back to multi-sense word`() = runBlocking {
-        // abandon 仅有 1 个义项，buildSenseQuestion 应自动挑选多义词（如 desert 或 benefit）
+    fun `buildSenseQuestion 不再偷偷换词，单义词也用它自己出题`() = runBlocking {
+        // abandon 的 meaning 只有一个义项「v. 放弃，抛弃」。
+        //
+        // 旧行为是「义项数 < 2 就随机换一个多义词」——这正是用户报的 bug：
+        // 「切换到义项辨析就会换词」。用户刚在四选一里选对了这个词，
+        // 一进义项模式词就变了，等于把刚建立的语境抽走。
+        //
+        // 现在传了词就用它，题干取那唯一的义项；答案唯一性由
+        // 「排除释义含同一义项的干扰项」保证（下面逐条断言）。
         val targetSingleSense = sampleWords.first { it.word == "abandon" }
         val q = repo.buildSenseQuestion(targetSingleSense)
         assertNotNull(q)
-        assertTrue(repo.splitSenses(q!!.word.meaning).size >= 2)
+        assertEquals("abandon", q!!.word.word)
         assertEquals(4, q.options.size)
-        assertTrue(q.options.any { it.word == q.word.word })
+        assertEquals(1, q.options.count { it.word == "abandon" })
+
+        val targetSenseNorm = repo.normSense(q.sense)
+        for (d in q.options.filter { it.word != "abandon" }) {
+            assertFalse(
+                "干扰项 ${d.word} 不能包含题干义项 ${q.sense}",
+                repo.splitSenses(d.meaning).any { repo.normSense(it) == targetSenseNorm }
+            )
+        }
     }
 
     @Test

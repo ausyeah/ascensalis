@@ -105,6 +105,28 @@ data class WordbookUiState(
     val options: List<QuizOption> = emptyList(),
     val selectedOptionIndex: Int? = null,
     val isAnswered: Boolean = false,
+
+    /**
+     * 已作答，但**允许改选**。
+     *
+     * ## 为什么需要它
+     *
+     * 用户反馈：「上一个词选对了然后返回上一个之后，锁定死了不能选择，
+     * 是仍然保留刚才的状态但是可以修改的意思」。
+     *
+     * 「上一题」回退的语义是**原样重放**：选项、选中、对错都不变。
+     * 但如果因此把选项**锁死**（`enabled = !isAnswered`），
+     * 用户就是想改主意时却改不了——回退就成了只能看不能动。
+     *
+     * 所以拆成两个维度：
+     * - [isAnswered] = 是否已判定（决定要不要显示对错颜色与解析）
+     * - 本字段 = 是否还能改选
+     *
+     * 回退/切模式重放时：已作答的题置 `allowReselect = true`，
+     * 于是**保留刚才的选中状态**（视觉上还是那道题、那个选择），
+     * 同时允许用户改选。
+     */
+    val allowReselect: Boolean = false,
     val isCardRevealed: Boolean = false,
     val remainingQueueCount: Int = 0,
 
@@ -137,6 +159,14 @@ data class WordbookUiState(
 
     // 是否有可回退的「上一题」（按钮置灰用）
     val hasPrevious: Boolean = false,
+
+    // ---- 循环复习轮次 ----
+    /** 当前轮次号；0 = 还没开过任何一轮。 */
+    val roundNumber: Int = 0,
+    /** 本轮剩余待复习词数。 */
+    val roundRemaining: Int = 0,
+    /** 已学过的词数（进过轮次队列的总数）。 */
+    val studiedWordCount: Int = 0,
 
     // 错题本子页
     val wrongSubTab: WrongSubTab = WrongSubTab.WRONG_BOOK,

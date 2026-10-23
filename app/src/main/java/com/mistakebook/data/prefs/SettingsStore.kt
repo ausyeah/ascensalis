@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -340,6 +341,39 @@ class SettingsStore(context: Context) {
     suspend fun setWordbookReminderEnabled(value: Boolean) =
         editBoolean(KEY_WORDBOOK_REMINDER, value)
 
+    // ===== 单词书循环复习轮次 =====
+
+    /**
+     * 循环轮次状态。
+     *
+     * ## 为什么要有「轮次」
+     *
+     * 背单词的 SRS 是「答对即退出本轮」，下次复习推到很久以后。
+     * 但考研初试在 12 月下旬，而词库走完一轮就要两三个月——一轮结束后
+     * 所有已掌握的词都落在考期之外，考前只剩错题本在转。
+     *
+     * 所以补的不是自动间隔（那与「刷一轮」的定位冲突），而是
+     * **手动开新轮次**：用户决定何时开始第 N 轮，系统按薄弱程度
+     * 把已学过的词重新召回。轮次进度不额外存字段，由每个词的
+     * `updatedAt` 派生（见 WordbookViewModel 的 roundQueue）。
+     */
+    data class WordbookRound(val n: Int = 0, val startedAt: Long = 0L)
+
+    val wordbookRound: Flow<WordbookRound> = appContext.settingsDataStore.data.map { prefs ->
+        WordbookRound(
+            n = prefs[KEY_ROUND_N] ?: 0,
+            startedAt = prefs[KEY_ROUND_STARTED_AT] ?: 0L
+        )
+    }
+
+    /** 开启新一轮：轮次号 +1，开始时间设为此刻。 */
+    suspend fun startWordbookRound(n: Int, startedAt: Long) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[KEY_ROUND_N] = n
+            prefs[KEY_ROUND_STARTED_AT] = startedAt
+        }
+    }
+
     // ===== 外观与主题 =====
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -410,5 +444,7 @@ class SettingsStore(context: Context) {
         const val MAX_WORDBOOK_DAILY_GOAL = 500
         val KEY_ACTIVE_PROFILE = stringPreferencesKey("active_llm_profile")
         val KEY_HOME_QUESTION_ORDER = stringPreferencesKey("home_question_order")
+        val KEY_ROUND_N = intPreferencesKey("wordbook_round_n")
+        val KEY_ROUND_STARTED_AT = longPreferencesKey("wordbook_round_started_at")
     }
 }

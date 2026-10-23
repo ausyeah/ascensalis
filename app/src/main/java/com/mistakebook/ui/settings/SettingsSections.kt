@@ -6,8 +6,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -29,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -521,7 +526,19 @@ internal fun ProfileRow(
     resultOk: Boolean,
     fetchingModels: Boolean = false,
     pickedModel: String? = null,
-    onPickedModelConsumed: () -> Unit = {}
+    onPickedModelConsumed: () -> Unit = {},
+
+    /**
+     * 这套配置**已拉取到的模型列表**（按配置 id 归属）。
+     *
+     * 用户诉求：「你反正获取到了这个模型列表，为什么不让我自己选择勾选与否
+     * 来确定这个配置可用模型呢」。
+     *
+     * 所以拉到列表后不能只让用户「挑一个填进模型名」——
+     * 而是要能**勾选若干个**作为「本配置可用模型」，
+     * 对话页据此提供模型切换。
+     */
+    fetchedModels: List<String> = emptyList()
 ) {
     var name by remember(profile.id) { mutableStateOf(profile.name) }
     var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
@@ -762,6 +779,86 @@ internal fun ProfileRow(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // ===== 模型勾选区 =====
+                //
+                // 拉到的模型列表直接列出来让用户**勾选**哪些算「本配置可用模型」。
+                // 勾选结果写进 providerModelList（= profile.models），
+                // 对话页据此提供模型切换。
+                if (fetchedModels.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.settings_pick_provider_models),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Column(
+                        modifier = Modifier.heightIn(max = 220.dp).verticalScroll(
+                            rememberScrollState()
+                        )
+                    ) {
+                        fetchedModels.forEach { m ->
+                            val checked = providerModelList.any { it.equals(m, ignoreCase = true) }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val next = providerModelList.toMutableList()
+                                        if (checked) {
+                                            next.removeAll { it.equals(m, ignoreCase = true) }
+                                        } else {
+                                            next.add(m)
+                                        }
+                                        providerModelList = next.distinct()
+                                        providerModelsText = next.joinToString(", ")
+                                        onDraftChanged()
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = {
+                                        val next = providerModelList.toMutableList()
+                                        if (it) next.add(m) else {
+                                            next.removeAll { e -> e.equals(m, ignoreCase = true) }
+                                        }
+                                        providerModelList = next.distinct()
+                                        providerModelsText = next.joinToString(", ")
+                                        onDraftChanged()
+                                    }
+                                )
+                                Text(
+                                    text = m,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                // 一键把某个模型设为主模型
+                                TextButton(onClick = {
+                                    model = m
+                                    onDraftChanged()
+                                }) {
+                                    Text(
+                                        stringResource(R.string.settings_set_as_main),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // 全选 / 全不选
+                    Row {
+                        TextButton(onClick = {
+                            providerModelList = fetchedModels.toList()
+                            providerModelsText = providerModelList.joinToString(", ")
+                            onDraftChanged()
+                        }) { Text(stringResource(R.string.settings_select_all)) }
+                        TextButton(onClick = {
+                            providerModelList = emptyList()
+                            providerModelsText = ""
+                            onDraftChanged()
+                        }) { Text(stringResource(R.string.settings_select_none)) }
+                    }
+                }
+
                 Spacer(Modifier.height(4.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -876,7 +973,9 @@ internal fun LlmProfilesSection(
                 resultOk = state.llmOutcome(profile.id)?.ok ?: false,
                 fetchingModels = state.loadingModels,
                 pickedModel = state.pickedModel,
-                onPickedModelConsumed = viewModel::consumePickedModel
+                onPickedModelConsumed = viewModel::consumePickedModel,
+                // 这套配置自己拉到的模型列表（勾选区用）
+                fetchedModels = state.fetchedModelsByProfile[profile.id].orEmpty()
             )
             Spacer(Modifier.height(8.dp))
         }

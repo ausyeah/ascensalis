@@ -48,7 +48,33 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     // 内存中的短期错题重现队列（答错后延迟若干题再次重现强化）
     private data class DeferItem(val word: Word, val reappearAtAnswerCount: Int)
     private val deferQueue = mutableListOf<DeferItem>()
+
+    /**
+     * 每个词已经延迟重现过几次。
+     *
+     * 没有上限的话，一个总答错的词会在同一会话里无限次地冒出来，
+     * 用户做同一道题十遍却一个新词没学到。封顶 [MAX_DEFER_TIMES] 次后
+     * 它退出本会话的候选池，下次会话重新计数。
+     */
+    private val deferCount = mutableMapOf<String, Int>()
     private var sessionAnswerCount = 0
+
+    /** 循环复习轮次：轮次号与本轮开始时间（后者为 0 = 没开过轮）。 */
+    private var roundNumber = 0
+    private var roundStartedAt = 0L
+
+    /**
+     * 错词本抽词权重。
+     *
+     * 70% 与 Web 版 wordbook 一致：错词本是薄弱项，应当主导出题；
+     * 留 30% 给新词是为了词汇量增长——只刷错题的话新词永远见不到。
+     */
+    private companion object {
+        const val WRONG_BOOK_WEIGHT = 0.70f
+
+        /** 单个词在一次会话内最多延迟重现几次。 */
+        const val MAX_DEFER_TIMES = 3
+    }
 
     // 最近刷过的单词滑动窗口（冷却窗口，严格防止单词连着连续出现）
     private val recentWords = ArrayDeque<String>()
@@ -184,6 +210,8 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 options = snapshot.options,
                 selectedOptionIndex = snapshot.selectedOptionIndex,
                 isAnswered = snapshot.isAnswered,
+                // 切模式回来同样允许改选（状态保留，但能改）。
+                allowReselect = snapshot.isAnswered,
                 isCardRevealed = snapshot.isCardRevealed,
                 spellInput = snapshot.spellInput,
                 spellSubmitted = snapshot.spellSubmitted,
@@ -204,7 +232,16 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             }
             observeDatabaseStats()
             prepareNextQuestion()
+            refreshRoundInfo()
             _uiState.update { it.copy(isLoading = false) }
+        }
+        // 轮次状态跟随设置变化（在设置页之外被别处改动也能同步）
+        viewModelScope.launch {
+            container.settingsStore.wordbookRound.collect { r ->
+                roundNumber = r.n
+                roundStartedAt = r.startedAt
+                refreshRoundInfo()
+            }
         }
         // 周统计刷新后实时同步到 UI 状态（切到统计页或答完题都会触发）
         viewModelScope.launch {
@@ -574,6 +611,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     options = emptyList(),
                     selectedOptionIndex = null,
                     isAnswered = false,
+                    allowReselect = false,
                     isCardRevealed = false,
                     spellInput = "",
                     spellSubmitted = false,
@@ -585,22 +623,18 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         }
 
         if (_uiState.value.studyMode == StudyMode.SENSE) {
+            // **绝不换词**：切到义项辨析要保留当前这个词，只是换呈现方式。
+            //
+            // 早先这里有一层「构题失败就 pickNextWord() 换词」的重试，
+            // 结果是用户盯着某个词，切一下模式题面就变成别的词了。
+            // 现在只重试**同��个词的另一个义项**；连这个都构不出来时，
+            // 退回到「按当前词出四选一」而不是换词。
             var senseQ: SenseQuestion? = null
-            var candidate: Word? = word
-            var retryCount = 0
-            val maxRetries = 10
-
-            // 循环重选重试，确保 SENSE 模式下必定构建出有效义项题
-            while (senseQ == null && retryCount < maxRetries && candidate != null) {
-                senseQ = vocabRepo.buildSenseQuestion(candidate)
+            var retry = 0
+            while (senseQ == null && retry < 4) {
+                senseQ = vocabRepo.buildSenseQuestion(word)
                 if (senseQ != null) break
-                retryCount++
-                candidate = pickNextWord()
-            }
-
-            // 若候选词多次尝试未成，进行全局随机多义词兜底
-            if (senseQ == null) {
-                senseQ = vocabRepo.buildSenseQuestion(null)
+                retry++
             }
 
             if (senseQ != null) {
@@ -627,22 +661,11 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
                 captureModeSnapshot()
-            } else {
-                // 极端兜底：绝不降级四选一穿帮破坏题意，呈现清晰空状态
-                _uiState.update {
-                    it.copy(
-                        currentWord = null,
-                        currentProgress = null,
-                        currentSense = null,
-                        options = emptyList(),
-                        selectedOptionIndex = null,
-                        isAnswered = false,
-                        isCardRevealed = false,
-                        isLoading = false
-                    )
-                }
+                return
             }
-            return
+
+            // 构不出义项题（词库里干扰项不够）：**仍不换词**，
+            // 直接按当前词出四选一，保证「切模式不换题」这条铁律。
         }
 
         val progress = dao.getProgress(word.word) ?: WordProgress(word = word.word)
@@ -668,6 +691,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 options = options,
                 selectedOptionIndex = null,
                 isAnswered = false,
+                allowReselect = false,
                 isCardRevealed = false,
                 isLoading = false
             )
@@ -705,6 +729,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 options = snapshot.options,
                 selectedOptionIndex = snapshot.selectedOptionIndex,
                 isAnswered = snapshot.isAnswered,
+                // 回退到已作答的题：保留刚才的选中状态，但**允许改选**。
+                // 早先这里只恢复 isAnswered=true，UI 又用 enabled=!isAnswered
+                // 锁死选项，于是「返回上一个词」之后那个词再也点不动了。
+                allowReselect = snapshot.isAnswered,
                 isCardRevealed = snapshot.isCardRevealed,
                 spellInput = snapshot.spellInput,
                 spellSubmitted = snapshot.spellSubmitted,
@@ -732,6 +760,23 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         wrongWordsCache = if (p.isWrongBook) wrongWordsCache + p.word else wrongWordsCache - p.word
     }
 
+    /**
+     * 抽下一道题。
+     *
+     * ## 出题顺序（与 Web 版 wordbook 保持一致）
+     *
+     * 1. **短期重现队列** —— 答错的词延迟若干题后再考一次；
+     * 2. **循环轮次队列** —— 用户手动开了新一轮时，把已学过且本轮
+     *    还没复习的词按「错得多的先来」排在最前。放在错词本分流**之前**：
+     *    用户主动开新一轮就是要过一遍，别被错词本截走流量；
+     * 3. **错词本 70% / 新词 30%** —— 错词本是薄弱项，权重理应更高；
+     *    但不能 100%，否则用户就退化成「只刷错题」，新词一个不认，
+     *    词汇量永远上不去。早期版本这里压到 20%，等于把错题本这个
+     *    核心机制晾在一边，与 Web 版（70/30）行为分叉，这里改回一致。
+     *
+     * 冷却窗口 [recentWords] 与重现队列 [deferQueue] 在每一层都排除：
+     * 连着出同一个词是所有分支的公共底线。
+     */
     private suspend fun pickNextWord(): Word? = withContext(Dispatchers.IO) {
         val isSenseMode = _uiState.value.studyMode == StudyMode.SENSE
         fun isEligibleSenseWord(w: Word): Boolean = !isSenseMode || vocabRepo.splitSenses(w.meaning).size >= 2
@@ -745,62 +790,71 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             return@withContext item.word
         }
 
-        // 2. 错词本温和复习机制：
-        //    - 权重由原先过重的 70% 降低至 20%（平滑融入日常刷题节奏，不反客为主）；
-        //    - 严格排除当前冷却窗口（recentWords）以及等待短期重现（deferQueue）中的词。
-        //    原来这里 `observeWrongBook().first()` 读全表、再逐词 `getWord`，
-        //    现在读内存里的错词集合（答题后增量维护），抽词不再碰数据库。
         val allWords = vocabRepo.getAllWords()
         if (allWords.isEmpty()) return@withContext null
 
         val pendingDeferWords = deferQueue.map { it.word.word }.toSet()
 
-        if (Random.nextFloat() < 0.20f) {
-            val eligibleWrong = wrongWordsCache
-                .filter { it !in recentWords && it !in pendingDeferWords }
-                .mapNotNull { vocabRepo.getWord(it) }
-                .filter { isEligibleSenseWord(it) }
-            if (eligibleWrong.isNotEmpty()) return@withContext eligibleWrong.random(Random)
+        fun blocked(word: String): Boolean =
+            word in recentWords || word in pendingDeferWords || deferCount[word] != null && deferCount[word]!! >= MAX_DEFER_TIMES
+
+        // 2. 循环轮次队列（本轮没复习过的已学词，错得多的排最前）
+        val roundRemaining = roundQueue(allWords)
+            .filter { !blocked(it.word) && isEligibleSenseWord(it) }
+        if (roundRemaining.isNotEmpty()) {
+            return@withContext roundRemaining.first()
         }
 
-        // 3. 抽取未掌握的新词/生词（排除熟词、冷却窗口以及排队中的重现词）
-        //
-        // **拒绝采样**替代全量 filter：原来每答一题都对全部四千多个词
-        // 建两个临时 List（两轮 O(N) 分配 + 每个元素跑一遍判定），
-        // 这是背单词页最直接的卡顿来源。改成随机抽有限次、命中即返回——
-        // 拒绝采样是无偏的，抽到的分布与「全量过滤后随机」完全一致，
-        // 代价从 O(N) 降到 O(尝试次数)。
+        // 3. 错词本 70% / 新词 30%
+        val eligibleWrong = wrongWordsCache
+            .filter { !blocked(it) }
+            .mapNotNull { vocabRepo.getWord(it) }
+            .filter { isEligibleSenseWord(it) }
+
+        // 新词：未标记熟词且等级不足 3。答对过的新词在本次会话内
+        // 不再出（sessionDone），否则一轮下来全在原地打转。
         fun isUnmastered(w: Word): Boolean {
             val p = progressCache[w.word]
             return p == null || (!p.isMastered && p.level < 3)
         }
 
-        val attempts = (allWords.size * 0.2f).toInt().coerceIn(80, 400)
         var picked: Word? = null
-        var tried = 0
-        while (tried < attempts && picked == null) {
-            tried++
-            val w = allWords.random(Random)
-            if (w.word !in recentWords && w.word !in pendingDeferWords &&
-                isEligibleSenseWord(w) && isUnmastered(w)
-            ) {
-                picked = w
+
+        if (eligibleWrong.isNotEmpty() && Random.nextFloat() < WRONG_BOOK_WEIGHT) {
+            picked = eligibleWrong.random(Random)
+        }
+
+        // 拒绝采样替代全量 filter：原来每答一题都对全部四千多个词
+        // 建两个临时 List（两轮 O(N) 分配 + 每个元素跑一遍判定），
+        // 这是背单词页最直接的卡顿来源。改成随机抽有限次、命中即返回——
+        // 拒绝采样是无偏的，抽到的分布与「全量过滤后随机」完全一致，
+        // 代价从 O(N) 降到 O(尝试次数)。
+        if (picked == null) {
+            val attempts = (allWords.size * 0.2f).toInt().coerceIn(80, 400)
+            var tried = 0
+            while (tried < attempts && picked == null) {
+                tried++
+                val w = allWords.random(Random)
+                if (!blocked(w.word) && isEligibleSenseWord(w) && isUnmastered(w)) {
+                    picked = w
+                }
             }
         }
         if (picked != null) return@withContext picked
 
-        // 采样一直没中，说明未掌握的词已经很少了——这时才付 O(N) 的代价
-        // 精确过滤，保证「还有未掌握词就绝不抽已掌握词」的语义不被采样近似破坏。
-        val unmastered = allWords.filter { w ->
-            w.word !in recentWords && w.word !in pendingDeferWords &&
-                isEligibleSenseWord(w) && isUnmastered(w)
+        // 采样一直没中：改走精确筛选，保证「还有候选就绝不抽已掌握的词」。
+        val eligibleFresh = allWords.filter {
+            !blocked(it.word) && isEligibleSenseWord(it) && isUnmastered(it)
+        }
+        if (eligibleFresh.isNotEmpty()) {
+            return@withContext eligibleFresh.random(Random)
+        }
+        // 错词本还有词但新词池空了就用错词本，别开天窗
+        if (eligibleWrong.isNotEmpty()) {
+            return@withContext eligibleWrong.random(Random)
         }
 
-        if (unmastered.isNotEmpty()) {
-            return@withContext unmastered.random(Random)
-        }
-
-        // 4. 兜底回退：若未掌握词已抽完，放宽限制，但依然绝对排除上一道刚答过的词
+        // 4. 兜底回退：候选全空时放宽限制，但依然绝对排除上一道刚答过的词
         val lastWord = recentWords.lastOrNull()
         val fallbackWords = allWords.filter { it.word != lastWord && isEligibleSenseWord(it) }
         if (fallbackWords.isNotEmpty()) {
@@ -815,16 +869,102 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /**
+     * 本轮剩余词：已学过、且本轮开始后还没再答过的词。
+     *
+     * **进度由每个词的 [WordProgress.updatedAt] 派生，不额外存字段**：
+     * 「属于本轮」= 学过（level>0 / 曾错 / 熟词 / 错过的次数>0）
+     * 且 updatedAt <= 本轮开始时间。答完一题它的 updatedAt 被推到当下，
+     * 于是自动离开队列。这样轮次进度天然跟随 progress 表，
+     * 不需要额外的表或列，也不会出现「计数器与实际作答不一致」。
+     *
+     * 排序与 Web 版一致：错得多的先来 → 遗忘多的先来 → 最近错的先来
+     * → 按词序兜底保证稳定（否则每次排序抖动，用户会看到队列乱跳）。
+     */
+    private fun roundQueue(allWords: List<Word>): List<Word> {
+        val startedAt = roundStartedAt
+        if (startedAt <= 0L) return emptyList()
+        return allWords.filter { w ->
+            val p = progressCache[w.word] ?: return@filter false
+            val studied = p.level > 0 || p.everWrong || p.isMastered || p.wrongCount > 0
+            studied && p.updatedAt <= startedAt
+        }.sortedWith(
+            compareByDescending<Word> { progressCache[it.word]?.wrongCount ?: 0 }
+                .thenByDescending { progressCache[it.word]?.lapses ?: 0 }
+                .thenByDescending { progressCache[it.word]?.lastAnsweredAt ?: 0L }
+                .thenBy { it.word }
+        )
+    }
+
+    /** 手动开启下一轮：轮次号 +1、开始时间设为此刻，并重开会话状态。 */
+    fun startNextRound() {
+        viewModelScope.launch {
+            val next = roundNumber + 1
+            val now = System.currentTimeMillis()
+            container.settingsStore.startWordbookRound(next, now)
+            roundNumber = next
+            roundStartedAt = now
+            resetSessionState()
+            prepareNextQuestion()
+            refreshRoundInfo()
+            _uiState.update {
+                it.copy(snackbarMessage = "已开始第 $next 轮，共 ${it.roundRemaining} 词待过")
+            }
+        }
+    }
+
+    /**
+     * 刷新轮次面板的数据。
+     *
+     * 「本轮剩余 / 已学总数」这两个数只在这几件事后变：开新一轮、
+     * 答完一题（updatedAt 被推出队列）、外部重置。所以在这三处调
+     * 即可，不必每帧算——每帧算就是对四千多个词做一次排序。
+     */
+    fun refreshRoundInfo() {
+        viewModelScope.launch {
+            val all = withContext(Dispatchers.IO) { vocabRepo.getAllWords() }
+            val studied = withContext(Dispatchers.IO) {
+                all.count { w ->
+                    val p = progressCache[w.word] ?: return@count false
+                    p.level > 0 || p.isMastered || p.everWrong || p.wrongCount > 0
+                }
+            }
+            val remaining = withContext(Dispatchers.IO) { roundQueue(all).size }
+            _uiState.update {
+                it.copy(roundNumber = roundNumber, roundRemaining = remaining, studiedWordCount = studied)
+            }
+        }
+    }
+
+    /** 重置会话内的调度状态（历史栈、冷却窗口、重现队列）。 */
+    private fun resetSessionState() {
+        questionHistory.clear()
+        modeSnapshots.clear()
+        deferQueue.clear()
+        deferCount.clear()
+        recentWords.clear()
+        sessionAnswerCount = 0
+        _uiState.update { it.copy(hasPrevious = false) }
+    }
+
+    /**
      * 四选一模式选择选项（带严格防连击与作答状态原子锁）。
      */
     fun selectOption(index: Int) {
         val state = _uiState.value
-        if (state.isLoading || state.isAnswered || index !in state.options.indices || isActionInProgress.get()) return
+        // 已作答的题默认锁死；但**回退/切模式重放**回来的题允许改选
+        // （allowReselect）。用户原话：「仍然保留刚才的状态但是可以修改」。
+        val answeredLocked = state.isAnswered && !state.allowReselect
+        if (state.isLoading || answeredLocked || index !in state.options.indices || isActionInProgress.get()) return
         val current = state.currentWord ?: return
         if (!isActionInProgress.compareAndSet(false, true)) return
 
-        sessionAnswerCount++
-        recordRecentWord(current.word)
+        // **改选**（回退后重选）不再重复计数：这一题已经记过一次分，
+        // 再记一次会把进度刷成两遍。只更新选中与判定。
+        val isReselect = state.isAnswered
+        if (!isReselect) {
+            sessionAnswerCount++
+            recordRecentWord(current.word)
+        }
         val selectedOption = state.options[index]
         val isCorrect = selectedOption.isCorrect
 
@@ -836,6 +976,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             it.copy(
                 selectedOptionIndex = index,
                 isAnswered = true,
+                allowReselect = false,
                 options = updatedOptions
             )
         }
@@ -844,11 +985,13 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                recordAnswer(
-                    current = current,
-                    isCorrect = isCorrect,
-                    studyModeLabel = if (state.studyMode == StudyMode.SENSE) "sense" else "quiz"
-                )
+                if (!isReselect) {
+                    recordAnswer(
+                        current = current,
+                        isCorrect = isCorrect,
+                        studyModeLabel = if (state.studyMode == StudyMode.SENSE) "sense" else "quiz"
+                    )
+                }
             } finally {
                 if (!isCorrect) {
                     // 答错后留在当前界面展示解析卡片，释放锁让用户可以点击「下一题」
@@ -858,7 +1001,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         }
 
         // 选对自动进入下一题：380ms 极短延迟（视觉保留绿标确认感，节奏紧凑跟手）
-        if (isCorrect) {
+        //
+        // **改选不自动跳题**：用户是回退回来改主意的，改完立刻被弹走，
+        // 等于没改成。改选后就留在这一题，让他自己看结果再点「下一题」。
+        if (isCorrect && !isReselect) {
             viewModelScope.launch {
                 try {
                     delay(380L)
@@ -904,6 +1050,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             )
         } else {
             // 答错惩罚：进入错词本，归零连对，并安排 8 题后重现强化
+            deferCount[current.word] = (deferCount[current.word] ?: 0) + 1
             deferQueue.add(DeferItem(current, sessionAnswerCount + 8))
             oldProgress.copy(
                 level = 0,
@@ -940,6 +1087,9 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         _uiState.update { st ->
             if (st.currentWord?.word == current.word) st.copy(currentProgress = newProgress) else st
         }
+        // 轮次队列由 updatedAt 派生，答完这一题它就离开队列了——
+        // 面板上的「剩余 N 词」要跟着减。
+        refreshRoundInfo()
     }
 
     /**
@@ -1042,6 +1192,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
 
                 val updated = when (rating) {
                     0 -> {
+                        deferCount[current.word] = (deferCount[current.word] ?: 0) + 1
                         deferQueue.add(DeferItem(current, sessionAnswerCount + 8))
                         old.copy(
                             level = 0,

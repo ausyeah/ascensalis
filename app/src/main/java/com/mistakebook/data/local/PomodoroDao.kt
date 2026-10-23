@@ -137,6 +137,43 @@ interface PomodoroDao {
     suspend fun taskTotalsOfDay(day: String): List<TaskTotal>
 
     /**
+     * 区间内按小时聚合的专注秒数（时段分布饼图用，0–23 时）。
+     *
+     * `startedAt` 是毫秒时间戳，`strftime` 的 'unixepoch' 先把它除到秒，
+     * 'localtime' 再换成本地时区——否则饼图会整体偏成 UTC 的形状
+     * （晚上八点的专注跑到下午三点那一格）。SQLite 没有 left join，
+     * 所以缺的小时由调用方补 0：SQL 只返回出现过的小时。
+     */
+    @Query(
+        """
+        SELECT CAST(strftime('%H', startedAt / 1000, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+               COALESCE(SUM(durationSec), 0) AS sec
+        FROM pomodoro_sessions
+        WHERE day >= :fromDay
+        GROUP BY hour
+        ORDER BY hour
+        """
+    )
+    suspend fun hourlyTotalsSince(fromDay: String = ""): List<HourTotal>
+
+    /**
+     * 区间内按月聚合的专注秒数（近 12 个月折线 / 季度折线用）。
+     *
+     * `day` 是 'yyyy-MM-dd'，取前 7 位就是 'yyyy-MM'，直接可分组。
+     */
+    @Query(
+        """
+        SELECT substr(day, 1, 7) AS month,
+               COALESCE(SUM(durationSec), 0) AS sec
+        FROM pomodoro_sessions
+        WHERE day >= :fromDay
+        GROUP BY month
+        ORDER BY month
+        """
+    )
+    suspend fun monthlyTotalsSince(fromDay: String = ""): List<MonthTotal>
+
+    /**
      * 有记录的日期序列（去重、降序；可按区间过滤）。
      *
      * 连续天数要在内存里判：规则是「今天还没学不算断、昨天没学才断」，
@@ -224,6 +261,18 @@ interface PomodoroDao {
 /** 按日聚合结果。 */
 data class DayTotal(
     val day: String,
+    val sec: Long
+)
+
+/** 按小时聚合结果（hour 取 0–23，缺的小时不返回行）。 */
+data class HourTotal(
+    val hour: Int,
+    val sec: Long
+)
+
+/** 按月聚合结果（month 形如 '2026-03'）。 */
+data class MonthTotal(
+    val month: String,
     val sec: Long
 )
 

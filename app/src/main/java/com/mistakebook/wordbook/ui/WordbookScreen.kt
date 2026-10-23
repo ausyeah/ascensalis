@@ -58,6 +58,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
@@ -484,6 +485,23 @@ private fun StudyView(
             }
         }
 
+        // 循环复习轮次面板：只在「已经学过一些词」时出现。
+        //
+        // 它回答一个 SRS 本身回答不了的问题：「我第一轮走完了，接下来
+        // 该刷什么？」答对即推到很久以后，词库走完一轮要两三个月，
+        // 考研期只剩错题本在转。开新一轮把已学的词按薄弱程度召回，
+        // 这是唯一能把「走完一轮」变成「再走一轮」的机制。
+        if (state.studiedWordCount > 0) {
+            item {
+                RoundPanel(
+                    roundNumber = state.roundNumber,
+                    remaining = state.roundRemaining,
+                    studied = state.studiedWordCount,
+                    onStartRound = { viewModel.startNextRound() }
+                )
+            }
+        }
+
         // 单词主纸质卡片
         if (currentWord != null) {
             item {
@@ -847,6 +865,10 @@ private fun StudyView(
                         option = option,
                         isSenseMode = state.studyMode == StudyMode.SENSE,
                         isAnswered = state.isAnswered,
+                        // 回退/切模式重放回来的题允许改选：
+                        // 保留刚才的选中状态（isAnswered 仍为 true，
+                        // 于是对错颜色照旧显示），但选项不再被锁死。
+                        allowReselect = state.allowReselect,
                         onSelect = {
                             val idx = state.options.indexOf(option)
                             if (idx >= 0) viewModel.selectOption(idx)
@@ -985,6 +1007,60 @@ private fun ChipLabel(text: String) {
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth()
     )
+}
+
+/**
+ * 循环复习轮次面板。
+ *
+ * 一行文字 + 一个按钮，不占额外卡片：刷题页的每一寸都该留给题目本身
+ * （每日目标进度条已经因为这个理由撤过一次）。
+ *
+ * 文案随状态变的三态：
+ * - 没开过轮次 → 「已学 N 词 · 还没开始过循环轮次」+「开始第 1 轮」
+ * - 进行中且还有词 → 「第 N 轮 · 剩余 X / Y 词」+「重新开始本轮」
+ * - 本轮已走完 → 「第 N 轮已完成 🎉」+「开始第 N+1 轮」
+ */
+@Composable
+private fun RoundPanel(
+    roundNumber: Int,
+    remaining: Int,
+    studied: Int,
+    onStartRound: () -> Unit
+) {
+    val info = when {
+        roundNumber == 0 -> "已学 $studied 词 · 还没开始过循环轮次"
+        remaining > 0 -> "第 $roundNumber 轮 · 剩余 $remaining / ${studied.coerceAtLeast(1)} 词"
+        else -> "第 $roundNumber 轮已完成 🎉"
+    }
+    val btn = when {
+        roundNumber == 0 -> "开始第 1 轮"
+        remaining > 0 -> "重新开始本轮"
+        else -> "开始第 ${roundNumber + 1} 轮"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = info,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(
+            onClick = onStartRound,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = 12.dp, vertical = 4.dp
+            ),
+            modifier = Modifier.height(32.dp)
+        ) {
+            Text(btn, fontSize = 12.sp)
+        }
+    }
 }
 
 @Composable
@@ -1214,6 +1290,8 @@ private fun QuizOptionRow(
     option: QuizOption,
     isSenseMode: Boolean = false,
     isAnswered: Boolean,
+    /** 已作答但允许改选（回退/切模式重放回来的题）。 */
+    allowReselect: Boolean = false,
     onSelect: () -> Unit
 ) {
     val isDark = LocalDarkTheme.current
@@ -1308,7 +1386,9 @@ private fun QuizOptionRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 5.dp)
-            .clickable(enabled = !isAnswered, onClick = onSelect),
+            // 已作答默认锁死；但 allowReselect 时（回退后重放）仍然可点，
+            // 用户能改主意——「保留状态但可以修改」。
+            .clickable(enabled = !isAnswered || allowReselect, onClick = onSelect),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = bgColor),
         border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(borderColor))

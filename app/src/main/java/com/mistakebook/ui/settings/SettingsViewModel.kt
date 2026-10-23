@@ -56,6 +56,17 @@ data class SettingsUiState(
     val models: List<String> = emptyList(),
     val modelsError: String? = null,
     val pickedModel: String? = null,
+
+    /**
+     * **按配置 id 归���**的已拉取模型列表。
+     *
+     * 用户诉求：「你反正获取到了这个模型列表，为什么不让我自己选择勾选与否
+     * 来确定这个配置可用模型呢」。
+     *
+     * 所以拉到的列表不能只存在一个全局变量里——配了第二套配置时，
+     * 列表必须跟着「是哪套配置拉的」走，否则 A 的模型会出现在 B 的勾选区。
+     */
+    val fetchedModelsByProfile: Map<String, List<String>> = emptyMap(),
     val backupMessage: String? = null
 ) {
     val activeProfile: LlmProfile? get() = snapshot.activeProfile
@@ -71,6 +82,14 @@ data class SettingsUiState(
 }
 
 // 测试连接的瞬时状态
+/** 拉模型列表相关的一组状态（合并进 combine，避免超过 5 个参数的上限）。 */
+private data class ModelsState(
+    val list: List<String>,
+    val error: String?,
+    val picked: String?,
+    val byProfile: Map<String, List<String>>
+)
+
 private data class TestState(
     val flags: TestFlags,
     val llmTestingId: String?,
@@ -101,6 +120,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val llmTestingProfileId = MutableStateFlow<String?>(null)
     private val llmTestResults = MutableStateFlow<Map<String, TestOutcome>>(emptyMap())
     private val models = MutableStateFlow<List<String>>(emptyList())
+    private val fetchedModelsByProfile = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     private val modelsError = MutableStateFlow<String?>(null)
     private val pickedModel = MutableStateFlow<String?>(null)
     private val backupMessage = MutableStateFlow<String?>(null)
@@ -116,8 +136,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             ) { a, b, c, d -> TestFlags(a, b, c, d) },
             combine(llmTestingProfileId, llmTestResults) { id, map -> id to map }
         ) { flags, llm -> TestState(flags, llm.first, llm.second) },
-        combine(models, modelsError, pickedModel) { list, error, picked ->
-            Triple(list, error, picked)
+        combine(models, modelsError, pickedModel, fetchedModelsByProfile) { list, error, picked, byProfile ->
+            ModelsState(list, error, picked, byProfile)
         },
         backupMessage
     ) { snapshot, test, modelsPair, backup ->
@@ -129,9 +149,10 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             mineruTestOk = test.mineruOk,
             llmTestResults = test.llmOutcomes,
             llmTestingProfileId = test.llmTestingId,
-            models = modelsPair.first,
-            modelsError = modelsPair.second,
-            pickedModel = modelsPair.third,
+            models = modelsPair.list,
+            modelsError = modelsPair.error,
+            pickedModel = modelsPair.picked,
+            fetchedModelsByProfile = modelsPair.byProfile,
             backupMessage = backup
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
@@ -305,6 +326,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 is ApiResult.Success -> {
                     val list = result.data
                     models.value = list
+                    // 按配置 id 归档：勾选区要显示「这套配置拉到的模型」。
+                    fetchedModelsByProfile.value =
+                        fetchedModelsByProfile.value + (draft.id to list)
                     loadingModels.value = false
                     if (list.isEmpty()) {
                         modelsError.value = "接口可达（${elapsedMs(started)}ms）但没返回任何模型"
@@ -317,6 +341,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
                 is ApiResult.Failure -> {
                     models.value = emptyList()
+                    fetchedModelsByProfile.value =
+                        fetchedModelsByProfile.value - draft.id
                     loadingModels.value = false
                     modelsError.value = describeError(result.error, "获取模型列表失败")
                 }

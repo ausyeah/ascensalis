@@ -254,6 +254,10 @@
     <string name="settings_remove_key">删除该 Key</string>
     <string name="settings_provider_models">本配置可用的模型</string>
     <string name="settings_provider_models_hint">逗号分隔。填了之后对话页可直接切换模型</string>
+    <string name="settings_pick_provider_models">勾选本配置可用的模型</string>
+    <string name="settings_set_as_main">设为主模型</string>
+    <string name="settings_select_all">全选</string>
+    <string name="settings_select_none">全不选</string>
     <string name="settings_supports_vision">该模型支持图片</string>
     <string name="settings_supports_vision_on">直接发送图片给模型</string>
     <string name="settings_supports_vision_off">不识图：先用 MinerU 识别图片文字再发送</string>

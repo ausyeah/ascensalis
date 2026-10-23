@@ -10,6 +10,7 @@ import com.mistakebook.data.local.SubjectDao
 import com.mistakebook.data.local.SubjectTotal
 import com.mistakebook.data.local.entities.PomodoroTask
 import com.mistakebook.data.local.entities.Subject
+import com.mistakebook.pomodoro.stats.HourBucketRange
 import com.mistakebook.pomodoro.stats.PomodoroStats
 import com.mistakebook.pomodoro.stats.StatsRange
 import kotlinx.coroutines.delay
@@ -62,6 +63,31 @@ data class PomodoroUiState(
     val newSubjectName: String = "",
     /** 统计页当前选的时间范围。 */
     val statsRange: StatsRange = StatsRange.ALL,
+    /** 时段分布饼图的时间口径（日 / 周 / 月 / 全部）。 */
+    val hourRange: HourBucketRange = HourBucketRange.WEEK,
+    /** 累计数据卡。 */
+    val activeDays: Int = 0,
+    val activeMonths: Int = 0,
+    val totalAllSec: Long = 0L,
+    val totalAllCompleted: Int = 0,
+    /** 时段分布：24 格（0–23 时），下标即小时。 */
+    val hourly: List<Long> = List(24) { 0L },
+    /** 近 12 个月每月专注秒数，下标 0 = 最远那个月。 */
+    val months12: List<Long> = List(12) { 0L },
+    /** 本月按周聚合（下标 0 = 第 1 周）。 */
+    val monthWeeks: List<Long> = emptyList(),
+    /** 单日专注卡：当前翻到的那一天。 */
+    val singleDay: String = "",
+    val singleDaySec: Long = 0L,
+    val singleDayPomodoros: Int = 0,
+    val singleDayTasks: List<PomodoroStats.TaskRow> = emptyList(),
+    /** 手动补记对话框是否开着。 */
+    val showManualEntry: Boolean = false,
+    val manualTaskId: Long? = null,
+    val manualDay: String = "",
+    val manualHour: Int = 12,
+    val manualMinute: Int = 0,
+    val manualMinutes: String = "45",
     val message: String? = null
 ) {
     /** 完成率（0f~1f），统计页「目标达成」用。 */
@@ -88,6 +114,8 @@ class PomodoroViewModel(
     private var editingSubject = MutableStateFlow<Subject?>(null)
     private var newSubjectOpen = MutableStateFlow(false)
     private var statsRange = MutableStateFlow(StatsRange.ALL)
+    /** 时段分布饼图的口径：与统计范围独立（见 HourBucketRange 的注释）。 */
+    private var hourRangeFlow = MutableStateFlow(HourBucketRange.WEEK)
     private var message = MutableStateFlow<String?>(null)
 
     /** 统计单独存一份：它只在「记录变化」时刷新，不该跟着秒 tick 重算。 */
@@ -111,7 +139,10 @@ class PomodoroViewModel(
                     PomodoroTask(name = PomodoroTask.DEFAULT_NAME, sortOrder = 0)
                 )
             }
-            stats.value = PomodoroStats.snapshot(dao, statsRange.value)
+            stats.value = PomodoroStats.snapshot(dao, statsRange.value, hourRangeFlow.value)
+            // 单日卡默认停在今天，进统计页就有内容（而不是一片空白
+            // 等用户去点「上一天」才发现能翻）
+            loadSingleDay(LocalDate.now().toString())
         }
 
         // 主状态流：任务 / 学科 / 选择 / 弹窗 / 提示 / 统计。
@@ -128,11 +159,12 @@ class PomodoroViewModel(
                 editingSubject,
                 newSubjectOpen,
                 statsRange,
+                hourRangeFlow,
                 message,
                 stats
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
-                val snapshot = values[10] as PomodoroStats.Snapshot
+                val snapshot = values[11] as PomodoroStats.Snapshot
                 PomodoroUiState(
                     tasks = values[0] as List<PomodoroTask>,
                     subjects = values[1] as List<Subject>,
@@ -145,7 +177,8 @@ class PomodoroViewModel(
                     editingSubject = values[6] as Subject?,
                     showNewSubject = values[7] as Boolean,
                     statsRange = values[8] as StatsRange,
-                    message = values[9] as String?,
+                    hourRange = values[9] as HourBucketRange,
+                    message = values[10] as String?,
                     todaySec = snapshot.todaySec,
                     todayPomodoros = snapshot.todayPomodoros,
                     streakDays = snapshot.streakDays,
@@ -157,6 +190,26 @@ class PomodoroViewModel(
                     taskTotals = snapshot.taskTotals,
                     subjectTotals = snapshot.subjectTotals,
                     recent = snapshot.recent,
+                    activeDays = snapshot.activeDays,
+                    activeMonths = snapshot.activeMonths,
+                    totalAllSec = snapshot.totalAllSec,
+                    totalAllCompleted = snapshot.totalAllCompleted,
+                    hourly = snapshot.hourly,
+                    months12 = snapshot.months12,
+                    monthWeeks = snapshot.monthWeeks,
+                    // 补记表单的草稿字段不在 combine 里，走 _ui.value 直读，
+                    // 与 newTaskName 同一套路：这些是「正在输入的东西」，
+                    // 不该因为统计刷新被冲掉。
+                    singleDay = _ui.value.singleDay,
+                    singleDaySec = _ui.value.singleDaySec,
+                    singleDayPomodoros = _ui.value.singleDayPomodoros,
+                    singleDayTasks = _ui.value.singleDayTasks,
+                    showManualEntry = _ui.value.showManualEntry,
+                    manualTaskId = _ui.value.manualTaskId,
+                    manualDay = _ui.value.manualDay,
+                    manualHour = _ui.value.manualHour,
+                    manualMinute = _ui.value.manualMinute,
+                    manualMinutes = _ui.value.manualMinutes,
                     mode = timer.state.value.mode,
                     status = timer.state.value.status,
                     targetMs = timer.state.value.targetMs,
@@ -216,12 +269,12 @@ class PomodoroViewModel(
         val now = System.currentTimeMillis()
         if (now - lastStatsAt < 30_000L) return
         lastStatsAt = now
-        stats.value = PomodoroStats.snapshot(dao, statsRange.value)
+        stats.value = PomodoroStats.snapshot(dao, statsRange.value, hourRangeFlow.value)
     }
 
     private suspend fun refreshStats() {
         lastStatsAt = System.currentTimeMillis()
-        stats.value = PomodoroStats.snapshot(dao, statsRange.value)
+        stats.value = PomodoroStats.snapshot(dao, statsRange.value, hourRangeFlow.value)
     }
 
     // ------------------------------------------------------------ 计时控制
@@ -502,6 +555,160 @@ class PomodoroViewModel(
         viewModelScope.launch { refreshStats() }
     }
 
+    /** 时段分布饼图换口径：与统计范围独立，两者各自触发同一次快照刷新。 */
+    fun setHourRange(range: HourBucketRange) {
+        if (hourRangeFlow.value == range) return
+        hourRangeFlow.value = range
+        viewModelScope.launch { refreshStats() }
+    }
+
+    // ------------------------------------------------- 单日专注卡（可翻页）
+
+    /**
+     * 翻到指定日期并载入那一天的明细。
+     *
+     * 用「朝目标日逐日推进」而不是直接跳：一次只走一天，
+     * 用户连续点「下一天」时中间那几天的数据也就顺带加载了，
+     * 翻页不会有空白帧。
+     */
+    fun showSingleDay(day: String) {
+        _ui.update { it.copy(singleDay = day) }
+        viewModelScope.launch { loadSingleDay(day) }
+    }
+
+    /** 相对当前翻到的日期前后各移一天。 */
+    fun shiftSingleDay(delta: Long) {
+        val cur = runCatching { LocalDate.parse(_ui.value.singleDay) }
+            .getOrElse { LocalDate.now() }
+        showSingleDay(cur.plusDays(delta).toString())
+    }
+
+    private suspend fun loadSingleDay(day: String) {
+        val sec = dao.totalSecOfDay(day)
+        val pomos = dao.pomodoroCountOfDay(day)
+        val rows = dao.taskTotalsOfDay(day).map {
+            PomodoroStats.TaskRow(it.taskId, it.taskName, it.subjectId, it.sec, it.sessionCount)
+        }
+        _ui.update {
+            it.copy(
+                singleDay = day,
+                singleDaySec = sec,
+                singleDayPomodoros = pomos,
+                singleDayTasks = rows
+            )
+        }
+    }
+
+    // ---------------------------------------------------------- 手动补记
+
+    /**
+     * 打开补记对话框。
+     *
+     * 现实里没人只用番茄钟：自习室用别人的 App 上机、通勤路上读书记不住
+     * 开始时间、纸质笔记转录——总有时长是真做了但库里没有。没有这个入口，
+     * 用户只会看着统计页觉得「我明明学了这么久」。
+     */
+    fun openManualEntry(day: String = LocalDate.now().toString()) {
+        val preset = _ui.value.selectedTaskId
+            ?: _ui.value.tasks.firstOrNull { it.subjectId == null }?.id
+            ?: _ui.value.tasks.firstOrNull()?.id
+        _ui.update {
+            it.copy(
+                showManualEntry = true,
+                manualDay = day,
+                manualTaskId = preset,
+                manualHour = java.time.LocalTime.now().hour,
+                manualMinute = 0,
+                manualMinutes = "45"
+            )
+        }
+    }
+
+    fun closeManualEntry() {
+        _ui.update { it.copy(showManualEntry = false) }
+    }
+
+    fun onManualTask(id: Long?) {
+        _ui.update { it.copy(manualTaskId = id) }
+    }
+
+    fun onManualDay(day: String) {
+        // 只接受 yyyy-MM-dd：格式非法的日期会让落库时的 day 字段变脏，
+        // 统计按字符串比较，一脏就永远算不进那一天。
+        if (Regex("""\d{4}-\d{2}-\d{2}""").matches(day)) {
+            _ui.update { it.copy(manualDay = day) }
+        }
+    }
+
+    fun onManualTime(hour: Int, minute: Int) {
+        _ui.update {
+            it.copy(
+                manualHour = hour.coerceIn(0, 23),
+                manualMinute = minute.coerceIn(0, 59)
+            )
+        }
+    }
+
+    fun onManualMinutes(text: String) {
+        // 只留数字与一位小数点：时长输入键盘不需要字母，且能挡掉
+        // 「半小时」「2h」这类会被 durationSec 静默解析成 0 的输入。
+        val filtered = text.filter { it.isDigit() || it == '.' }.take(5)
+        _ui.update { it.copy(manualMinutes = filtered) }
+    }
+
+    /**
+     * 落一条补记。
+     *
+     * 口径：`targetSec = 0` 且 `completed = false`——
+     * 与「中途放弃的一次计时」在库里同形，但语义更干净：番茄数只认
+     * 走完目标的（PomodoroStats 的口径），所以补记**只加时长、不加番茄数**，
+     * 用户补的是「我干了多久」，不是「我又完成了几个番茄」。
+     */
+    fun submitManualEntry() {
+        val s = _ui.value
+        val taskId = s.manualTaskId ?: run {
+            message.value = "先选一个任务"
+            return
+        }
+        val minutes = s.manualMinutes.toDoubleOrNull() ?: 0.0
+        if (minutes <= 0.0) {
+            message.value = "时长填一个大于 0 的分钟数"
+            return
+        }
+        val sec = (minutes * 60).toLong()
+        val day = s.manualDay
+        val startedAt = runCatching {
+            LocalDate.parse(day)
+                .atTime(s.manualHour, s.manualMinute)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toInstant().toEpochMilli()
+        }.getOrElse {
+            message.value = "日期格式不对，应该是 2026-03-08 这样"
+            return
+        }
+        viewModelScope.launch {
+            dao.insertSession(
+                com.mistakebook.data.local.entities.PomodoroSession(
+                    taskId = taskId,
+                    mode = "POMODORO",
+                    day = day,
+                    startedAt = startedAt,
+                    endedAt = startedAt + sec * 1000L,
+                    durationSec = sec,
+                    targetSec = 0L,
+                    completed = false
+                )
+            )
+            _ui.update { it.copy(showManualEntry = false) }
+            refreshStats()
+            loadSingleDay(day)
+            message.value = "已补记 ${formatMinutesForMessage(minutes)}"
+        }
+    }
+
+    private fun formatMinutesForMessage(minutes: Double): String =
+        if (minutes % 1.0 == 0.0) "${minutes.toInt()} 分钟" else "$minutes 分钟"
+
     /** 清空全部专注记录（统计归零）。任务与学科不动。 */
     fun resetStats() {
         viewModelScope.launch {
@@ -576,7 +783,7 @@ class PomodoroViewModel(
                     }
                 }
                 // 任务：同学科下同名复用，否则新建
-                val cacheKey = "${subjectId ?: -1} ${row.taskName}"
+                val cacheKey = "${subjectId ?: -1}|#|${row.taskName}"
                 val taskId = taskCache[cacheKey] ?: run {
                     val existing = dao.findTasksByName(row.taskName)
                         .firstOrNull { it.subjectId == subjectId }
