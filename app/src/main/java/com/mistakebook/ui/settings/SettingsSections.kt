@@ -500,7 +500,11 @@ internal fun ProfileRow(
      * 拉模型列表。传的是**当前输入框内容**，不是已保存的配置——
      * 否则「填了 URL 和 Key 但没按保存」时必然失败。
      */
-    onFetchModels: (LlmProfile) -> Unit,
+    // 拉模型的结果回调带两样东西：合并后的模型池、以及**自动绑定后的 key 列表**
+    // （哪个模型归哪把 key 调，由探测结果决定，不用用户手填）。
+    onFetchModels: (LlmProfile, (List<String>, List<LlmKeyEntry>) -> Unit) -> Unit,
+    /** 每个模型是从哪把 key 拉到的（「主 Key」/「Key 2」）。 */
+    modelSources: Map<String, String> = emptyMap(),
     onTest: (LlmProfile) -> Unit,
     testing: Boolean = false,
 
@@ -741,7 +745,15 @@ internal fun ProfileRow(
                     // 而拉列表的目的正是拿到模型名，等于死锁。
                     trailingIcon = {
                         IconButton(
-                            onClick = { onFetchModels(draft()) },
+                            onClick = {
+                                onFetchModels(draft()) { _, bindings ->
+                                    // 探测出「哪个模型归哪把 key」后写回草稿：
+                                    // 保存之后 resolveKey 才能按模型名找到正确的 key，
+                                    // 选了就能调，而不是只有主 key 那几个模型真能用。
+                                    extraKeys = bindings
+                                    onDraftChanged()
+                                }
+                            },
                             enabled = canRequest && !fetchingModels
                         ) {
                             if (fetchingModels) {
@@ -826,11 +838,23 @@ internal fun ProfileRow(
                                         onDraftChanged()
                                     }
                                 )
-                                Text(
-                                    text = m,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = m,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    // 来源标注：这个模型是哪把 key 探到的。
+                                    // 多 key 中转站里「看得见」和「调得动」是两件事——
+                                    // 标出来用户才知道勾选之后到底走的哪把钥匙。
+                                    val source = modelSources[m]
+                                    if (source != null) {
+                                        Text(
+                                            text = source,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                                 // 一键把某个模型设为主模型
                                 TextButton(onClick = {
                                     model = m
@@ -964,8 +988,11 @@ internal fun LlmProfilesSection(
                 onDelete = { viewModel.deleteProfile(profile.id) },
                 onSave = viewModel::saveActiveProfile,
                 onDraftChanged = { viewModel.clearLlmTestResult(profile.id) },
-                onFetchModels = { draft ->
-                    viewModel.fetchModels(draft) { onShowModelsClick() }
+                onFetchModels = { draft, onDone ->
+                    viewModel.fetchModels(draft) { list, bindings ->
+                        onDone(list, bindings)
+                        onShowModelsClick()
+                    }
                 },
                 onTest = viewModel::testLlm,
                 testing = state.isTestingLlm(profile.id),
@@ -975,7 +1002,8 @@ internal fun LlmProfilesSection(
                 pickedModel = state.pickedModel,
                 onPickedModelConsumed = viewModel::consumePickedModel,
                 // 这套配置自己拉到的模型列表（勾选区用）
-                fetchedModels = state.fetchedModelsByProfile[profile.id].orEmpty()
+                fetchedModels = state.fetchedModelsByProfile[profile.id].orEmpty(),
+                modelSources = state.modelSourcesByProfile[profile.id].orEmpty()
             )
             Spacer(Modifier.height(8.dp))
         }

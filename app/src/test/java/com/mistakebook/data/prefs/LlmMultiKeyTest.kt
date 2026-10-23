@@ -153,4 +153,92 @@ class LlmMultiKeyTest {
         assertEquals(1, n.extraKeys.size)
         assertFalse(n.extraKeys.first().models.isEmpty())
     }
+
+    // ------------------------------------------------------------------
+    // 多 key 整合拉列表后的路由保证
+    //
+    // 用户诉求：「并不是在每个 key 下去负责某一个模型，而是把所有的 key
+    // 路由到一起……我用哪个模型，就调用对应的 key 去获取」。
+    //
+    // 内部做法：拉列表时逐把 key 探测，只把**主 key 看不见**的模型绑到
+    // 能看见它的附加 key 上。下面钉死的是这条链路的**结果**：
+    // 合并池里的每一个模型，resolveKey 都得给出一把能真正调它的 key。
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `主 key 有固定 id，来源标注才对得上号`() {
+        val p = profile()
+        val main = p.allKeys().first()
+        assertEquals(LlmProfile.MAIN_KEY_ID, main.id)
+        // 每次调用 id 都一样：否则「这个模型来自哪把 key」无法稳定回溯
+        assertEquals(main.id, p.allKeys().first().id)
+    }
+
+    @Test
+    fun `主 key 能调的模型不绑给附加 key，仍走主 key`() {
+        // 探测结果：主 key 与 key-b 都看得见 gpt-4o → 不绑，走主 key
+        val p = profile(
+            extra = listOf(LlmKeyEntry(id = "b", key = "sk-b", models = emptyList()))
+        )
+        assertEquals("sk-main", p.resolveKey("gpt-4o"))
+    }
+
+    @Test
+    fun `只有附加 key 看得见的模型绑给它，调用时命中该 key`() {
+        // 探测结果：主 key 只看到 gpt-4o，deepseek-chat 只有 key-b 有
+        val p = profile(
+            extra = listOf(LlmKeyEntry(id = "b", key = "sk-b", models = listOf("deepseek-chat")))
+        )
+        assertEquals("sk-main", p.resolveKey("gpt-4o"))
+        assertEquals("sk-b", p.resolveKey("deepseek-chat"))
+    }
+
+    @Test
+    fun `三把 key 各管一批模型，逐模型路由正确`() {
+        val p = profile(
+            extra = listOf(
+                LlmKeyEntry(id = "b", key = "sk-b", models = listOf("deepseek-chat")),
+                LlmKeyEntry(id = "c", key = "sk-c", models = listOf("claude-3-5-sonnet", "gpt-4o-mini"))
+            )
+        )
+        assertEquals("sk-b", p.resolveKey("deepseek-chat"))
+        assertEquals("sk-c", p.resolveKey("claude-3-5-sonnet"))
+        assertEquals("sk-c", p.resolveKey("gpt-4o-mini"))
+        // 没绑的一律落到主 key
+        assertEquals("sk-main", p.resolveKey("o1"))
+    }
+
+    @Test
+    fun `合并池里每个模型都至少有一把 key 能调`() {
+        val pool = listOf("gpt-4o", "deepseek-chat", "claude-3-5-sonnet")
+        val p = profile(
+            models = pool,
+            extra = listOf(
+                LlmKeyEntry(id = "b", key = "sk-b", models = listOf("deepseek-chat")),
+                LlmKeyEntry(id = "c", key = "sk-c", models = listOf("claude-3-5-sonnet"))
+            )
+        )
+        // 合并后的池子：勾选任意一个都能解析出非空 key
+        pool.forEach { m ->
+            assertTrue("模型 $m 应能解析出可用 key", p.resolveKey(m).isNotBlank())
+            assertTrue("模型 $m 应有 key 可服务", p.keysServing(m).isNotEmpty())
+        }
+    }
+
+    @Test
+    fun `keysServing 列出所有能调该模型的 key`() {
+        val p = profile(
+            extra = listOf(
+                // 空 models = 通用兜底 key，谁都能调
+                LlmKeyEntry(id = "b", key = "sk-b"),
+                LlmKeyEntry(id = "c", key = "sk-c", models = listOf("deepseek-chat"))
+            )
+        )
+        // gpt-4o：主 key + 通用 key-b
+        assertEquals(2, p.keysServing("gpt-4o").size)
+        // deepseek-chat：主 key + 通用 key-b + 绑定的 key-c
+        assertEquals(3, p.keysServing("deepseek-chat").size)
+        // 空模型名：无从判断，不给出任何 key
+        assertTrue(p.keysServing("  ").isEmpty())
+    }
 }

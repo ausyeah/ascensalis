@@ -183,12 +183,23 @@ class LlmClient(private val api: LlmApi) {
 
 
     /** 设置页「测试连接」：GET {base}/models，HTTP 200 即有效。 */
-    suspend fun listModels(profile: LlmProfile): ApiResult<List<String>> {
-        if (!profile.isConfigured()) return fail(ApiErrorKind.NO_KEY)
+    /**
+     * 拉取某个配置下的可用模型列表。
+     *
+     * [keyOverride] 用来**指定用哪一把 key 去探**：一个配置下有多把 key
+     * 时，每把 key 看到的模型可能完全不同，要逐个探测再合并。
+     * 不给时按 [LlmProfile.resolveKey] 的规则挑一把。
+     *
+     * 这里**不要求模型名非空**（与聊天请求不同）：拉列表的目的往往正是
+     * 拿到模型名填进配置里，要求先有模型名才能拉列表是个死循环。
+     */
+    suspend fun listModels(profile: LlmProfile, keyOverride: String? = null): ApiResult<List<String>> {
+        val key = keyOverride?.takeIf { it.isNotBlank() } ?: profile.resolveKey(profile.model)
+        if (profile.baseUrl.isBlank() || key.isBlank()) return fail(ApiErrorKind.NO_KEY)
         val response = runCatching {
             api.listModels(
                 url = profile.modelsUrl(),
-                authorization = "Bearer ${profile.resolveKey(profile.model)}"
+                authorization = "Bearer $key"
             )
         }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
         if (!response.isSuccessful) {

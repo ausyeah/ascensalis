@@ -2,6 +2,7 @@ package com.mistakebook.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mistakebook.data.prefs.LlmKeyEntry
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.SettingsSnapshot
@@ -67,6 +68,8 @@ data class SettingsUiState(
      * 列表必须跟着「是哪套配置拉的」走，否则 A 的模型会出现在 B 的勾选区。
      */
     val fetchedModelsByProfile: Map<String, List<String>> = emptyMap(),
+    /** 每个模型的来源 key 标签（「主 Key」/「Key 2」…），勾选区用来标注。 */
+    val modelSourcesByProfile: Map<String, Map<String, String>> = emptyMap(),
     val backupMessage: String? = null
 ) {
     val activeProfile: LlmProfile? get() = snapshot.activeProfile
@@ -87,7 +90,8 @@ private data class ModelsState(
     val list: List<String>,
     val error: String?,
     val picked: String?,
-    val byProfile: Map<String, List<String>>
+    val byProfile: Map<String, List<String>>,
+    val sourcesByProfile: Map<String, Map<String, String>>
 )
 
 private data class TestState(
@@ -121,6 +125,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val llmTestResults = MutableStateFlow<Map<String, TestOutcome>>(emptyMap())
     private val models = MutableStateFlow<List<String>>(emptyList())
     private val fetchedModelsByProfile = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    /** 每个模型是从哪把 key 拉到的（profileId → model → 「主 Key」/「Key 2」）。 */
+    private val modelSourcesByProfile = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
     private val modelsError = MutableStateFlow<String?>(null)
     private val pickedModel = MutableStateFlow<String?>(null)
     private val backupMessage = MutableStateFlow<String?>(null)
@@ -136,8 +142,17 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             ) { a, b, c, d -> TestFlags(a, b, c, d) },
             combine(llmTestingProfileId, llmTestResults) { id, map -> id to map }
         ) { flags, llm -> TestState(flags, llm.first, llm.second) },
-        combine(models, modelsError, pickedModel, fetchedModelsByProfile) { list, error, picked, byProfile ->
-            ModelsState(list, error, picked, byProfile)
+        combine(
+            models, modelsError, pickedModel, fetchedModelsByProfile, modelSourcesByProfile
+        ) { values ->
+            @Suppress("UNCHECKED_CAST")
+            ModelsState(
+                list = values[0] as List<String>,
+                error = values[1] as String?,
+                picked = values[2] as String?,
+                byProfile = values[3] as Map<String, List<String>>,
+                sourcesByProfile = values[4] as Map<String, Map<String, String>>
+            )
         },
         backupMessage
     ) { snapshot, test, modelsPair, backup ->
@@ -153,6 +168,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             modelsError = modelsPair.error,
             pickedModel = modelsPair.picked,
             fetchedModelsByProfile = modelsPair.byProfile,
+            modelSourcesByProfile = modelsPair.sourcesByProfile,
             backupMessage = backup
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
@@ -309,44 +325,101 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     /**
      * 拉取可用模型列表。
      *
+     * ## 遍历**全部 key**，不是只问主 key
+     *
      * 同样用**当前输入**而不是已保存值——这正是「填了 URL 和 API 就该能拉列表」
      * 成立的前提。模型名可以为空：拉列表的目的就是拿到模型名。
+     *
+     * 关键点：中转站一个 URL 下挂着多把 key，**每把 key 能看到的模型不一样**
+     * （额度与授权按 key 分开）。只拿主 key 去问，列出的就只是主 key 那一份，
+     * 其余 key 供应的模型一个都看不见——也就无从勾选，更谈不上调用。
+     *
+     * 所以逐把 key 探测一次，把结果**合并去重**成一个完整模型池；
+     * 同时记下「哪个模型是哪把 key 看到的」，据此自动把模型绑到能调用它的
+     * key 上（用户不必手动在每把 key 下面填模型名）。
+     *
+     * ## 绑定策略：主 key 优先，附加 key 只补位
+     *
+     * 一个模型如果主 key 也能调、附加 key 也能调，就**不绑**，让它走主 key
+     * （主 key 通常是主账号，额度与稳定性最好）；只有主 key 看不见的模型，
+     * 才绑到能看见它的那把附加 key 上。这样合并出来的池子里的**每一个**
+     * 模型都一定有 key 能调它——这正是「选好之后都能够调用」的保证。
      */
-    fun fetchModels(draft: LlmProfile, onReady: (List<String>) -> Unit = {}) {
+    fun fetchModels(
+        draft: LlmProfile,
+        onReady: (List<String>, List<LlmKeyEntry>) -> Unit = { _, _ -> }
+    ) {
         viewModelScope.launch {
             loadingModels.value = true
             modelsError.value = null
-            if (draft.baseUrl.isBlank() || draft.apiKey.isBlank()) {
+            val keys = draft.normalized().allKeys().filter { it.isUsable() }
+            if (draft.baseUrl.isBlank() || keys.isEmpty()) {
                 loadingModels.value = false
                 modelsError.value = "请先填写接口地址和 API Key"
                 return@launch
             }
             val started = System.nanoTime()
-            when (val result = container.llmClient.listModels(draft.normalized())) {
-                is ApiResult.Success -> {
-                    val list = result.data
-                    models.value = list
-                    // 按配置 id 归档：勾选区要显示「这套配置拉到的模型」。
-                    fetchedModelsByProfile.value =
-                        fetchedModelsByProfile.value + (draft.id to list)
-                    loadingModels.value = false
-                    if (list.isEmpty()) {
-                        modelsError.value = "接口可达（${elapsedMs(started)}ms）但没返回任何模型"
-                    } else {
-                        // 直接把选择弹窗打开：用户点这个按钮就是想选模型，
-                        // 让他再点一次「可用模型」纯属多余
-                        onReady(list)
-                    }
-                }
 
-                is ApiResult.Failure -> {
-                    models.value = emptyList()
-                    fetchedModelsByProfile.value =
-                        fetchedModelsByProfile.value - draft.id
-                    loadingModels.value = false
-                    modelsError.value = describeError(result.error, "获取模型列表失败")
+            // keyId -> 这把 key 看到的模型
+            val seen = LinkedHashMap<String, List<String>>()
+            val failures = mutableListOf<String>()
+            keys.forEach { entry ->
+                when (val r = container.llmClient.listModels(draft.normalized(), entry.key)) {
+                    is ApiResult.Success -> seen[entry.id] = r.data
+                    is ApiResult.Failure ->
+                        failures += describeError(r.error, "").trim().removePrefix("：")
+                        .ifBlank { r.error.kind.name }
                 }
             }
+
+            val merged = LinkedHashSet<String>()
+            seen.values.forEach { merged += it }
+
+            if (merged.isEmpty()) {
+                models.value = emptyList()
+                fetchedModelsByProfile.value = fetchedModelsByProfile.value - draft.id
+                modelSourcesByProfile.value = modelSourcesByProfile.value - draft.id
+                loadingModels.value = false
+                modelsError.value = if (failures.isEmpty()) {
+                    "接口可达（${elapsedMs(started)}ms）但没返回任何模型"
+                } else {
+                    "获取模型列表失败：${failures.distinct().joinToString("；")}"
+                }
+                return@launch
+            }
+
+            val mainModels = seen[LlmProfile.MAIN_KEY_ID].orEmpty().toSet()
+
+            // model -> 来源标签（给用户看「这把钥匙是谁的」）
+            val labelOf = mutableMapOf<String, String>()
+            keys.forEachIndexed { index, entry ->
+                val label = if (entry.id == LlmProfile.MAIN_KEY_ID) "主 Key" else "Key ${index + 1}"
+                seen[entry.id].orEmpty().forEach { m ->
+                    // 主 key 能看到就算主 key 的：绑定策略是主 key 优先
+                    if (m !in labelOf || entry.id == LlmProfile.MAIN_KEY_ID) {
+                        labelOf[m] = label
+                    }
+                }
+            }
+
+            // 自动绑定：只绑「主 key 看不见」的那些模型给能看到它的附加 key，
+            // 用户手填的绑定保留（可能在探测失败的情况下仍然有效）。
+            val boundKeys = draft.extraKeys.map { entry ->
+                if (entry.key.isBlank()) return@map entry
+                val visible = seen[entry.id].orEmpty().filter { it !in mainModels }
+                val union = LinkedHashSet<String>(entry.models)
+                union += visible
+                entry.copy(models = union.toList().distinct())
+            }
+
+            val list = merged.toList()
+            models.value = list
+            fetchedModelsByProfile.value = fetchedModelsByProfile.value + (draft.id to list)
+            modelSourcesByProfile.value = modelSourcesByProfile.value + (draft.id to labelOf)
+            loadingModels.value = false
+            // 直接把选择弹窗打开：用户点这个按钮就是想选模型，
+            // 让他再点一次「可用模型」纯属多余
+            onReady(list, boundKeys)
         }
     }
 

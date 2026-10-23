@@ -944,6 +944,37 @@ private fun StudyView(
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
+                } else {
+                    // **常驻的「下一个词」**。
+                    //
+                    // 答错已经有上面那颗「下一题」大按钮，这里就不重复了；
+                    // 其余状态一律给出这颗次要按钮，原因是「回退」这条路径
+                    // 之前是**死路**：点撤回回到上一个词后，答对的会自动
+                    // 跳走，但改选答对、以及回退后重新看一眼的场景不会跳——
+                    // 界面上没有任何能往前走的东西，只能去切模式或者杀进程。
+                    // 有进有退才是完整的导航：撤得回来，也得走得出去。
+                    item {
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = viewModel::prepareNextQuestion,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                if (state.isAnswered) "下一个词" else "换一个词",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                 }
             } else if (state.studyMode == StudyMode.SPELL) {
                 // 拼写模式：输入框 + 提交 + 结果反馈

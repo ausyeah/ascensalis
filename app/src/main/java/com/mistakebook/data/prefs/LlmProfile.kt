@@ -103,12 +103,37 @@ data class LlmProfile(
      *
      * 主 key 排第一是刻意的——它承担「兜底」角色，
      * 附加 key 只有在自己绑定了模型时才会被优先选中。
+     *
+     * 主 key 用**固定 id**（而不是随机 UUID）：它是每次调用现算出来的
+     * 临时对象，id 若随机，「这个模型来自哪个 key」就没法稳定回溯，
+     * 拉列表时的来源标注与自动绑定都对不上号。
      */
     fun allKeys(): List<LlmKeyEntry> =
         buildList {
-            if (apiKey.isNotBlank()) add(LlmKeyEntry(key = apiKey, models = emptyList()))
+            if (apiKey.isNotBlank()) {
+                add(LlmKeyEntry(id = MAIN_KEY_ID, key = apiKey, models = emptyList()))
+            }
             addAll(extraKeys.filter { it.key.isNotBlank() })
         }
+
+    /**
+     * 按模型名找出**所有**能调用它的 key。
+     *
+     * 与 [resolveKey] 的区别：那个只给一个最终答案，这个给全部候选——
+     * 设置页要拿它告诉用户「这个模型有几把钥匙能开」。
+     */
+    fun keysServing(model: String): List<LlmKeyEntry> {
+        val target = model.trim()
+        if (target.isBlank()) return emptyList()
+        return allKeys().filter {
+            it.isUsable() && (it.models.isEmpty() || it.matches(target))
+        }
+    }
+
+    companion object {
+        /** 主 key 的固定标识（见 [allKeys] 的注释）。 */
+        const val MAIN_KEY_ID = "__main__"
+    }
 
     /**
      * 按模型名解析出该用的 key。
