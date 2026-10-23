@@ -139,6 +139,33 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
+            // 分组顺序：外观 → 使用偏好 → 识别与大模型（配置）→ 数据管理。
+            // 配置类是「首次装机配一次就再也不碰」的东西，垫底；
+            // 外观是打开设置最常改的，放最上面。
+
+            // ---- 外观 ----
+            SettingsSectionHeader("外观")
+            ThemeModeSection(
+                state = state,
+                viewModel = viewModel
+            )
+
+            // ---- 使用偏好 ----
+            SettingsSectionHeader("使用偏好")
+            PrintDefaultsSection(
+                state = state,
+                viewModel = viewModel
+            )
+
+            ReviewReminderSection(
+                state = state,
+                viewModel = viewModel,
+                onPickTimeClick = { showTimePicker = true }
+            )
+
+            // ---- 识别与大模型（配置）----
+            SettingsSectionHeader("识别与大模型")
+
             MineruKeySection(
                 state = state,
                 viewModel = viewModel
@@ -163,26 +190,13 @@ fun SettingsScreen(
                 viewModel = viewModel
             )
 
-            ThemeModeSection(
-                state = state,
-                viewModel = viewModel
-            )
-
             MineruParamsSection(
                 state = state,
                 viewModel = viewModel
             )
 
-            PrintDefaultsSection(
-                state = state,
-                viewModel = viewModel
-            )
-
-            ReviewReminderSection(
-                state = state,
-                viewModel = viewModel,
-                onPickTimeClick = { showTimePicker = true }
-            )
+            // ---- 数据管理 ----
+            SettingsSectionHeader("数据管理")
 
             DataManageSection(
                 container = container,

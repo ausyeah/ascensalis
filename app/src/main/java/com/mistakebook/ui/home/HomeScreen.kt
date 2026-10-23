@@ -279,16 +279,20 @@ fun HomeScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            // 优雅沉浸式搜索栏（整合至首屏内容区，消除多层顶部栏冗余）
-            Box(
+            // 搜索栏 + 错题本专属操作（打印/对话列表）同一行：
+            // 这两个入口只服务错题本，从顶栏挪到搜索栏右侧，顶栏四个 Tab
+            // 从此位置恒定，翻页不抖动；搜索栏让出部分宽度给它们。
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 OutlinedTextField(
                     value = state.keyword,
                     onValueChange = viewModel::setKeyword,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f),
                     placeholder = {
                         Text(
                             text = stringResource(R.string.home_search_hint),
@@ -328,6 +332,22 @@ fun HomeScreen(
                         unfocusedBorderColor = Color.Transparent
                     )
                 )
+                IconButton(onClick = onOpenPrint, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Print,
+                        contentDescription = stringResource(R.string.home_action_print),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                IconButton(onClick = onOpenChatList, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Forum,
+                        contentDescription = stringResource(R.string.chat_list_title),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
 
             FilterRow(

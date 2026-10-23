@@ -31,6 +31,14 @@ interface PomodoroDao {
     @Query("SELECT * FROM pomodoro_tasks ORDER BY sortOrder, id")
     fun observeAllTasks(): Flow<List<PomodoroTask>>
 
+    /**
+     * 按名字找未归档任务（CSV 导入时按「任务名」对已有任务复用）。
+     * 学科匹配在 Kotlin 侧做：SQLite 的 `IS` 对可为空的外键在各版本
+     * 行为不完全一致，两条 `subjectId IS NULL` / `= :id` 分支更直白。
+     */
+    @Query("SELECT * FROM pomodoro_tasks WHERE name = :name AND archived = 0")
+    suspend fun findTasksByName(name: String): List<PomodoroTask>
+
     @Insert
     suspend fun insertTask(task: PomodoroTask): Long
 
@@ -84,20 +92,20 @@ interface PomodoroDao {
     )
     suspend fun dailyTotalsSince(fromDay: String): List<DayTotal>
 
-    /** 按任务聚合的累计专注秒数（不限时间），一次性读取。 */
+    /** 按任务聚合的累计专注秒数（可按区间过滤，fromDay 传 "" = 不限）。 */
     @Query(
         """
         SELECT t.id AS taskId, t.name AS taskName, t.subjectId AS subjectId,
                COALESCE(SUM(s.durationSec), 0) AS sec,
                COUNT(s.id) AS sessionCount
         FROM pomodoro_tasks t
-        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id
+        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id AND s.day >= :fromDay
         WHERE t.archived = 0
         GROUP BY t.id
         ORDER BY sec DESC
         """
     )
-    suspend fun taskTotalsOnce(): List<TaskTotal>
+    suspend fun taskTotalsOnce(fromDay: String = ""): List<TaskTotal>
 
     /** 按任务聚合的累计专注秒数（不限时间）。 */
     @Query(
@@ -129,24 +137,45 @@ interface PomodoroDao {
     suspend fun taskTotalsOfDay(day: String): List<TaskTotal>
 
     /**
-     * 有记录的日期序列（去重、升序）。
+     * 有记录的日期序列（去重、降序；可按区间过滤）。
      *
      * 连续天数要在内存里判：规则是「今天还没学不算断、昨天没学才断」，
      * 这种带业务语义的判断写成 SQL 只会更难维护。
      */
-    @Query("SELECT DISTINCT day FROM pomodoro_sessions ORDER BY day DESC")
-    suspend fun distinctDays(): List<String>
-
-    /** 累计专注秒数与总次数（全时段）。 */
-    @Query("SELECT COALESCE(SUM(durationSec), 0) FROM pomodoro_sessions")
-    suspend fun totalSecAll(): Long
-
-    /** 总会话次数（完成率 = completedSessionCount / sessionCountAll）。 */
-    @Query("SELECT COUNT(*) FROM pomodoro_sessions")
-    suspend fun sessionCountAll(): Int
+    @Query("SELECT DISTINCT day FROM pomodoro_sessions WHERE day >= :fromDay ORDER BY day DESC")
+    suspend fun distinctDays(fromDay: String = ""): List<String>
 
     /**
-     * 按学科聚合的累计专注（学科分布图用）。
+     * 统计口径统一带一个 fromDay（'yyyy-MM-dd'，字符串比较）。
+     *
+     * 传空串 `""` 即「全部」——SQLite 里任何非空日期串都 `>= ''`，
+     * 这样「全部 / 今日 / 近 7 天 / 近 30 天」共用同一批 SQL，
+     * 不必为每个区间各写一套。
+     */
+
+    /** 区间内总专注秒数（fromDay 传 "" = 全部）。 */
+    @Query("SELECT COALESCE(SUM(durationSec), 0) FROM pomodoro_sessions WHERE day >= :fromDay")
+    suspend fun totalSecSince(fromDay: String): Long
+
+    /** 区间内完成的番茄数（只认 mode = POMODORO 且 completed）。 */
+    @Query(
+        """
+        SELECT COUNT(*) FROM pomodoro_sessions
+        WHERE day >= :fromDay AND completed = 1 AND mode = 'POMODORO'
+        """
+    )
+    suspend fun pomodoroCountSince(fromDay: String): Int
+
+    /** 区间内总会话次数（完成率的分母）。 */
+    @Query("SELECT COUNT(*) FROM pomodoro_sessions WHERE day >= :fromDay")
+    suspend fun sessionCountSince(fromDay: String): Int
+
+    /** 区间内完成次数（完成率的分子）。 */
+    @Query("SELECT COUNT(*) FROM pomodoro_sessions WHERE completed = 1 AND day >= :fromDay")
+    suspend fun completedSessionCount(fromDay: String): Int
+
+    /**
+     * 按学科聚合的累计专注（学科分布图用，可按区间过滤）。
      *
      * subjectId 为 null 的行是「未分类」任务——不能丢，它们的时长
      * 也是用户实打实专注出来的。LEFT JOIN 而不是 INNER：某个学科下
@@ -158,27 +187,34 @@ interface PomodoroDao {
                COALESCE(SUM(s.durationSec), 0) AS sec,
                COUNT(s.id) AS sessionCount
         FROM pomodoro_tasks t
-        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id
+        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id AND s.day >= :fromDay
         WHERE t.archived = 0
         GROUP BY t.subjectId
         ORDER BY sec DESC
         """
     )
-    suspend fun subjectTotalsOnce(): List<SubjectTotal>
+    suspend fun subjectTotalsOnce(fromDay: String = ""): List<SubjectTotal>
 
-    @Query("SELECT COUNT(*) FROM pomodoro_sessions WHERE completed = 1")
-    suspend fun completedSessionCount(): Int
-
-    /** 最近若干条记录，用于「最近专注」列表。 */
+    /** 最近若干条记录，用于「最近专注」列表（可按区间过滤）。 */
     @Query(
         """
         SELECT s.*, t.name AS taskName FROM pomodoro_sessions s
         JOIN pomodoro_tasks t ON t.id = s.taskId
+        WHERE s.day >= :fromDay
         ORDER BY s.endedAt DESC
         LIMIT :limit
         """
     )
-    suspend fun recentSessions(limit: Int): List<SessionWithTask>
+    suspend fun recentSessions(fromDay: String = "", limit: Int): List<SessionWithTask>
+
+    /**
+     * 清空全部专注记录（统计页「重置统计」用）。
+     *
+     * 只删会话流水，不动任务与学科——用户重置的是「统计数据」，
+     * 不是「我列的任务清单」。任务清单没了，图表反而全零没意义。
+     */
+    @Query("DELETE FROM pomodoro_sessions")
+    suspend fun clearAllSessions()
 
     /** 删任务时的级联由外键处理；这里只用于清空某个任务的记录（暂未使用）。 */
     @Query("DELETE FROM pomodoro_sessions WHERE taskId = :taskId")

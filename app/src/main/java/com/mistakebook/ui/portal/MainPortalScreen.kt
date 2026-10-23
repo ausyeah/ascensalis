@@ -18,11 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.Print
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -112,6 +107,9 @@ fun MainPortalScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 顶栏只放 Tab 行，宽度恒定：打印/对话入口已移至错题本页
+                    // 搜索栏右侧（见 HomeScreen），顶栏不再随翻页增删图标，
+                    // 四个 Tab 的位置在任何页面下都纹丝不动。
                     PortalTabRow(
                         selectedIndex = currentPage,
                         onSelectIndex = { index ->
@@ -119,29 +117,8 @@ fun MainPortalScreen(
                                 pagerState.animateScrollToPage(index)
                             }
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     )
-
-                    // 右侧图标只在错题本页出现：打印与对话列表是错题本的能力，
-                    // 挂在其他页上是纯干扰。设置已升级为第 4 个 Tab，齿轮图标撤销。
-                    if (currentPage == 0) {
-                        IconButton(onClick = onOpenPrint, modifier = Modifier.size(36.dp)) {
-                            Icon(
-                                imageVector = Icons.Outlined.Print,
-                                contentDescription = stringResource(R.string.home_action_print),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        IconButton(onClick = onOpenChatList, modifier = Modifier.size(36.dp)) {
-                            Icon(
-                                imageVector = Icons.Outlined.Forum,
-                                contentDescription = stringResource(R.string.chat_list_title),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
                 }
             }
         }

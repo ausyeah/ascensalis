@@ -6,6 +6,27 @@ import com.mistakebook.data.local.SubjectTotal
 import java.time.LocalDate
 
 /**
+ * 统计时间范围。
+ *
+ * 「全部」用空串 fromDay 表达（见 PomodoroDao 的口径说明），
+ * 四个选项共用同一批 SQL。
+ */
+enum class StatsRange(val label: String) {
+    TODAY("今日"),
+    DAYS_7("近 7 天"),
+    DAYS_30("近 30 天"),
+    ALL("全部");
+
+    /** 区间起始日（'yyyy-MM-dd'）；ALL 返回空串 = 不限。 */
+    fun fromDay(today: LocalDate): String = when (this) {
+        TODAY -> today.toString()
+        DAYS_7 -> today.minusDays(6).toString()
+        DAYS_30 -> today.minusDays(29).toString()
+        ALL -> ""
+    }
+}
+
+/**
  * 番茄钟统计。
  *
  * ## 口径说明（写死在这里，避免各处各算各的）
@@ -18,6 +39,8 @@ import java.time.LocalDate
  *   只要昨天/前天…连续有记录就一直数下去。
  * - **近 7 天 / 近 30 天**：含今天，缺的天补 0，保证柱状图永远是满格。
  *   数组下标 0 是**今天**，由使用方决定正序还是倒序画。
+ *   这两个窗口固定以今天为终点，**不随统计范围变**——它们是「最近动态」，
+ *   选「全部」时也看得到最近一个月的节奏。
  */
 object PomodoroStats {
 
@@ -40,25 +63,27 @@ object PomodoroStats {
         val taskTotals: List<TaskRow> = emptyList(),
         /** 按学科聚合（含未分类的 null 行）。 */
         val subjectTotals: List<SubjectTotal> = emptyList(),
-        /** 总会话次数，与 totalCompleted 一起算完成率。 */
+        /** 区间内总会话次数，与 totalCompleted 一起算完成率。 */
         val sessionCount: Int = 0,
         /** 最近几次专注记录（新的在前）。 */
-        val recent: List<SessionWithTask> = emptyList()
+        val recent: List<SessionWithTask> = emptyList(),
+        /** 快照对应的统计范围（UI 回显用）。 */
+        val range: StatsRange = StatsRange.ALL
     ) {
         /** 目标完成率（0f~1f）。一次都没记时为 0。 */
         val completionRate: Float
             get() = if (sessionCount <= 0) 0f else totalCompleted.toFloat() / sessionCount
     }
 
-    suspend fun snapshot(dao: PomodoroDao): Snapshot {
+    suspend fun snapshot(dao: PomodoroDao, range: StatsRange = StatsRange.ALL): Snapshot {
         val today = LocalDate.now()
         val todayKey = today.toString()
+        val from = range.fromDay(today)
 
-        val todaySec = dao.totalSecOfDay(todayKey)
-        val todayPomodoros = dao.pomodoroCountOfDay(todayKey)
-        val totalSec = dao.totalSecAll()
-        val totalCompleted = dao.completedSessionCount()
-        val sessionCount = dao.sessionCountAll()
+        val rangeSec = dao.totalSecSince(from)
+        val rangePomodoros = dao.pomodoroCountSince(from)
+        val totalCompleted = dao.completedSessionCount(from)
+        val sessionCount = dao.sessionCountSince(from)
 
         val from7 = today.minusDays(6).toString()
         val byDay7 = dao.dailyTotalsSince(from7).associate { it.day to it.sec }
@@ -74,27 +99,28 @@ object PomodoroStats {
             byDay30[today.minusDays(offset.toLong()).toString()] ?: 0L
         }
 
-        val days = dao.distinctDays().toSet()
+        val days = dao.distinctDays(from).toSet()
         val streak = computeStreak(days, today)
 
-        val taskTotals = dao.taskTotalsOnce().map {
+        val taskTotals = dao.taskTotalsOnce(from).map {
             TaskRow(it.taskId, it.taskName, it.subjectId, it.sec, it.sessionCount)
         }
-        val subjectTotals = dao.subjectTotalsOnce()
-        val recent = dao.recentSessions(RECENT_LIMIT)
+        val subjectTotals = dao.subjectTotalsOnce(from)
+        val recent = dao.recentSessions(from, RECENT_LIMIT)
 
         return Snapshot(
-            todaySec = todaySec,
-            todayPomodoros = todayPomodoros,
+            todaySec = rangeSec,
+            todayPomodoros = rangePomodoros,
             streakDays = streak,
-            totalSec = totalSec,
+            totalSec = rangeSec,
             totalCompleted = totalCompleted,
             last7 = last7,
             last30 = last30,
             taskTotals = taskTotals,
             subjectTotals = subjectTotals,
             sessionCount = sessionCount,
-            recent = recent
+            recent = recent,
+            range = range
         )
     }
 

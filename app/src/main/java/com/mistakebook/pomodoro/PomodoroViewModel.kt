@@ -11,6 +11,7 @@ import com.mistakebook.data.local.SubjectTotal
 import com.mistakebook.data.local.entities.PomodoroTask
 import com.mistakebook.data.local.entities.Subject
 import com.mistakebook.pomodoro.stats.PomodoroStats
+import com.mistakebook.pomodoro.stats.StatsRange
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +20,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import java.time.LocalDate
+import java.time.ZoneId
 
 data class PomodoroUiState(
     val tasks: List<PomodoroTask> = emptyList(),
@@ -51,8 +56,12 @@ data class PomodoroUiState(
     val newTaskSubjectId: Long? = null,
     /** 长按任务弹出的编辑面板（null = 关着）。 */
     val editingTask: PomodoroTask? = null,
+    /** 长按学科弹出的编辑面板（null = 关着）。 */
+    val editingSubject: Subject? = null,
     val showNewSubject: Boolean = false,
     val newSubjectName: String = "",
+    /** 统计页当前选的时间范围。 */
+    val statsRange: StatsRange = StatsRange.ALL,
     val message: String? = null
 ) {
     /** 完成率（0f~1f），统计页「目标达成」用。 */
@@ -76,7 +85,9 @@ class PomodoroViewModel(
     private var selectedTaskId = MutableStateFlow<Long?>(null)
     private var newTaskOpen = MutableStateFlow(false)
     private var editingTask = MutableStateFlow<PomodoroTask?>(null)
+    private var editingSubject = MutableStateFlow<Subject?>(null)
     private var newSubjectOpen = MutableStateFlow(false)
+    private var statsRange = MutableStateFlow(StatsRange.ALL)
     private var message = MutableStateFlow<String?>(null)
 
     /** 统计单独存一份：它只在「记录变化」时刷新，不该跟着秒 tick 重算。 */
@@ -100,7 +111,7 @@ class PomodoroViewModel(
                     PomodoroTask(name = PomodoroTask.DEFAULT_NAME, sortOrder = 0)
                 )
             }
-            stats.value = PomodoroStats.snapshot(dao)
+            stats.value = PomodoroStats.snapshot(dao, statsRange.value)
         }
 
         // 主状态流：任务 / 学科 / 选择 / 弹窗 / 提示 / 统计。
@@ -114,12 +125,14 @@ class PomodoroViewModel(
                 selectedTaskId,
                 newTaskOpen,
                 editingTask,
+                editingSubject,
                 newSubjectOpen,
+                statsRange,
                 message,
                 stats
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
-                val snapshot = values[8] as PomodoroStats.Snapshot
+                val snapshot = values[10] as PomodoroStats.Snapshot
                 PomodoroUiState(
                     tasks = values[0] as List<PomodoroTask>,
                     subjects = values[1] as List<Subject>,
@@ -129,8 +142,10 @@ class PomodoroViewModel(
                     newTaskSubjectId = _ui.value.newTaskSubjectId,
                     showNewTask = values[4] as Boolean,
                     editingTask = values[5] as PomodoroTask?,
-                    showNewSubject = values[6] as Boolean,
-                    message = values[7] as String?,
+                    editingSubject = values[6] as Subject?,
+                    showNewSubject = values[7] as Boolean,
+                    statsRange = values[8] as StatsRange,
+                    message = values[9] as String?,
                     todaySec = snapshot.todaySec,
                     todayPomodoros = snapshot.todayPomodoros,
                     streakDays = snapshot.streakDays,
@@ -195,12 +210,12 @@ class PomodoroViewModel(
         val now = System.currentTimeMillis()
         if (now - lastStatsAt < 30_000L) return
         lastStatsAt = now
-        stats.value = PomodoroStats.snapshot(dao)
+        stats.value = PomodoroStats.snapshot(dao, statsRange.value)
     }
 
     private suspend fun refreshStats() {
         lastStatsAt = System.currentTimeMillis()
-        stats.value = PomodoroStats.snapshot(dao)
+        stats.value = PomodoroStats.snapshot(dao, statsRange.value)
     }
 
     // ------------------------------------------------------------ 计时控制
@@ -420,6 +435,155 @@ class PomodoroViewModel(
             _ui.update { it.copy(newSubjectName = "") }
             newSubjectOpen.value = false
             message.value = "学科已创建"
+        }
+    }
+
+    // ------------------------------------------------------------ 学科编辑（长按）
+
+    /** 长按学科 → 打开编辑面板。 */
+    fun editSubject(subject: Subject) {
+        editingSubject.value = subject
+    }
+
+    fun closeEditSubject() {
+        editingSubject.value = null
+    }
+
+    /** 改名先落到编辑流，点保存才写库（与任务编辑同一套路，防 combine 覆盖）。 */
+    fun onEditSubjectName(name: String) {
+        editingSubject.update { it?.copy(name = name) }
+    }
+
+    fun saveEditedSubject() {
+        val subject = _ui.value.editingSubject ?: return
+        val name = subject.name.trim()
+        if (name.isBlank()) {
+            message.value = "学科名不能为空"
+            return
+        }
+        viewModelScope.launch {
+            val clash = subjectDao.findByName(name)
+            if (clash != null && clash.id != subject.id) {
+                message.value = "学科「$name」已存在"
+                return@launch
+            }
+            subjectDao.update(subject.copy(name = name))
+            editingSubject.value = null
+            message.value = "已保存"
+        }
+    }
+
+    /**
+     * 删除学科。
+     *
+     * 外键 SET_NULL：学科下的任务全部滑到「未分类」，记录一条不丢。
+     * 正在计时的任务不受影响（它只认 taskId，不认学科）。
+     */
+    fun deleteSubject(id: Long) {
+        viewModelScope.launch {
+            val subject = subjectDao.findById(id)
+            if (subject != null) subjectDao.delete(subject)
+            editingSubject.value = null
+            message.value = "学科已删除，其任务已移至未分类"
+        }
+    }
+
+    // ------------------------------------------------------------ 统计范围 / 重置 / 导入
+
+    fun setStatsRange(range: StatsRange) {
+        if (statsRange.value == range) return
+        statsRange.value = range
+        viewModelScope.launch { refreshStats() }
+    }
+
+    /** 清空全部专注记录（统计归零）。任务与学科不动。 */
+    fun resetStats() {
+        viewModelScope.launch {
+            dao.clearAllSessions()
+            refreshStats()
+            message.value = "统计数据已清空"
+        }
+    }
+
+    /**
+     * 从外部 CSV 导入专注记录。
+     *
+     * 每行按「分类 / 任务名 / 时长」归档：学科与任务不存在就按名字
+     * 自动建（复用错题本那套学科），时长按秒落一条会话流水，
+     * 日期列认不出就归到今天。导入的是「已经发生过的事」，
+     * 所以记为未完成（completed = false）——不替用户虚报番茄数。
+     */
+    fun importCsv(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    getApplication<android.app.Application>().contentResolver
+                        .openInputStream(uri)?.bufferedReader()?.readText()
+                }.getOrNull()
+            }
+            if (text.isNullOrBlank()) {
+                message.value = "打不开这个文件，换一个试试"
+                return@launch
+            }
+            val result = CsvFocusImporter.parse(text)
+            if (result.headerUnrecognized || result.rows.isEmpty()) {
+                message.value = "没认出可导入的列：需要含「任务名」和「时长」"
+                return@launch
+            }
+
+            var inserted = 0
+            val today = LocalDate.now().toString()
+            result.rows.forEach { row ->
+                // 学科：按名字找，没有就建
+                var subjectId: Long? = null
+                val subjectName = row.subject?.takeIf { it.isNotBlank() }
+                if (subjectName != null) {
+                    subjectId = subjectDao.findByName(subjectName)?.id
+                    if (subjectId == null) {
+                        subjectId = subjectDao.insert(
+                            Subject(name = subjectName, sortOrder = subjectDao.count())
+                        )
+                    }
+                }
+                // 任务：同学科下同名复用，否则新建
+                val task = dao.findTasksByName(row.taskName)
+                    .firstOrNull { it.subjectId == subjectId }
+                    ?: run {
+                        val newId = dao.insertTask(
+                            PomodoroTask(
+                                name = row.taskName,
+                                subjectId = subjectId,
+                                sortOrder = 0
+                            )
+                        )
+                        PomodoroTask(id = newId, name = row.taskName, subjectId = subjectId)
+                    }
+
+                val day = row.day ?: today
+                val startedAt = runCatching {
+                    LocalDate.parse(day).atTime(12, 0)
+                        .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }.getOrDefault(System.currentTimeMillis())
+                dao.insertSession(
+                    com.mistakebook.data.local.entities.PomodoroSession(
+                        taskId = task.id,
+                        mode = "POMODORO",
+                        day = day,
+                        startedAt = startedAt,
+                        endedAt = startedAt + row.durationSec * 1000L,
+                        durationSec = row.durationSec,
+                        targetSec = 0L,
+                        completed = false
+                    )
+                )
+                inserted++
+            }
+            refreshStats()
+            message.value = if (result.skipped > 0) {
+                "已导入 $inserted 条，跳过 ${result.skipped} 条无法识别的行"
+            } else {
+                "已导入 $inserted 条记录"
+            }
         }
     }
 

@@ -34,6 +34,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
@@ -94,6 +95,27 @@ internal fun SettingsGroup(title: String, content: @Composable () -> Unit) {
             Spacer(Modifier.height(8.dp))
             content()
         }
+    }
+}
+
+/**
+ * 设置页的分组标题：外观 / 使用偏好 / 识别与大模型 / 数据管理。
+ *
+ * 设置项从「配置 Key」堆到「数据管理」一长串，用户找「主题」要翻过半页。
+ * 按「先看外观、再是偏好、配置垫底、数据收尾」的顺序分组，
+ * 每组一行小标题 + 细分割线，扫一眼就知道东西在哪。
+ */
+@Composable
+internal fun SettingsSectionHeader(title: String) {
+    Column(modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(6.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
