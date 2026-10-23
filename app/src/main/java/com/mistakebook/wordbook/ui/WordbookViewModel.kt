@@ -656,6 +656,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                         options = options,
                         selectedOptionIndex = null,
                         isAnswered = false,
+                        // 新题必须显式复位：copy 不写这个字段会沿用旧值，
+                        // 上一题若处于「回退重放可改选」态，true 会泄漏到
+                        // 这道新题上——答完还能点选项，状态就乱了。
+                        allowReselect = false,
                         isCardRevealed = false,
                         isLoading = false
                     )
@@ -976,7 +980,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             it.copy(
                 selectedOptionIndex = index,
                 isAnswered = true,
-                allowReselect = false,
+                // 改选后仍保留「可改」：用户回退到旧题就是来改主意的，
+                // 改一次又锁死等于只给一次反悔机会。只有**首次作答**
+                // 才落锁（首答后的锁定交给自动跳题 / 答错驻留来接管）。
+                allowReselect = state.allowReselect,
                 options = updatedOptions
             )
         }
@@ -1016,6 +1023,16 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     isActionInProgress.set(false)
                 }
             }
+        } else if (isCorrect && isReselect) {
+            //
+            // **锁死 bug 的根因**：防连击锁的释放只挂在两条路径上——
+            // 「首答答对」靠自动跳题 job 的 finally，「答错」靠
+            // recordAnswer job 的 finally。而「改选 + 答对」两条 job
+            // 都不会跑（改选不记账、不自动跳），锁就永远悬着，
+            // 之后每一次 selectOption 都被 isActionInProgress 拦下——
+            // 用户实测「选对了→返回上一个→锁定死了不能选择」。
+            // 改选答对不跳题，就地释放锁。
+            isActionInProgress.set(false)
         }
     }
 
