@@ -14,6 +14,7 @@ import com.mistakebook.data.chat.PreparedAttachment
 import com.mistakebook.data.local.entities.ChatAttachment
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.data.repos.ChatRepository
@@ -171,6 +172,10 @@ data class ChatUiState(
      * 而不是为每个模型各建一套配置（URL 抄 N 遍）。
      */
     val modelOptions: List<String> = emptyList(),
+    /** 当前实际生效的模型名（选择面板与输入栏 chip 显示用）。 */
+    val currentModel: String = "",
+    /** 思考强度（模型面板右上角设置里可调，与设置页同一数据源）。 */
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.HIGH,
 
     /**
      * 本会话当前选中的模型。
@@ -267,6 +272,13 @@ class ChatViewModel(
     private var truncatedMessageId: Long? = null
 
     init {
+        // 思考强度跟随全局设置：模型选择面板的「设置」里可以直接调，
+        // 与设置页共用同一份数据源（SettingsStore），调完下一次发送即生效。
+        viewModelScope.launch {
+            settingsStore.settings.collect { s ->
+                _state.value = _state.value.copy(reasoningEffort = s.reasoningEffort)
+            }
+        }
         viewModelScope.launch {
             // 从对话记录点进来时会话已经存在，直接按 id 用；
             // 只有「从首页/题目页新开」才需要创建或复用。
@@ -474,7 +486,12 @@ class ChatViewModel(
      * 不用为每个模型各建一套配置。空串 = 用配置里的默认模型。
      */
     fun selectModel(model: String) {
-        _state.value = _state.value.copy(selectedModel = model)
+        _state.value = _state.value.copy(selectedModel = model, currentModel = model)
+    }
+
+    /** 调整思考强度：写全局设置，下一次发送生效。 */
+    fun setReasoningEffort(effort: ReasoningEffort) {
+        viewModelScope.launch { settingsStore.setReasoningEffort(effort) }
     }
 
     /**
@@ -484,9 +501,14 @@ class ChatViewModel(
      * 所以进对话页时拉一次快照。
      */
     private suspend fun refreshModelOptions() {
-        val profile = settingsStore.settings.first().activeProfile ?: return
+        val snapshot = settingsStore.settings.first()
+        val profile = snapshot.activeProfile ?: return
         val options = profile.availableModels()
-        _state.value = _state.value.copy(modelOptions = options)
+        _state.value = _state.value.copy(
+            modelOptions = options,
+            // 芯片上显示的名字：用户切过就用切后的，否则用配置的默认模型
+            currentModel = _state.value.selectedModel.ifBlank { profile.model }
+        )
     }
 
     fun send() {

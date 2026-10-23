@@ -34,12 +34,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
@@ -48,12 +48,14 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -62,6 +64,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -87,12 +91,14 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import com.mistakebook.R
 import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.local.entities.ChatMessage
+import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.ChatRole
 import com.mistakebook.domain.MessageStatus
@@ -189,6 +195,7 @@ fun ChatScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var showAttachSheet by remember { mutableStateOf(false) }
+    var showModelSheet by remember { mutableStateOf(false) }
 
     // 选文件：OpenDocument 拿的是可长期读取的 Uri（不依赖临时授权），
     // 比 GetContent 好——GetContent 在进程重启后就读不到了。
@@ -491,31 +498,35 @@ fun ChatScreen(
                 Spacer(Modifier.height(4.dp))
             }
 
-            // 模型切换行：只在当前 provider 供应多个模型时出现。
-            //
-            // 一个中转站常挂着几十个模型，用户想在对话中直接切，
-            // 而不是为每个模型各建一套配置（URL 抄 N 遍）。
-            if (state.modelOptions.size > 1) {
-                ModelPickerRow(
-                    models = state.modelOptions,
-                    selected = state.selectedModel,
-                    enabled = !state.isStreaming,
-                    onSelect = viewModel::selectModel
-                )
-                Spacer(Modifier.height(4.dp))
-            }
+            // 模型切换改为输入栏里的选择入口 + 底部弹层（见 ChatInputBar）。
+            // 旧的横向 chip 一排在模型多的时候要滚很久才能找到目标，
+            // 弹层一屏列表能看到全部，还能就地去设置里调思考强度。
 
             ChatInputBar(
                 text = state.input,
                 streaming = state.isStreaming,
                 attachments = state.pendingAttachments,
+                modelName = state.currentModel,
                 onTextChange = viewModel::onInputChange,
                 onSend = viewModel::send,
                 onStop = viewModel::stop,
                 onAttach = { showAttachSheet = true },
+                onPickModel = { showModelSheet = true },
                 onRemoveAttachment = viewModel::removePendingAttachment
             )
         }
+    }
+
+    if (showModelSheet) {
+        ModelPickerSheet(
+            models = state.modelOptions,
+            selected = state.selectedModel,
+            currentEffort = state.reasoningEffort,
+            enabled = !state.isStreaming,
+            onSelect = viewModel::selectModel,
+            onEffortChange = viewModel::setReasoningEffort,
+            onDismiss = { showModelSheet = false }
+        )
     }
 }
 
@@ -1213,60 +1224,17 @@ private fun OcrNoticeBar(notice: String, onRetry: () -> Unit) {
     }
 }
 
-/**
- * 模型切换行：一排可横向滚动的 chip。
- *
- * 只在 provider 供应多个模型时显示（由调用方判断）。
- * 生成中禁用——换模型会让「这一轮用哪个模型」变得不可追溯。
- */
-@Composable
-private fun ModelPickerRow(
-    models: List<String>,
-    selected: String,
-    enabled: Boolean,
-    onSelect: (String) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            Icons.Default.SmartToy,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        models.forEach { model ->
-            FilterChip(
-                selected = selected.isBlank() && model == models.firstOrNull() ||
-                    selected == model,
-                onClick = { onSelect(model) },
-                enabled = enabled,
-                label = {
-                    Text(
-                        text = model,
-                        maxLines = 1,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            )
-        }
-    }
-}
-
 @Composable
 private fun ChatInputBar(
     text: String,
     streaming: Boolean,
     attachments: List<PendingAttachment>,
+    modelName: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onAttach: () -> Unit,
+    onPickModel: () -> Unit,
     onRemoveAttachment: (Long) -> Unit
 ) {
     Surface(tonalElevation = 3.dp, shadowElevation = 8.dp) {
@@ -1285,28 +1253,83 @@ private fun ChatInputBar(
                 Spacer(Modifier.height(6.dp))
             }
 
-            Row(verticalAlignment = Alignment.Bottom) {
-                IconButton(onClick = onAttach, enabled = !streaming, modifier = Modifier.size(48.dp)) {
+            // 上段：输入区。去掉了描边——两段式布局里容器本身就是边界，
+            // 再画一圈边框就是双重框，又挤又旧。
+            OutlinedTextField(
+                value = text,
+                onValueChange = onTextChange,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(stringResource(R.string.chat_input_hint)) },
+                maxLines = 5,
+                shape = RoundedCornerShape(20.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    disabledBorderColor = Color.Transparent,
+                    errorBorderColor = Color.Transparent,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                )
+            )
+
+            // 下段：操作条
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 附件在最左（用户点名：最左边是 +，右边那个加号不要了）
+                IconButton(onClick = onAttach, enabled = !streaming, modifier = Modifier.size(44.dp)) {
                     Icon(
-                        Icons.Default.AttachFile,
+                        Icons.Default.Add,
                         contentDescription = stringResource(R.string.chat_attach)
                     )
                 }
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text(stringResource(R.string.chat_input_hint)) },
-                    maxLines = 5,
-                    shape = RoundedCornerShape(20.dp)
-                )
-                Spacer(Modifier.width(8.dp))
+
+                Spacer(Modifier.width(6.dp))
+
+                // 模型选择入口：圆形图标 + 当前模型名 + 下拉箭头。
+                // 一个 provider 常供应几十个模型，点这里弹出完整列表。
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(18.dp))
+                        .clickable(enabled = !streaming, onClick = onPickModel)
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = modelName.firstOrNull()?.uppercase() ?: "?",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = modelName.ifBlank { stringResource(R.string.chat_model_unset) },
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Icon(
+                        Icons.Default.ExpandMore,
+                        contentDescription = stringResource(R.string.chat_pick_model),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 FilledIconButton(
                     onClick = { if (streaming) onStop() else onSend() },
                     enabled = streaming ||
                         text.isNotBlank() ||
                         attachments.any { it.status == com.mistakebook.domain.AttachmentStatus.READY },
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(44.dp)
                 ) {
                     Icon(
                         imageVector = if (streaming) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
@@ -1316,6 +1339,166 @@ private fun ChatInputBar(
             }
         }
     }
+}
+
+/**
+ * 模型选择弹层（效仿主流 AI 应用的模型列表）。
+ *
+ * 两页内容共用一个弹层：
+ * - **模型列表**：每行圆形首字母徽标 + 模型名 + 选中对勾；
+ * - **设置**（右上角齿轮）：思考强度五档单选，写全局设置，
+ *   与设置页同一数据源，下一次发送即生效。
+ *
+ * 为什么把思考强度塞在这里：它是「换模型时最常一起动的参数」——
+ * 切到推理模型想拉满思考、切到快模型想关掉思考省额度，
+ * 藏到设置页里每次都要跳出去改，打断对话节奏。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelPickerSheet(
+    models: List<String>,
+    selected: String,
+    currentEffort: ReasoningEffort,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+    onEffortChange: (ReasoningEffort) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var page by remember { mutableStateOf(0) } // 0 模型列表 / 1 思考强度
+    ModalBottomSheet(onDismissRequest = {
+        page = 0
+        onDismiss()
+    }) {
+        Column(modifier = Modifier.padding(bottom = 24.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (page == 1) {
+                    // 设置页左上角是「返回模型列表」
+                    IconButton(onClick = { page = 0 }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回模型列表")
+                    }
+                }
+                Text(
+                    text = if (page == 0) stringResource(R.string.chat_pick_model)
+                    else stringResource(R.string.settings_reasoning_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                if (page == 0) {
+                    IconButton(onClick = { page = 1 }, enabled = enabled) {
+                        Icon(Icons.Default.Settings, contentDescription = "思考强度设置")
+                    }
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                }
+            }
+
+            if (page == 0) {
+                if (models.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.chat_model_unset),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                    )
+                }
+                models.forEach { model ->
+                    val isSelected = selected == model ||
+                        (selected.isBlank() && model == models.firstOrNull())
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = enabled) {
+                                onSelect(model)
+                                page = 0
+                                onDismiss()
+                            }
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = model.firstOrNull()?.uppercase() ?: "?",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = model,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isSelected) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "已选择",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            } else {
+                // 思考强度：五档单选。当场生效打勾，不关弹层——
+                // 用户往往要「调完强度继续换模型」。
+                ReasoningEffort.entries.forEach { effort ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onEffortChange(effort) }
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = currentEffort == effort, onClick = { onEffortChange(effort) })
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = effortLabel(effort),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = effortHint(effort),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun effortLabel(effort: ReasoningEffort): String = when (effort) {
+    ReasoningEffort.OFF -> "关闭"
+    ReasoningEffort.LOW -> "低"
+    ReasoningEffort.MEDIUM -> "中"
+    ReasoningEffort.HIGH -> "高"
+    ReasoningEffort.MAX -> "最高"
+}
+
+private fun effortHint(effort: ReasoningEffort): String = when (effort) {
+    ReasoningEffort.OFF -> "不带思考字段，服务端按默认来"
+    ReasoningEffort.LOW -> "浅想一下，最快"
+    ReasoningEffort.MEDIUM -> "平衡思考与速度"
+    ReasoningEffort.HIGH -> "想清楚再答"
+    ReasoningEffort.MAX -> "思考拉满（部分中转站支持）"
 }
 
 /** 附件来源选择。相册 / 拍照 / 文件三选一。 */

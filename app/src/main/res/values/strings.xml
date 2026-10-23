@@ -443,6 +443,8 @@
     <string name="chat_context_not_injected">未能读取这道题的信息，将只按你的提问回答。</string>
 
     <string name="chat_attach">添加附件</string>
+    <string name="chat_pick_model">选择模型</string>
+    <string name="chat_model_unset">未配置模型</string>
     <string name="chat_attach_image">图片</string>
     <string name="chat_attach_file">文档</string>
     <string name="chat_attach_gallery">从相册选择</string>
