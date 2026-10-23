@@ -178,7 +178,13 @@ class PomodoroViewModel(
         viewModelScope.launch {
             while (true) {
                 delay(1_000L)
-                if (timer.state.value.status == RunStatus.IDLE) continue
+                if (timer.state.value.status == RunStatus.IDLE) {
+                    // 归位：空闲时秒表读数必须回零。表盘订阅的是这条流，
+                    // 流里留着上一次会话的残留（倒计时结束时恰是 targetMs），
+                    // 表盘就会在已结束的状态下一直显示 00:00 或旧的正计时读数。
+                    if (_tick.value != 0L) _tick.value = 0L
+                    continue
+                }
                 tickCount++
                 if (tickCount % CHECKPOINT_EVERY_TICKS == 0L) timer.checkpoint()
                 _tick.value = timer.elapsedMs()
@@ -610,6 +616,10 @@ class PomodoroViewModel(
                 selectedTaskId = timer.state.value.taskId ?: it.selectedTaskId
             )
         }
+        // 秒表读数同步重算：开始新会话时若沿用上一条残留（如上轮倒计时
+        // 到点的 targetMs），表盘头一秒会显示 00:00 冒充「已耗尽」。
+        // 结束后这里是 0，表盘立刻回到标准目标时长，不等下一轮 tick。
+        _tick.value = timer.elapsedMs()
     }
 
     companion object {

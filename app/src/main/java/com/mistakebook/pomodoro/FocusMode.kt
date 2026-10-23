@@ -10,9 +10,9 @@ package com.mistakebook.pomodoro
  * 「倒计时和番茄钟重复了吧」。重复的模式按钮除了让人多按一次，
  * 没有任何信息量。
  *
- * 现在：番茄钟 = 倒计时（目标时长用轮盘自定，默认 25 分钟），
+ * 现在：番茄钟 = 倒计时（目标时长用轮盘自定，默认 45 分钟），
  * 正计时 = 没有终点。定时需求由「自定时长的番茄钟」覆盖——
- * 想要 45 分钟就把轮盘拨到 45，比多一个模式按钮直观得多。
+ * 想要别的时长就把轮盘拨过去，比多一个模式按钮直观得多。
  *
  * ## 历史数据兼容
  *
@@ -26,7 +26,7 @@ enum class FocusMode(
     val defaultMinutes: Int,
     val hasTarget: Boolean
 ) {
-    POMODORO("番茄", 25, hasTarget = true),
+    POMODORO("番茄", 45, hasTarget = true),
     STOPWATCH("正计时", 0, hasTarget = false);
 
     /** 供统计与进度显示用的默认目标秒数。 */

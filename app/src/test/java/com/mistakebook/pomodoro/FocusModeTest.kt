@@ -37,7 +37,7 @@ class FocusModeTest {
     @Test
     fun `只有番茄有目标时长`() {
         assertTrue(FocusMode.POMODORO.hasTarget)
-        assertEquals(25L * 60_000L, FocusMode.POMODORO.defaultTargetMs())
+        assertEquals(45L * 60_000L, FocusMode.POMODORO.defaultTargetMs())
         assertTrue(!FocusMode.STOPWATCH.hasTarget)
         assertEquals(0L, FocusMode.STOPWATCH.defaultTargetMs())
     }

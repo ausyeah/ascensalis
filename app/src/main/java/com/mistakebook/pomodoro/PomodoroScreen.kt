@@ -108,8 +108,8 @@ import kotlin.math.roundToInt
  *
  * 番茄钟 / 正向计时是**两种心智模型**（有终点 vs 没有终点），各占一页；
  * 统计数据单独一页。旧版的「定时」模式与番茄钟完全是同一个东西
- * （都是倒计时，只是默认时长不同），已合并——想定时 45 分钟，
- * 在番茄钟页把轮盘拨到 45 即可。
+ * （都是倒计时，只是默认时长不同），已合并——默认就是 45 分钟，
+ * 想换时长在番茄钟页把轮盘拨一下即可。
  *
  * ## 布局顺序是按「一次专注的动作顺序」排的
  *
@@ -285,21 +285,16 @@ private fun TimerTab(
             onNewSubjectName = viewModel::onNewSubjectName,
             onCreateSubject = viewModel::createSubject,
             onCancelNewSubject = { viewModel.openNewSubject(false) },
-            onEditSubject = viewModel::editSubject
+            onEditSubject = viewModel::editSubject,
+            // 新建任务表单跟着学科走：内联展开在所点学科的任务列表下方，
+            // 不再是页面最底部那张孤零零的卡（见 SubjectTaskBoard）。
+            showNewTask = state.showNewTask,
+            newTaskSubjectId = state.newTaskSubjectId,
+            newTaskName = state.newTaskName,
+            onNewTaskName = viewModel::onNewTaskName,
+            onCreateTask = viewModel::createTask,
+            onCancelNewTask = { viewModel.openNewTask(false) }
         )
-
-        if (state.showNewTask) {
-            Spacer(Modifier.height(12.dp))
-            NewTaskCard(
-                name = state.newTaskName,
-                subjects = state.subjects,
-                subjectId = state.newTaskSubjectId,
-                onName = viewModel::onNewTaskName,
-                onSubject = viewModel::onNewTaskSubject,
-                onConfirm = viewModel::createTask,
-                onCancel = { viewModel.openNewTask(false) }
-            )
-        }
 
         Spacer(Modifier.height(24.dp))
     }
@@ -433,57 +428,61 @@ private fun TimerDial(
 
             Spacer(Modifier.height(10.dp))
 
-            // ---- 主操作：时间正下方 ----
+            // ---- 主操作：时间正下方，纯图标、零底色 ----
+            // 早期是一颗 primary 大胶囊「开始」，用户原话：「占整个圆的大
+            // 部分，甚至还要超出去，实在是没有审美」。计时器的控件应该
+            // 像手表一样安静——图形本身即语义，不需要文字 explain：
+            // 三角形 = 开始，竖等号 = 暂停，红方块 = 停止。
             when (status) {
                 RunStatus.IDLE -> {
                     // 开始：长按循环切换模式（隐藏手势，顶部另有可见 Tab）
-                    Surface(
+                    Box(
                         modifier = Modifier
-                            .height(44.dp)
-                            .widthIn(min = 132.dp)
+                            .size(52.dp)
+                            .clip(CircleShape)
                             .combinedClickable(onClick = onStart, onLongClick = onCycleMode),
-                        shape = RoundedCornerShape(22.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("开始", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        }
+                        Icon(
+                            Icons.Outlined.PlayArrow,
+                            contentDescription = "开始",
+                            modifier = Modifier.size(30.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
                 else -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        FilledTonalButton(
-                            onClick = if (status == RunStatus.RUNNING) onPause else onResume,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            modifier = Modifier.height(38.dp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(CircleShape)
+                                .combinedClickable(
+                                    onClick = if (status == RunStatus.RUNNING) onPause else onResume
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 if (status == RunStatus.RUNNING) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                                contentDescription = if (status == RunStatus.RUNNING) "暂停" else "继续",
+                                modifier = Modifier.size(30.dp),
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(Modifier.width(4.dp))
-                            Text(if (status == RunStatus.RUNNING) "暂停" else "继续", fontSize = 13.sp)
                         }
-                        FilledTonalButton(
-                            onClick = onStopSave,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            modifier = Modifier.height(38.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            )
+                        // 停止：唯一允许出现的彩色，且只给破坏性操作
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(CircleShape)
+                                .combinedClickable(onClick = onStopSave),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Outlined.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("结束并记录", fontSize = 13.sp)
+                            Icon(
+                                Icons.Outlined.Stop,
+                                contentDescription = "结束并记录",
+                                modifier = Modifier.size(26.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 }
@@ -791,7 +790,13 @@ private fun SubjectTaskBoard(
     onNewSubjectName: (String) -> Unit,
     onCreateSubject: () -> Unit,
     onCancelNewSubject: () -> Unit,
-    onEditSubject: (Subject) -> Unit
+    onEditSubject: (Subject) -> Unit,
+    showNewTask: Boolean = false,
+    newTaskSubjectId: Long? = null,
+    newTaskName: String = "",
+    onNewTaskName: (String) -> Unit = {},
+    onCreateTask: () -> Unit = {},
+    onCancelNewTask: () -> Unit = {}
 ) {
     // 学科累计时长（按学科聚合的统计里有），任务数实时数
     val taskTotals = remember(tasks) {
@@ -843,6 +848,20 @@ private fun SubjectTaskBoard(
                         Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("新建任务")
+                    }
+                    // 新建任务表单：就地长在这个学科的任务列表下面。
+                    // 早期它被甩到整个页面最底部——「点数学的新建任务，
+                    // 输入框出现在英语下面」，包含关系断裂，学科一多
+                    // 就得翻到底。现在表单跟着学科走，位置即归属。
+                    if (showNewTask && newTaskSubjectId == subjectId) {
+                        Spacer(Modifier.height(8.dp))
+                        InlineTaskEditor(
+                            subjectName = name,
+                            name = newTaskName,
+                            onName = onNewTaskName,
+                            onConfirm = onCreateTask,
+                            onCancel = onCancelNewTask
+                        )
                     }
                 }
             }
@@ -912,6 +931,64 @@ private fun InlineSubjectEditor(
             Spacer(Modifier.width(8.dp))
             TextButton(onClick = onCancel) { Text("取消") }
             Button(onClick = onConfirm, enabled = name.isNotBlank()) { Text("创建") }
+        }
+    }
+}
+
+/**
+ * 就地展开的「新建任务」输入行——长在所属学科的任务列表下面。
+ *
+ * 与 [InlineSubjectEditor] 同一套手势：自动获焦、弹键盘、回车创建。
+ * 学科由**所在位置**决定（点哪个学科的新建任务就归哪个学科），
+ * 所以不再放学科筛选 chips——位置本身就是归属，再选一遍是重复提问。
+ */
+@Composable
+private fun InlineTaskEditor(
+    subjectName: String,
+    name: String,
+    onName: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboard?.show()
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "新建到「$subjectName」",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = onName,
+                label = { Text("任务名") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onConfirm() }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onCancel) { Text("取消") }
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = onConfirm, enabled = name.isNotBlank()) { Text("创建") }
+            }
         }
     }
 }
@@ -1016,61 +1093,6 @@ private fun TaskRow(
                 )
                 Spacer(Modifier.width(3.dp))
                 Text("开始", fontSize = 13.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun NewTaskCard(
-    name: String,
-    subjects: List<Subject>,
-    subjectId: Long?,
-    onName: (String) -> Unit,
-    onSubject: (Long?) -> Unit,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            OutlinedTextField(
-                value = name,
-                onValueChange = onName,
-                label = { Text("任务名") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = "归到哪个学科（可不选）",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SubjectChip(name = "不分类", selected = subjectId == null, onClick = { onSubject(null) })
-                subjects.forEach { s ->
-                    SubjectChip(
-                        name = s.name,
-                        selected = subjectId == s.id,
-                        onClick = { onSubject(s.id) }
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onCancel) { Text("取消") }
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = onConfirm) { Text("创建") }
             }
         }
     }

@@ -117,9 +117,17 @@ class PomodoroTimer(context: Context) {
         save()
     }
 
-    /** 重置为待开始状态。 */
+    /**
+     * 重置为待开始状态。
+     *
+     * **模式必须原样保留**：正计时停下来还停在正计时（目标 0、读数归零）。
+     * 早期版本这里直接 `State()`，模式被弹回番茄——用户在正计时页点
+     * 「结束并记录」，界面「嗖」地跳回番茄钟页，还以为自己按错了。
+     * 目标时长回到该模式的默认值（番茄 = 45 分钟），不继承上一次
+     * 拨轮设的自定义值：一次专注结束，表盘就该回到标准起点。
+     */
     fun reset() {
-        _state.value = State()
+        _state.value = idleStateFor(_state.value.mode)
         save()
     }
 
@@ -246,3 +254,12 @@ class PomodoroTimer(context: Context) {
         const val KEY_REBOOT = "rebooted"
     }
 }
+
+/**
+ * 归位后的待开始状态：**模式原样保留**，目标回该模式默认值。
+ *
+ * 抽成纯函数是为了能单测——「正计时停止后不弹回番茄」这条教训
+ * 值得一个回归测试钉死（见 TimerResetTest）。
+ */
+internal fun idleStateFor(mode: FocusMode): PomodoroTimer.State =
+    PomodoroTimer.State(mode = mode, targetMs = mode.defaultTargetMs())

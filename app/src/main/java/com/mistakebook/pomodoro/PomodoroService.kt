@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
  * ## 为什么是 specialUse 而不是 shortService
  *
  * Android 14 起 `startForeground()` 必须声明服务类型，漏声明直接抛
- * `MissingForegroundServiceTypeException`。番茄钟一跑就是 25 分钟以上，
+ * `MissingForegroundServiceTypeException`。番茄钟一跑就是 45 分钟以上，
  * 而 `shortService` 只有约 3 分钟就会被系统停掉，所以只能用
  * `specialUse`（Manifest 里附了 property 说明用途）。
  *
