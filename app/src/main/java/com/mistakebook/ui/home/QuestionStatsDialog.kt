@@ -30,8 +30,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.R
+import com.mistakebook.data.local.knowledgePoints
+import com.mistakebook.data.local.options
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.ErrorReason
+import com.mistakebook.export.AnkiCsvBuilder
 import com.mistakebook.report.WeeklyStatsBuilder
 import com.mistakebook.ui.common.SectionLabel
 import com.mistakebook.ui.common.containerViewModel
@@ -91,9 +94,29 @@ fun QuestionStatsDialog(
                         BarGroup(rows = group.bars, total = state.total)
                     }
                 }
+
+                // Anki 导出（F7）：统计页是"数据出口"的自然位置
+                state.exportMessage?.let { message ->
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            TextButton(
+                onClick = { viewModel.exportAnki() },
+                enabled = !state.exporting && state.total > 0
+            ) {
+                Text(
+                    if (state.exporting) stringResource(R.string.stats_exporting)
+                    else stringResource(R.string.stats_export_anki)
+                )
+            }
+        },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
         }
@@ -175,7 +198,9 @@ data class QuestionStatsUiState(
     val total: Int = 0,
     val mastered: Int = 0,
     val newThisWeek: Int = 0,
-    val groups: List<StatGroup> = emptyList()
+    val groups: List<StatGroup> = emptyList(),
+    val exporting: Boolean = false,
+    val exportMessage: String? = null
 )
 
 class QuestionStatsViewModel(private val container: AppContainer) : ViewModel() {
@@ -236,4 +261,68 @@ class QuestionStatsViewModel(private val container: AppContainer) : ViewModel() 
 
     private fun labelReason(name: String): String =
         ErrorReason.entries.firstOrNull { it.name == name }?.label ?: name
+
+    /**
+     * 导出 Anki CSV（F7）。落盘走 MediaStore.Downloads（Q+）/应用目录（旧机），
+     * 与 BackupManager 同一模式；文件名带时间戳防覆盖。
+     */
+    fun exportAnki() {
+        if (_uiState.value.exporting) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(exporting = true, exportMessage = null)
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ctx = container.appContext
+                    val dao = container.database.questionDao()
+                    val subjects = container.subjectRepository.observeAll().first()
+                    val subjectNames = subjects.associate { (it.id as Long?) to it.name }
+                    val questions = dao.allActive()
+                    if (questions.isEmpty()) return@runCatching ctx.getString(R.string.stats_export_empty)
+
+                    val rows = questions.map { q ->
+                        AnkiCsvBuilder.cardRow(
+                            stem = q.stem,
+                            options = q.options.map { it.label to it.text },
+                            answer = q.answer,
+                            analysis = q.analysis,
+                            tags = buildList {
+                                add(ctx.getString(R.string.app_name))
+                                q.subjectId?.let { subjectNames[it] }?.let { add(it) }
+                                add(labelReason(q.errorReason.name))
+                                addAll(q.knowledgePoints)
+                            }
+                        )
+                    }
+                    val csv = AnkiCsvBuilder.build(rows)
+                    val name = "anki_${java.text.SimpleDateFormat(
+                        "yyyyMMdd_HHmmss", java.util.Locale.CHINA
+                    ).format(java.util.Date())}.csv"
+                    val path = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        val values = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                            put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/csv")
+                            put(
+                                android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                                android.os.Environment.DIRECTORY_DOWNLOADS + "/错题本"
+                            )
+                        }
+                        val uri = ctx.contentResolver.insert(
+                            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                        ) ?: error("无法写入下载目录")
+                        ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            out.write(csv.toByteArray(Charsets.UTF_8))
+                        } ?: error("打开输出流失败")
+                        "Download/错题本/$name"
+                    } else {
+                        val dir = container.files.exportDir.apply { mkdirs() }
+                        val target = java.io.File(dir, name)
+                        target.writeText(csv, Charsets.UTF_8)
+                        target.absolutePath
+                    }
+                    ctx.getString(R.string.stats_export_done, path)
+                }.getOrElse { e -> e.message ?: "导出失败" }
+            }
+            _uiState.value = _uiState.value.copy(exporting = false, exportMessage = result)
+        }
+    }
 }

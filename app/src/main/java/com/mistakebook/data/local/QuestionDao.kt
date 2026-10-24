@@ -189,6 +189,10 @@ interface QuestionDao {
     )
     suspend fun difficultyDistribution(): List<NameCount>
 
+    /** Anki 导出（F7）：全部未删除的题。导出场景一次性拉全量，不分页。 */
+    @Query("SELECT * FROM questions WHERE deletedAt IS NULL ORDER BY createdAt DESC")
+    suspend fun allActive(): List<Question>
+
     /**
      * 思维导图（F4）用：按学科过滤的知识点 JSON 清单。
      * [subjectFilter] 传 0 表示不限学科（与列表查询的约定一致）。
