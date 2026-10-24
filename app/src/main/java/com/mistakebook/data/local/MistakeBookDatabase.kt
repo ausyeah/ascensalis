@@ -33,7 +33,7 @@ import com.mistakebook.data.local.entities.Tag
         PomodoroTask::class,
         PomodoroSession::class
     ],
-    version = 4,
+        version = 5,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -255,6 +255,18 @@ abstract class MistakeBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 4 → 5：questions 加 relatedQuestionId 列（F1 举一反三变式题）。
+         *
+         * 变式题记录它由哪道题生成，详情页据此展示「来源题」关联。
+         * 纯加列、可空、无默认值约束：老数据该列全为 NULL，一行 SQL 完成。
+         */
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `questions` ADD COLUMN `relatedQuestionId` INTEGER")
+            }
+        }
+
         fun build(context: Context): MistakeBookDatabase =
             Room.databaseBuilder(context, MistakeBookDatabase::class.java, DB_NAME)
                 // 两个都**必须**注册：漏一个，Room 就找不到那条升级路径，
@@ -267,7 +279,7 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                 //
                 // 加新版本时记得两处同步：改上面的 `version`，并在此追加 MIGRATION_n_n+1。
                 // 「定义了但忘了注册」是 Room 最常见也最致命的疏漏。
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
     }
 }

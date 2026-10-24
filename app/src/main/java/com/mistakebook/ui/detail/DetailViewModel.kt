@@ -8,8 +8,15 @@ import com.mistakebook.data.local.knowledgePoints
 import com.mistakebook.data.local.options
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.MasteryStatus
+import com.mistakebook.domain.Option
+import com.mistakebook.domain.QuestionDraft
+import com.mistakebook.net.ApiResult
+import com.mistakebook.pipeline.VariantPrompts
+import com.mistakebook.pipeline.VariantQuestionParser
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -37,6 +44,20 @@ sealed interface ReRecognizeResult {
 
     /** 未提交，[reason] 是可直接展示给用户的中文原因。 */
     data class Failed(val reason: String) : ReRecognizeResult
+}
+
+/**
+ * 变式题（F1 举一反三）的界面状态。
+ *
+ * 独立于 [DetailUiState] 而不是并进去：它有自己的生命周期（生成中→出结果/失败→关闭），
+ * 且不应因为题目数据刷新（改难度、改备注）被打断或重置。
+ */
+data class VariantState(
+    val generating: Boolean = false,
+    val draft: com.mistakebook.pipeline.RefinedQuestionDto? = null,
+    val error: String? = null
+) {
+    val visible: Boolean get() = generating || draft != null || error != null
 }
 
 class DetailViewModel(
@@ -169,5 +190,91 @@ class DetailViewModel(
         viewModelScope.launch {
             container.questionRepository.updateNote(questionId, draft)
         }
+    }
+
+    // ===== 变式题（F1 举一反三）：基于本题出一道同知识点的新题 =====
+
+    private val _variant = MutableStateFlow(VariantState())
+    val variantState: StateFlow<VariantState> = _variant.asStateFlow()
+
+    /**
+     * 入口：状态为空时发起生成，已有结果/失败时只把对话框打开（由 [variantState].visible 驱动）。
+     * 生成中重复点击直接忽略——LLM 调用没有「暂停重来」，连点只会多烧一次调用。
+     */
+    fun openVariant() {
+        val state = _variant.value
+        if (state.generating || state.draft != null || state.error != null) return
+        generateVariant()
+    }
+
+    fun generateVariant() {
+        if (_variant.value.generating) return
+        val question = uiState.value.question ?: return
+        viewModelScope.launch {
+            _variant.value = VariantState(generating = true)
+            val snapshot = container.settingsStore.snapshotNow()
+            val profile = snapshot.activeProfile
+            if (profile == null || !profile.isConfigured()) {
+                _variant.value = VariantState(error = "请先到设置填写大模型 API Key")
+                return@launch
+            }
+            val raw = container.llmClient.refineJson(
+                profile = profile,
+                systemPrompt = VariantPrompts.system(),
+                userPrompt = VariantPrompts.user(question, subjectName = uiState.value.subjectName),
+                imageFile = null,
+                longEdgePx = 0,
+                attachImage = false
+            )
+            when (raw) {
+                is ApiResult.Success -> {
+                    val dto = VariantQuestionParser.parse(raw.data)
+                    _variant.value = if (dto == null) {
+                        VariantState(error = "AI 没能生成有效的变式题，请重试")
+                    } else {
+                        VariantState(draft = dto)
+                    }
+                }
+                is ApiResult.Failure -> {
+                    _variant.value = VariantState(
+                        error = raw.error.serverMessage.ifBlank { "生成失败，请检查网络后重试" }
+                    )
+                }
+            }
+        }
+    }
+
+    /** 把当前变式存为错题并关联本题；[onSaved] 带新题 id（UI 用来跳转）。 */
+    fun saveVariant(onSaved: (Long) -> Unit) {
+        val dto = _variant.value.draft ?: return
+        val question = uiState.value.question ?: return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            // DTO → QuestionDraft：复用 save() 的全部入库规则（学科解析/标签/排期初值）。
+            // errorReason 用默认 OTHER——变式是「还没做的新题」，错因留给用户做完再标。
+            val draft = QuestionDraft(
+                imagePath = "",
+                mineruMarkdown = "",
+                subjectName = dto.subject,
+                stem = dto.stem,
+                options = dto.options.map { Option(it.label, it.text) },
+                answer = dto.answer,
+                analysis = dto.analysis,
+                title = dto.title.trim().ifBlank {
+                    question.title.trim().takeIf { it.isNotBlank() }?.let { "变式 · $it" } ?: ""
+                },
+                knowledgePoints = dto.knowledge_points,
+                difficulty = dto.difficulty
+            )
+            val id = container.questionRepository.saveVariant(question, draft, now)
+            _variant.value = VariantState()
+            onSaved(id)
+        }
+    }
+
+    /** 关闭变式弹层。生成中不允许关（没有取消 LLM 的路径），其余状态直接清空。 */
+    fun dismissVariant() {
+        if (_variant.value.generating) return
+        _variant.value = VariantState()
     }
 }

@@ -354,6 +354,12 @@
     <string name="edit_subject_manual">识别不出来？手动填学科</string>
     <string name="edit_subject_manual_hint">例如：通信原理</string>
     <string name="detail_note_saved">备注已保存</string>
+    <string name="detail_variant_generate">举一反三：出一道同源变式题</string>
+    <string name="detail_variant_title">变式题</string>
+    <string name="detail_variant_generating">正在基于这道题出变式…</string>
+    <string name="detail_variant_save">存为错题</string>
+    <string name="detail_variant_regenerate">重新生成</string>
+    <string name="detail_variant_failed">生成失败</string>
     <string name="probe_math_title">公式渲染探针</string>
     <string name="probe_math_display_label">独立行公式：</string>
     <string name="error_no_key_action">去设置填写</string>

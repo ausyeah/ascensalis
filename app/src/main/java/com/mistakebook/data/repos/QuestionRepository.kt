@@ -109,6 +109,22 @@ class QuestionRepository(
         return id
     }
 
+    /**
+     * 保存一道 AI 变式题（F1 举一反三），并与来源题关联。
+     *
+     * 复用 [save] 的全部入库规则（学科解析、标签同步、复习排期初值）；
+     * 这里只补变式特有的两件事：错题本归属继承来源题、回填 relatedQuestionId。
+     * 变式题没有原图——调用方传 imagePath 空串（与手动录入同一守卫约定）。
+     */
+    suspend fun saveVariant(origin: Question, draft: QuestionDraft, now: Long): Long {
+        val id = save(draft.copy(notebookId = draft.notebookId ?: origin.notebookId), now)
+        // 关联在 save() 产物上补一笔：save 不感知变式语义，职责保持单一
+        questionDao.findById(id)?.let { saved ->
+            questionDao.update(saved.copy(relatedQuestionId = origin.id))
+        }
+        return id
+    }
+
     // 编辑已有题目：题干/答案等字段由调用方写进 question，这里只负责收尾与标签同步。
     suspend fun update(question: Question, knowledgePoints: List<String>) {
         val updated = question.copy(

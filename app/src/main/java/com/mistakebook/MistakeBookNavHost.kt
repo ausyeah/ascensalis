@@ -287,6 +287,11 @@ fun MistakeBookNavHost(
                     navController.navigate(Routes.progress(taskId)) {
                         popUpTo(Routes.HOME)
                     }
+                },
+                // 变式题存为错题后跳新题详情：栈上压在新题页，返回即回原题，
+                // 「看完变式回原题再出一道」的动线不需要重新找题
+                onVariantSaved = { newId ->
+                    navController.navigate(Routes.detail(newId))
                 }
             )
         }

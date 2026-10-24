@@ -58,6 +58,12 @@ data class Question(
     val note: String = "",
     val reviewStage: Int = 0,
     val nextReviewAt: Long? = null,
+    /**
+     * 来源题：本题由 AI 对哪道题「举一反三」生成（F1 变式题）。
+     * 为空表示普通录入的题。不设外键——来源题可能被软删/硬删，
+     * 关联只是展示信息，不值得为它承担级联行为的复杂度。
+     */
+    val relatedQuestionId: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
     val deletedAt: Long? = null
