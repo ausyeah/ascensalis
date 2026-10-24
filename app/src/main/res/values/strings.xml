@@ -103,6 +103,7 @@
     <string name="crop_mask_hint">用白色笔涂掉不想识别的区域（红笔批注、旁边的题、草稿）</string>
     <string name="crop_preview">预览</string>
     <string name="crop_preview_title">这张图将送去识别</string>
+    <string name="crop_preview_title_chat">这张图将作为对话附件发送</string>
     <string name="crop_preview_hint">确认裁剪范围与涂白位置无误。涂白部分不会被识别。</string>
     <string name="crop_decoding">正在加载照片…</string>
 <string name="crop_decode_failed">图片加载失败：%1$s</string>

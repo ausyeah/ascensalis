@@ -69,6 +69,16 @@ class AppFiles(context: Context) {
      */
     fun chatOcrDir(sessionId: Long): File = File(chatDir(sessionId), "ocr")
 
+    /**
+     * 裁切 → 对话的附件交接暂存目录（T12）。
+     *
+     * 裁切页确认后把产物复制到这里，ChatScreen 观察到交接路径后走
+     * 现有「添加附件」管道，附件管线会把它转存进 chatDir(sessionId)。
+     * 用副本交接而不是直接引用裁切产物：裁切文件有自己的生命周期
+     * （重裁剪会覆盖同名路径），副本保证对话页拿到时文件还在。
+     */
+    fun chatAttachmentStagingDir(): File = File(filesRoot, "chats/pending")
+
     fun deleteRecursively(file: File?) {
         if (file == null || !file.exists()) return
         file.listFiles()?.forEach { deleteRecursively(it) }

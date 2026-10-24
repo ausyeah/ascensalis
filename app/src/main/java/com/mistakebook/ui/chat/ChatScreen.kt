@@ -153,7 +153,9 @@ fun ChatScreen(
     questionId: Long?,
     sessionId: Long? = null,
     onBack: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    /** 「拍照」入口改走扫描相机（T12）：NavHost 置 CHAT 用途后进 CAPTURE。 */
+    onLaunchScanCamera: () -> Unit = {}
 ) {
     val viewModel = containerViewModel(
         container = container,
@@ -212,31 +214,16 @@ fun ChatScreen(
     ) { uri -> uri?.let(viewModel::onAttachmentPicked) }
 
     val context = LocalContext.current
-    var tempCameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
-    var tempCameraFile by remember { mutableStateOf<File?>(null) }
 
-    // 拍照结果回调。三个加固点：
-    //  1. success=true 也可能什么都没写——部分 ROM 的相机返回成功但不落
-    //     EXTRA_OUTPUT 的文件，不校验的话附件会永远停在「准备中」
-    //  2. 进程被系统回收后 remember 状态丢失，tempCameraUri 会是 null
-    //  3. 用完立刻清空，防止同一张旧图被误当成新一轮拍照的结果
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        val uri = tempCameraUri
-        val file = tempCameraFile
-        tempCameraUri = null
-        tempCameraFile = null
-        if (!success || uri == null || file == null) return@rememberLauncherForActivityResult
-        if (!file.exists() || file.length() <= 0L) {
-            Toast.makeText(
-                context,
-                R.string.chat_attach_photo_empty,
-                Toast.LENGTH_SHORT
-            ).show()
-            return@rememberLauncherForActivityResult
+    // 裁切页交回的聊天附件（T12）：扫描相机 + 裁切确认后经容器标志交接。
+    // 快照状态驱动重组 → LaunchedEffect 重跑；取走即清，防旧图误入下一轮。
+    // 进程死亡不持久化（与旧 TakePicture 方案的记忆边界一致）。
+    val pendingChatAttachment = container.pendingChatAttachmentPath
+    LaunchedEffect(pendingChatAttachment) {
+        if (!pendingChatAttachment.isNullOrBlank()) {
+            container.pendingChatAttachmentPath = null
+            viewModel.onAttachmentPicked(android.net.Uri.fromFile(File(pendingChatAttachment)))
         }
-        viewModel.onAttachmentPicked(uri)
     }
 
     // 首次进入题目会话时预填首问，**不自动发送**。
@@ -349,57 +336,11 @@ fun ChatScreen(
         AttachmentSourceSheet(
             onPickImage = { imagePicker.launch(IMAGE_MIME_TYPES) },
             onTakePhoto = {
-                val dir = File(context.cacheDir, "camera").apply { mkdirs() }
-                val file = File(dir, "chat_photo_${System.currentTimeMillis()}.jpg")
-                // FileProvider.getUriForFile 在路径未声明 / authority 不匹配时
-                // 抛 IllegalArgumentException，兜住并提示而不是闪退
-                val uri = runCatching {
-                    FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        file
-                    )
-                }.getOrNull()
-                if (uri == null) {
-                    Toast.makeText(
-                        context,
-                        R.string.chat_attach_photo_unavailable,
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else {
-                    tempCameraUri = uri
-                    tempCameraFile = file
-                    // **不要用 resolveActivity 预检**。
-                    //
-                    // v0.0.11 在这里加了预检，真机实测直接误判：设备上明明有相机，
-                    // resolveActivity 却返回 null，于是走了「没有相机」分支，
-                    // 拍照功能整个不可用。Android 11+ 的包可见性对
-                    // ACTION_IMAGE_CAPTURE 本来就不完全可靠——部分 ROM 的相机
-                    // 没有按规范暴露 intent-filter，<queries> 也救不回来。
-                    //
-                    // 改成直接 launch + try-catch：真有相机就一定拉得起来；
-                    // 真的一个都没有时，launch 抛 ActivityNotFoundException，
-                    // 由 runCatching 兜住并提示。预检唯一的价值是「别闪退」，
-                    // 而 try-catch 已经做到了，且不会误伤。
-                    //
-                    // 注意这里传的是 uri 而不是自己拼的 Intent：
-                    // cameraLauncher 用的是 ActivityResultContracts.TakePicture，
-                    // 它的入参就是「照片写到哪个 Uri」，intent 由 contract 自己构造。
-                    val launched = runCatching { cameraLauncher.launch(uri) }.isSuccess
-                    if (launched) {
-                        // 相机拉起成功后才关面板——万一启动失败，面板留着，
-                        // 用户还能改选「从相册选择」
-                        showAttachSheet = false
-                    } else {
-                        tempCameraUri = null
-                        tempCameraFile = null
-                        Toast.makeText(
-                            context,
-                            R.string.chat_attach_no_camera,
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                }
+                // T12：系统 TakePicture 在部分 ROM 上不可靠（代码注释里
+                // 记了一整段血泪史），统一改走扫描相机——有增强档位、
+                // 闪光灯、框选与涂鸦，拍完经裁切页把产物交回本页附件。
+                showAttachSheet = false
+                onLaunchScanCamera()
             },
             onPickFile = { filePicker.launch(DOCUMENT_MIME_TYPES) },
             onDismiss = { showAttachSheet = false }

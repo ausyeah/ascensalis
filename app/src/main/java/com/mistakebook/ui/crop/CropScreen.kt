@@ -190,7 +190,15 @@ fun CropScreen(
      * 与 [recropOnly] 互斥——后者连识别都不跑。
      */
     reRecognizeQuestionId: Long? = null,
-    onRecropped: (String) -> Unit = {}
+    onRecropped: (String) -> Unit = {},
+    /**
+     * 聊天附件模式（T12）：确认不走识别提交，产物复制进聊天附件暂存
+     * 后经 container.pendingChatAttachmentPath 交回对话页。
+     * 由 NavHost 传入（container.chatCropping 且已通过互斥校验）。
+     */
+    chatMode: Boolean = false,
+    /** 聊天附件模式确认后的退出：popBackStack 回到对话页。 */
+    onChatConfirmed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -499,6 +507,32 @@ fun CropScreen(
                             }
                             return@launch
                         }
+                        // 聊天附件模式（T12）：不走 RecognitionSubmitter、不查 Key。
+                        // 产物复制进暂存目录后经容器标志交回对话页。
+                        // 涂鸦遮蔽等全部能力照常可用（遮住草稿对批改很有用）。
+                        if (chatMode) {
+                            val saved = withContext(Dispatchers.IO) {
+                                saveCrop(
+                                    displayBitmap, cropRect, container, cropStrokes,
+                                    brushWidthPx, imageSize.width.toFloat()
+                                )
+                            }
+                            if (saved == null) {
+                                errorText = context.getString(R.string.crop_too_small)
+                                return@launch
+                            }
+                            sessionStore.clear(imagePath)
+                            val stagingPath = withContext(Dispatchers.IO) {
+                                val dir = container.files.chatAttachmentStagingDir().apply { mkdirs() }
+                                val target = File(dir, "chat_crop_${System.currentTimeMillis()}.jpg")
+                                saved.copyTo(target, overwrite = true)
+                                target.absolutePath
+                            }
+                            container.pendingChatAttachmentPath = stagingPath
+                            container.chatCropping = false
+                            onChatConfirmed()
+                            return@launch
+                        }
                         // 重新识别（先裁切再识别）：详情页入口进来。
                         // 裁切涂鸦完成后——先用新图换掉题目封面/显示图，
                         // 再按原图的语义提交识别覆盖内容。用户在裁切页里
@@ -689,7 +723,14 @@ fun CropScreen(
                         .transformable(state = transformableState)
                 )
                 TopAppBar(
-                    title = { Text(stringResource(R.string.crop_preview_title), color = Color.White) },
+                    title = {
+                        Text(
+                            stringResource(
+                                if (chatMode) R.string.crop_preview_title_chat else R.string.crop_preview_title
+                            ),
+                            color = Color.White
+                        )
+                    },
                     navigationIcon = {
                         IconButton(onClick = { previewBitmap = null }) {
                             Icon(androidx.compose.material.icons.Icons.Filled.Close, contentDescription = "Close", tint = Color.White)

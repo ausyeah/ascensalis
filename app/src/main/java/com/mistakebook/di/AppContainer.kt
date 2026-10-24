@@ -344,10 +344,10 @@ class AppContainer(context: Context) {
     /**
      * 裁切页交给对话页的待发附件路径（T12）。ChatScreen 的
      * LaunchedEffect 观察它：非空则把该图加入待发附件并清空。
-     * 进程死亡不持久化（与现状一致）。
+     * 必须是快照状态：普通 @Volatile 字段不触发重组，对话页读不到
+     * 交接（同 recroppedImagePath 的教训）。进程死亡不持久化。
      */
-    @Volatile
-    var pendingChatAttachmentPath: String? = null
+    var pendingChatAttachmentPath: String? by mutableStateOf(null)
 
     /**
      * 重裁剪产生的新原图路径。

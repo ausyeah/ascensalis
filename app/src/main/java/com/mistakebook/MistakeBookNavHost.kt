@@ -212,6 +212,11 @@ fun MistakeBookNavHost(
                 imagePath = entry.arguments?.getString("imagePath").orEmpty(),
                 recropOnly = recrop,
                 reRecognizeQuestionId = reRecognizeQuestionId,
+                chatMode = chatCropping,
+                onChatConfirmed = {
+                    // 栈此时应自然回到 ChatScreen（CAPTURE 已被 popUpTo 弹掉）
+                    navController.popBackStack()
+                },
                 onRecropped = { newPath ->
                     container.recroppedImagePath = newPath
                     container.recropping = false
@@ -220,6 +225,7 @@ fun MistakeBookNavHost(
                 onConfirmed = { taskIds ->
                     container.recropping = false
                     container.reRecognizeQuestionId = null
+                    container.chatCropping = false
                     navController.navigate(Routes.progress(taskIds.first())) {
                         popUpTo(Routes.HOME)
                     }
@@ -387,7 +393,13 @@ fun MistakeBookNavHost(
                 questionId = raw.takeIf { it != Routes.CHAT_FREE },
                 sessionId = rawSession.takeIf { it != Routes.CHAT_FREE },
                 onBack = { navController.popBackStack() },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onLaunchScanCamera = {
+                    // T12：对话页的相机入口显式置 CHAT 用途（与首页拍题互斥的
+                    // 状态隔离，见 CAPTURE composable 的注释）
+                    container.cameraPurpose = AppContainer.CameraPurpose.CHAT
+                    navController.navigate(Routes.CAPTURE)
+                }
             )
         }
 
