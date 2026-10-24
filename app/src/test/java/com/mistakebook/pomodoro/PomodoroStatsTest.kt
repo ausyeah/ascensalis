@@ -49,4 +49,37 @@ class PomodoroStatsTest {
     fun `没有任何记录`() {
         assertEquals(0, PomodoroStats.computeStreak(emptySet(), today))
     }
+
+    // -------------------------------------------------- 单日卡翻页（不许翻未来）
+
+    @Test
+    fun `从今天往前翻一天`() {
+        assertEquals(
+            today.minusDays(1),
+            PomodoroStats.shiftDayClamped(today, -1L, today)
+        )
+    }
+
+    @Test
+    fun `从过去某天往后翻一天`() {
+        assertEquals(
+            today,
+            PomodoroStats.shiftDayClamped(today.minusDays(1), 1L, today)
+        )
+    }
+
+    @Test
+    fun `今天再往后翻被夹住，返回 null`() {
+        // 用户反馈：「左右点击切换日期居然能切换到未来？」
+        assertEquals(null, PomodoroStats.shiftDayClamped(today, 1L, today))
+    }
+
+    @Test
+    fun `未来日期再往后翻同样被夹住`() {
+        // 防御：万一 singleDay 已经落在未来（时钟漂移），也不许继续往后
+        assertEquals(
+            null,
+            PomodoroStats.shiftDayClamped(today.plusDays(1), 1L, today)
+        )
+    }
 }

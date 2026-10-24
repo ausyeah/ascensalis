@@ -485,23 +485,6 @@ private fun StudyView(
             }
         }
 
-        // 循环复习轮次面板：只在「已经学过一些词」时出现。
-        //
-        // 它回答一个 SRS 本身回答不了的问题：「我第一轮走完了，接下来
-        // 该刷什么？」答对即推到很久以后，词库走完一轮要两三个月，
-        // 考研期只剩错题本在转。开新一轮把已学的词按薄弱程度召回，
-        // 这是唯一能把「走完一轮」变成「再走一轮」的机制。
-        if (state.studiedWordCount > 0) {
-            item {
-                RoundPanel(
-                    roundNumber = state.roundNumber,
-                    remaining = state.roundRemaining,
-                    studied = state.studiedWordCount,
-                    onStartRound = { viewModel.startNextRound() }
-                )
-            }
-        }
-
         // 单词主纸质卡片
         if (currentWord != null) {
             item {
@@ -945,7 +928,8 @@ private fun StudyView(
                         }
                     }
                 } else {
-                    // **常驻的「下一个词」**。
+                    // **常驻的前进按钮**：答过了叫「下一个词」（抽新题），
+                    // 没答过叫「换批释义」（不换词，只重抽当前词的选项）。
                     //
                     // 答错已经有上面那颗「下一题」大按钮，这里就不重复了；
                     // 其余状态一律给出这颗次要按钮，原因是「回退」这条路径
@@ -956,14 +940,21 @@ private fun StudyView(
                     item {
                         Spacer(Modifier.height(12.dp))
                         OutlinedButton(
-                            onClick = viewModel::prepareNextQuestion,
+                            onClick = {
+                                // 已答错的大按钮是「下一题」（抽新词）；
+                                // 未作答时这颗次要按钮是「换批释义」——
+                                // 不换词，只把当前词的选项重抽一批
+                                // （用户原话：要的是换释义，不是换词）。
+                                if (state.isAnswered) viewModel.prepareNextQuestion()
+                                else viewModel.reshuffleOptions()
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(46.dp),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Text(
-                                if (state.isAnswered) "下一个词" else "换一个词",
+                                if (state.isAnswered) "下一个词" else "换批释义",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -1038,62 +1029,6 @@ private fun ChipLabel(text: String) {
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth()
     )
-}
-
-/**
- * 循环复习轮次面板。
- *
- * 一行文字 + 一个按钮，不占额外卡片：刷题页的每一寸都该留给题目本身
- * （每日目标进度条已经因为这个理由撤过一次）。
- *
- * 文案随状态变的三态：
- * - 没开过轮次 → 「已学 N 词 · 还没开始过循环轮次」+「开始第 1 轮」
- * - 进行中且还有词 → 「第 N 轮 · 剩余 X / Y 词」+「换一轮词」
- *   （按钮行为是轮次 +1 重新随机抽一轮词的释义，不是把本轮进度清零重来，
- *     所以叫「换一轮词」——用户反馈「重新开始本轮」会误解成重新计时/重头开始）
- * - 本轮已走完 → 「第 N 轮已完成 🎉」+「开始第 N+1 轮」
- */
-@Composable
-private fun RoundPanel(
-    roundNumber: Int,
-    remaining: Int,
-    studied: Int,
-    onStartRound: () -> Unit
-) {
-    val info = when {
-        roundNumber == 0 -> "已学 $studied 词 · 还没开始过循环轮次"
-        remaining > 0 -> "第 $roundNumber 轮 · 剩余 $remaining / ${studied.coerceAtLeast(1)} 词"
-        else -> "第 $roundNumber 轮已完成 🎉"
-    }
-    val btn = when {
-        roundNumber == 0 -> "开始第 1 轮"
-        remaining > 0 -> "换一轮词"
-        else -> "开始第 ${roundNumber + 1} 轮"
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = info,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f)
-        )
-        Spacer(Modifier.width(8.dp))
-        OutlinedButton(
-            onClick = onStartRound,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                horizontal = 12.dp, vertical = 4.dp
-            ),
-            modifier = Modifier.height(32.dp)
-        ) {
-            Text(btn, fontSize = 12.sp)
-        }
-    }
 }
 
 @Composable

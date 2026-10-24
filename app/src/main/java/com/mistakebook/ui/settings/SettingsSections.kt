@@ -1124,6 +1124,13 @@ internal fun LlmUsageSection(container: com.mistakebook.di.AppContainer) {
                 label = stringResource(R.string.settings_usage_completion),
                 value = formatCount(snap.llmCompletionTokens)
             )
+            // 总计 = 输入 + 输出。缓存命中 token 是**输入里的一部分**
+            // （服务端从 prompt 里划出来的那截），再加一遍就成了重复计数，
+            // 所以这里只加 prompt + completion，口径与下面那行提示一致。
+            UsageRow(
+                label = stringResource(R.string.settings_usage_total),
+                value = formatCount(snap.llmPromptTokens + snap.llmCompletionTokens)
+            )
             UsageRow(
                 label = stringResource(R.string.settings_usage_cached),
                 value = formatCount(snap.llmCachedTokens)

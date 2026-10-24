@@ -10,7 +10,6 @@ import com.mistakebook.data.local.SubjectDao
 import com.mistakebook.data.local.SubjectTotal
 import com.mistakebook.data.local.entities.PomodoroTask
 import com.mistakebook.data.local.entities.Subject
-import com.mistakebook.pomodoro.stats.HourBucketRange
 import com.mistakebook.pomodoro.stats.PomodoroStats
 import com.mistakebook.pomodoro.stats.StatsRange
 import kotlinx.coroutines.delay
@@ -61,17 +60,13 @@ data class PomodoroUiState(
     val editingSubject: Subject? = null,
     val showNewSubject: Boolean = false,
     val newSubjectName: String = "",
-    /** 统计页当前选的时间范围。 */
-    val statsRange: StatsRange = StatsRange.ALL,
-    /** 时段分布饼图的时间口径（日 / 周 / 月 / 全部）。 */
-    val hourRange: HourBucketRange = HourBucketRange.WEEK,
+    /** 统计页当前选的时间范围。默认「今日」——统计页第一眼该是今天。 */
+    val statsRange: StatsRange = StatsRange.TODAY,
     /** 累计数据卡。 */
     val activeDays: Int = 0,
     val activeMonths: Int = 0,
     val totalAllSec: Long = 0L,
     val totalAllCompleted: Int = 0,
-    /** 时段分布：24 格（0–23 时），下标即小时。 */
-    val hourly: List<Long> = List(24) { 0L },
     /** 近 12 个月每月专注秒数，下标 0 = 最远那个月。 */
     val months12: List<Long> = List(12) { 0L },
     /** 本月按周聚合（下标 0 = 第 1 周）。 */
@@ -113,9 +108,7 @@ class PomodoroViewModel(
     private var editingTask = MutableStateFlow<PomodoroTask?>(null)
     private var editingSubject = MutableStateFlow<Subject?>(null)
     private var newSubjectOpen = MutableStateFlow(false)
-    private var statsRange = MutableStateFlow(StatsRange.ALL)
-    /** 时段分布饼图的口径：与统计范围独立（见 HourBucketRange 的注释）。 */
-    private var hourRangeFlow = MutableStateFlow(HourBucketRange.WEEK)
+    private var statsRange = MutableStateFlow(StatsRange.TODAY)
     private var message = MutableStateFlow<String?>(null)
 
     /** 统计单独存一份：它只在「记录变化」时刷新，不该跟着秒 tick 重算。 */
@@ -139,7 +132,7 @@ class PomodoroViewModel(
                     PomodoroTask(name = PomodoroTask.DEFAULT_NAME, sortOrder = 0)
                 )
             }
-            stats.value = PomodoroStats.snapshot(dao, statsRange.value, hourRangeFlow.value)
+            stats.value = PomodoroStats.snapshot(dao, statsRange.value)
             // 单日卡默认停在今天，进统计页就有内容（而不是一片空白
             // 等用户去点「上一天」才发现能翻）
             loadSingleDay(LocalDate.now().toString())
@@ -159,12 +152,11 @@ class PomodoroViewModel(
                 editingSubject,
                 newSubjectOpen,
                 statsRange,
-                hourRangeFlow,
                 message,
                 stats
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
-                val snapshot = values[11] as PomodoroStats.Snapshot
+                val snapshot = values[10] as PomodoroStats.Snapshot
                 PomodoroUiState(
                     tasks = values[0] as List<PomodoroTask>,
                     subjects = values[1] as List<Subject>,
@@ -177,8 +169,7 @@ class PomodoroViewModel(
                     editingSubject = values[6] as Subject?,
                     showNewSubject = values[7] as Boolean,
                     statsRange = values[8] as StatsRange,
-                    hourRange = values[9] as HourBucketRange,
-                    message = values[10] as String?,
+                    message = values[9] as String?,
                     todaySec = snapshot.todaySec,
                     todayPomodoros = snapshot.todayPomodoros,
                     streakDays = snapshot.streakDays,
@@ -194,7 +185,6 @@ class PomodoroViewModel(
                     activeMonths = snapshot.activeMonths,
                     totalAllSec = snapshot.totalAllSec,
                     totalAllCompleted = snapshot.totalAllCompleted,
-                    hourly = snapshot.hourly,
                     months12 = snapshot.months12,
                     monthWeeks = snapshot.monthWeeks,
                     // 补记表单的草稿字段不在 combine 里，走 _ui.value 直读，
@@ -269,12 +259,12 @@ class PomodoroViewModel(
         val now = System.currentTimeMillis()
         if (now - lastStatsAt < 30_000L) return
         lastStatsAt = now
-        stats.value = PomodoroStats.snapshot(dao, statsRange.value, hourRangeFlow.value)
+        stats.value = PomodoroStats.snapshot(dao, statsRange.value)
     }
 
     private suspend fun refreshStats() {
         lastStatsAt = System.currentTimeMillis()
-        stats.value = PomodoroStats.snapshot(dao, statsRange.value, hourRangeFlow.value)
+        stats.value = PomodoroStats.snapshot(dao, statsRange.value)
     }
 
     // ------------------------------------------------------------ 计时控制
@@ -555,13 +545,6 @@ class PomodoroViewModel(
         viewModelScope.launch { refreshStats() }
     }
 
-    /** 时段分布饼图换口径：与统计范围独立，两者各自触发同一次快照刷新。 */
-    fun setHourRange(range: HourBucketRange) {
-        if (hourRangeFlow.value == range) return
-        hourRangeFlow.value = range
-        viewModelScope.launch { refreshStats() }
-    }
-
     // ------------------------------------------------- 单日专注卡（可翻页）
 
     /**
@@ -576,11 +559,19 @@ class PomodoroViewModel(
         viewModelScope.launch { loadSingleDay(day) }
     }
 
-    /** 相对当前翻到的日期前后各移一天。 */
+    /**
+     * 相对当前翻到的日期前后各移一天。
+     *
+     * **不许翻到未来**：统计数据是已发生的事实，「后一天」翻到明天
+     * 只会看到一片空白，还会让人以为数据丢了（用户反馈：
+     * 「左右点击切换日期居然能切换到未来？」）。这里直接夹住，
+     * UI 上同时把「后一天」按钮置灰（见 SingleDayCard）。
+     */
     fun shiftSingleDay(delta: Long) {
         val cur = runCatching { LocalDate.parse(_ui.value.singleDay) }
             .getOrElse { LocalDate.now() }
-        showSingleDay(cur.plusDays(delta).toString())
+        val target = PomodoroStats.shiftDayClamped(cur, delta, LocalDate.now()) ?: return
+        showSingleDay(target.toString())
     }
 
     private suspend fun loadSingleDay(day: String) {

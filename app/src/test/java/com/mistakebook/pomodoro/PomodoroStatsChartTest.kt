@@ -5,9 +5,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 统计页新增图表的纯逻辑测试：季度并组与时段口径。
+ * 统计页图表的纯逻辑测试：季度并组。
  *
- * 这两处是「图上看到的数字」与「库里算出的数字」之间的翻译层，
+ * 这里是「图上看到的数字」与「库里算出的数字」之间的翻译层，
  * 翻译错了不会报错、只会画出一张好看的错图——所以必须钉死。
  */
 class PomodoroStatsChartTest {
@@ -39,28 +39,4 @@ class PomodoroStatsChartTest {
         assertTrue(PomodoroStats.quartersOf(emptyList()).isEmpty())
     }
 
-    // ------------------------------------------------------------ 时段口径
-
-    @Test
-    fun `时段口径的起始日各自正确`() {
-        val today = java.time.LocalDate.of(2026, 3, 8)
-        assertEquals("2026-03-08", HourBucketRange.DAY.fromDay(today))
-        assertEquals("2026-03-02", HourBucketRange.WEEK.fromDay(today))
-        assertEquals("2026-03-01", HourBucketRange.MONTH.fromDay(today))
-        // 空串 = 不限，与 DAO 的口径统一
-        assertEquals("", HourBucketRange.ALL.fromDay(today))
-    }
-
-    @Test
-    fun `周口径跨月时正确回退到上月末`() {
-        val today = java.time.LocalDate.of(2026, 3, 3)
-        assertEquals("2026-02-25", HourBucketRange.WEEK.fromDay(today))
-    }
-
-    @Test
-    fun `四个口径互不相同`() {
-        val today = java.time.LocalDate.of(2026, 6, 15)
-        val set = HourBucketRange.entries.map { it.fromDay(today) }.toSet()
-        assertEquals(4, set.size)
-    }
 }

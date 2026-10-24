@@ -24,8 +24,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -58,6 +61,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -432,11 +436,14 @@ fun ChatScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHost) }
     ) { padding ->
+        // 输入法 inset **只作用在底部输入栏**上（见 ChatInputBar 内的
+        // `imePadding`），不挂在根 Column 上：
+        // 挂在根上时整个内容区（含顶端 UI 的视觉位置）都会被键盘顶上去
+        // 再回弹；挂底部则只有输入栏与对话列表随键盘上移，顶栏纹丝不动。
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .imePadding()
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 if (state.loading) {
@@ -521,9 +528,12 @@ fun ChatScreen(
         ModelPickerSheet(
             models = state.modelOptions,
             selected = state.selectedModel,
+            providers = state.providerOptions,
+            activeProviderId = state.activeProviderId,
             currentEffort = state.reasoningEffort,
             enabled = !state.isStreaming,
             onSelect = viewModel::selectModel,
+            onSelectProvider = viewModel::selectProvider,
             onEffortChange = viewModel::setReasoningEffort,
             onDismiss = { showModelSheet = false }
         )
@@ -1241,7 +1251,11 @@ private fun ChatInputBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
+                // 键盘弹出时输入栏坐到键盘上；键盘收起时贴齐手势导航条。
+                // 用 union 而不是两个 padding 叠加：ime 的底边距本身就
+                // 含导航栏区域，再叠一层 navigationBarsPadding 会让输入栏
+                // 浮在键盘上方一条导航栏的高度。
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             if (attachments.isNotEmpty()) {
@@ -1358,9 +1372,12 @@ private fun ChatInputBar(
 private fun ModelPickerSheet(
     models: List<String>,
     selected: String,
+    providers: List<ChatProviderOption>,
+    activeProviderId: String?,
     currentEffort: ReasoningEffort,
     enabled: Boolean,
     onSelect: (String) -> Unit,
+    onSelectProvider: (String) -> Unit,
     onEffortChange: (ReasoningEffort) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1400,6 +1417,39 @@ private fun ModelPickerSheet(
             }
 
             if (page == 0) {
+                // ---- 供应商切换（扁平列表，点选即换，不展开不成表单）----
+                //
+                // 用户诉求：「切换模型不能跳转切换供应商……点开设置里面
+                // 就是几个供应商列表，但是不能展开，可以自己选择哪个
+                // 供应商来切换模型」。所以这里只做「选一个」：
+                // 写全局 activeProfileId，模型列表随设置流自动换成
+                // 新供应商的；编辑配置仍然回设置页。
+                if (providers.isNotEmpty()) {
+                    Text(
+                        text = "供应商",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 6.dp)
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        providers.forEach { provider ->
+                            FilterChip(
+                                selected = provider.id == activeProviderId,
+                                onClick = { onSelectProvider(provider.id) },
+                                enabled = enabled,
+                                label = { Text(provider.name, maxLines = 1) }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
                 if (models.isEmpty()) {
                     Text(
                         text = stringResource(R.string.chat_model_unset),

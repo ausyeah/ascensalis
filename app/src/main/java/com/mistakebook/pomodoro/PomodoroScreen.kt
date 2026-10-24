@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -81,6 +82,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -88,6 +90,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -95,7 +98,6 @@ import kotlinx.coroutines.flow.StateFlow
 import com.mistakebook.data.local.entities.PomodoroTask
 import com.mistakebook.data.local.entities.Subject
 import com.mistakebook.di.AppContainer
-import com.mistakebook.pomodoro.stats.HourBucketRange
 import com.mistakebook.pomodoro.stats.PomodoroStats
 import com.mistakebook.pomodoro.stats.StatsRange
 import com.mistakebook.ui.common.containerViewModel
@@ -213,7 +215,6 @@ fun PomodoroScreen(container: AppContainer) {
                 else -> StatsTab(
                     state = state,
                     onRangeChange = viewModel::setStatsRange,
-                    onHourRangeChange = viewModel::setHourRange,
                     onShiftDay = viewModel::shiftSingleDay,
                     onResetStats = viewModel::resetStats,
                     onManualEntry = { viewModel.openManualEntry() },
@@ -1447,7 +1448,6 @@ private fun SubjectChip(name: String, selected: Boolean, onClick: () -> Unit) {
 private fun StatsTab(
     state: PomodoroUiState,
     onRangeChange: (StatsRange) -> Unit,
-    onHourRangeChange: (HourBucketRange) -> Unit,
     onShiftDay: (Long) -> Unit,
     onResetStats: () -> Unit,
     onImportCsv: () -> Unit,
@@ -1491,19 +1491,22 @@ private fun StatsTab(
             }
         }
 
-        // ---- 累计数据卡（不受上方时间范围影响，是「我一共做了多少」）----
+        // ---- 单日专注卡（可翻页，默认今天）----
+        //
+        // 排序规则（用户诉求）：「统计数据越是接近今日的就往上排，
+        // 总计这种就往下丢」。单日卡是离今天最近的一张，排最前。
         item {
-            StatsCard(title = "累计数据") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatCell("累计专注", formatDuration(state.totalAllSec), Modifier.weight(1f))
-                    StatCell("累计番茄", "${state.totalAllCompleted} 个", Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatCell("坚持天数", "${state.activeDays} 天", Modifier.weight(1f))
-                    StatCell("跨度", "${state.activeMonths} 个月", Modifier.weight(1f))
-                }
-            }
+            SingleDayCard(
+                day = state.singleDay,
+                sec = state.singleDaySec,
+                pomodoros = state.singleDayPomodoros,
+                tasks = state.singleDayTasks,
+                // 翻到今天就挡住「后一天」：统计是已发生的事实，
+                // 翻到未来只会看到空白，还会让人以为数据丢了
+                nextEnabled = state.singleDay < LocalDate.now().toString(),
+                onPrev = { onShiftDay(-1L) },
+                onNext = { onShiftDay(1L) }
+            )
         }
 
         // ---- 总览四宫格（随范围变）----
@@ -1517,63 +1520,6 @@ private fun StatsTab(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatCell("连续天数", "${state.streakDays} 天", Modifier.weight(1f))
                 StatCell("专注次数", "${state.sessionCount} 次", Modifier.weight(1f))
-            }
-        }
-
-        // ---- 单日专注卡（可翻页）----
-        item {
-            SingleDayCard(
-                day = state.singleDay,
-                sec = state.singleDaySec,
-                pomodoros = state.singleDayPomodoros,
-                tasks = state.singleDayTasks,
-                onPrev = { onShiftDay(-1L) },
-                onNext = { onShiftDay(1L) }
-            )
-        }
-
-        // ---- 专注时长分布（时段饼图，日/周/月/全部）----
-        item {
-            val hourRows = remember(state.hourly) {
-                state.hourly.mapIndexed { h, sec -> Triple(hourLabel(h), sec, h) }
-                    .filter { it.second > 0L }
-                    .sortedByDescending { it.second }
-            }
-            StatsCard(
-                title = "专注时长分布（${state.hourRange.label}）"
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    HourBucketRange.entries.forEach { r ->
-                        FilterChip(
-                            selected = state.hourRange == r,
-                            onClick = { onHourRangeChange(r) },
-                            label = { Text(r.label, fontSize = 12.sp) }
-                        )
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                if (hourRows.isEmpty()) {
-                    EmptyHint("这个区间还没有专注记录")
-                } else {
-                    SubjectPieChart(rows = hourRows)
-                    Spacer(Modifier.height(12.dp))
-                    val hourTotal = hourRows.sumOf { it.second }.coerceAtLeast(1L)
-                    hourRows.take(8).forEachIndexed { index, (name, sec, _) ->
-                        PieLegendRow(
-                            color = pieColor(index),
-                            name = name,
-                            sec = sec,
-                            sessionCount = 0,
-                            percent = sec.toFloat() / hourTotal
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                }
             }
         }
 
@@ -1613,6 +1559,26 @@ private fun StatsTab(
             }
         }
 
+        // ---- 近 7 天（离今天最近的动态窗口，排在月/季之前）----
+        item {
+            StatsCard(title = "近 7 天") {
+                Last7Bars(values = state.last7)
+            }
+        }
+
+        // ---- 近 30 天趋势线 ----
+        item {
+            StatsCard(title = "近 30 天趋势") {
+                DailyTrendLine(values = state.last30)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "30 天累计 ${formatDuration(state.last30.sum())}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
         // ---- 本月按周柱状图 ----
         if (state.monthWeeks.any { it > 0L }) {
             item {
@@ -1649,26 +1615,6 @@ private fun StatsTab(
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = "最近一个季度 ${formatDuration(quarters.lastOrNull() ?: 0L)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        // ---- 近 7 天 ----
-        item {
-            StatsCard(title = "近 7 天") {
-                Last7Bars(values = state.last7)
-            }
-        }
-
-        // ---- 近 30 天趋势线 ----
-        item {
-            StatsCard(title = "近 30 天趋势") {
-                DailyTrendLine(values = state.last30)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "30 天累计 ${formatDuration(state.last30.sum())}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1726,12 +1672,26 @@ private fun StatsTab(
         }
 
         // ---- 最近记录 ----
+        //
+        // 固定高度 + 内部滚动（用户诉求：「这个栏目应该要做成固定长度，
+        // 然后可以内部滑动，不然太多了容易爆」）。直接 forEach 铺开的话，
+        // 20 条记录能把统计页拉成无限长列表，翻到底全是它。
         if (state.recent.isNotEmpty()) {
             item {
                 StatsCard(title = "最近专注（${state.statsRange.label}）") {
-                    state.recent.forEach { session ->
-                        RecentRow(session = session)
-                        Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                        ) {
+                            state.recent.forEach { session ->
+                                RecentRow(session = session)
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
                     }
                 }
             }
@@ -1768,6 +1728,25 @@ private fun StatsTab(
             }
         }
 
+        // ---- 累计数据（总计沉底）----
+        //
+        // 用户诉求：「统计数据越是接近今日的就往上排，总计这种就
+        // 往下丢」。累计是跨全部时间的口径，与任何「最近」都无关，
+        // 放最底部——但它仍不受上方时间范围 chips 影响。
+        item {
+            StatsCard(title = "累计数据") {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StatCell("累计专注", formatDuration(state.totalAllSec), Modifier.weight(1f))
+                    StatCell("累计番茄", "${state.totalAllCompleted} 个", Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StatCell("坚持天数", "${state.activeDays} 天", Modifier.weight(1f))
+                    StatCell("跨度", "${state.activeMonths} 个月", Modifier.weight(1f))
+                }
+            }
+        }
+
         item { Spacer(Modifier.height(24.dp)) }
     }
 
@@ -1794,32 +1773,6 @@ private fun StatsTab(
     }
 }
 
-/** 图上一句话提示：比空白卡更能说明「为什么空的」。 */
-@Composable
-private fun EmptyHint(text: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(72.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-private fun hourLabel(h: Int): String = when {
-    h == 0 -> "凌晨 0–1 点"
-    h < 6 -> "凌晨 $h 点"
-    h < 12 -> "上午 $h 点"
-    h == 12 -> "中午 12 点"
-    h < 18 -> "下午 ${h - 12} 点"
-    else -> "晚上 ${h - 12} 点"
-}
-
 /**
  * 单日专注卡（可翻页）。
  *
@@ -1833,6 +1786,7 @@ private fun SingleDayCard(
     sec: Long,
     pomodoros: Int,
     tasks: List<PomodoroStats.TaskRow>,
+    nextEnabled: Boolean,
     onPrev: () -> Unit,
     onNext: () -> Unit
 ) {
@@ -1858,7 +1812,7 @@ private fun SingleDayCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            TextButton(onClick = onNext) {
+            TextButton(onClick = onNext, enabled = nextEnabled) {
                 Icon(Icons.Outlined.ChevronRight, contentDescription = "后一天")
             }
         }
@@ -1893,6 +1847,9 @@ private fun dayLabel(day: String): String {
  *
  * 折线看趋势、柱状看「每周到底多少」——月里有 4–5 周，
  * 每周一根柱比 30 根日柱更容易看出「这周是不是掉队了」。
+ *
+ * 手指停留 / 点击某根柱 → 顶部读数行换成那一周的简略数据
+ * （用户诉求：「这些图，手指停留或者点击应该要显示具体的简略数据」）。
  */
 @Composable
 private fun WeekBars(values: List<Long>) {
@@ -1900,6 +1857,9 @@ private fun WeekBars(values: List<Long>) {
     val max = remember(values) { values.maxOrNull()?.coerceAtLeast(60L) ?: 60L }
     val color = MaterialTheme.colorScheme.primary
     val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // -1 = 没选中；选中时柱体换主色、读数行换成那一周的时长
+    var selected by remember { mutableStateOf(-1) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1910,14 +1870,24 @@ private fun WeekBars(values: List<Long>) {
         values.forEachIndexed { index, sec ->
             val ratio = (sec.toFloat() / max.toFloat()).coerceIn(0f, 1f)
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    // 整列可点：柱子细，点柱顶不如点整列好按
+                    .pointerInput(index) {
+                        detectTapGestures(
+                            onPress = {
+                                selected = if (selected == index) -1 else index
+                            }
+                        )
+                    },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Bottom
             ) {
                 Text(
                     text = if (sec > 0L) "${sec / 60}" else "",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (index == selected) color else labelColor,
+                    fontWeight = if (index == selected) FontWeight.Bold else FontWeight.Normal
                 )
                 Spacer(Modifier.height(2.dp))
                 Box(
@@ -1925,7 +1895,11 @@ private fun WeekBars(values: List<Long>) {
                         .fillMaxWidth()
                         .height((4 + ratio * 58).dp)
                         .background(
-                            color = if (sec > 0L) color else track,
+                            color = when {
+                                index == selected -> color
+                                sec > 0L -> color
+                                else -> track
+                            },
                             shape = RoundedCornerShape(4.dp)
                         )
                 )
@@ -1933,11 +1907,24 @@ private fun WeekBars(values: List<Long>) {
                 Text(
                     text = "第${index + 1}周",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (index == selected) color else labelColor,
+                    fontWeight = if (index == selected) FontWeight.Bold else FontWeight.Normal
                 )
             }
         }
     }
+    // 读数行：选中某一周时显示「第 N 周 · 时长」，否则显示本月峰值
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = if (selected in values.indices) {
+            "第 ${selected + 1} 周 · ${formatDuration(values[selected])}"
+        } else {
+            "峰值 ${max / 60} 分钟"
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = if (selected in values.indices) color else labelColor,
+        fontWeight = if (selected in values.indices) FontWeight.Bold else FontWeight.Normal
+    )
 }
 
 /**
@@ -1951,7 +1938,10 @@ private fun WeekBars(values: List<Long>) {
 private fun MonthTrendLine(values: List<Long>) {
     TrendLine(
         values = values,
-        startLabel = if (values.isEmpty()) "" else "${values.size} 个月前"
+        startLabel = if (values.isEmpty()) "" else "${values.size} 个月前",
+        pointLabeler = { index ->
+            if (index == values.size - 1) "本月" else "${values.size - 1 - index} 个月前"
+        }
     )
 }
 
@@ -1960,7 +1950,8 @@ private fun MonthTrendLine(values: List<Long>) {
 private fun QuarterTrendLine(values: List<Long>) {
     TrendLine(
         values = values,
-        startLabel = if (values.isEmpty()) "" else "近 ${values.size} 个季度"
+        startLabel = if (values.isEmpty()) "" else "近 ${values.size} 个季度",
+        pointLabeler = { index -> "第 ${index + 1} 个季度" }
     )
 }
 
@@ -1979,7 +1970,9 @@ private fun QuarterTrendLine(values: List<Long>) {
 private fun TrendLine(
     values: List<Long>,
     startLabel: String,
-    endLabel: String = "最近"
+    endLabel: String = "最近",
+    /** 每个数据点的可读名称（触摸时显示用，如「6 天前」「本月」）。 */
+    pointLabeler: (Int) -> String = { index -> "第 ${index + 1} 个" }
 ) {
     val ratios = remember(values) {
         val max = (values.maxOrNull() ?: 0L).coerceAtLeast(60L)
@@ -1989,13 +1982,22 @@ private fun TrendLine(
     val lineColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.surfaceContainerHighest
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // 手指停留 / 点击选中的点；-1 = 没选。松手不清空——
+    // 用户要的就是「按住看清楚」，抬手立刻消失反而看不到。
+    var selected by remember { mutableStateOf(-1) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
-                text = "峰值 ${max / 60} 分钟",
+                // 选中时这一行变成选中点的读数：简略数据（名称 + 时长）
+                text = if (selected in values.indices) {
+                    "${pointLabeler(selected)} · ${formatDuration(values[selected])}"
+                } else {
+                    "峰值 ${max / 60} 分钟"
+                },
                 style = MaterialTheme.typography.labelSmall,
-                color = labelColor
+                color = if (selected in values.indices) lineColor else labelColor,
+                fontWeight = if (selected in values.indices) FontWeight.Bold else FontWeight.Normal
             )
             Text("0", style = MaterialTheme.typography.labelSmall, color = labelColor)
         }
@@ -2004,6 +2006,19 @@ private fun TrendLine(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(110.dp)
+                // 手指停留或点击 → 按 x 坐标找最近的数据点。
+                // 不消费事件：纵向滚动（外层 LazyColumn）照旧能抢走手势。
+                .pointerInput(values) {
+                    detectTapGestures(
+                        onPress = { offset ->
+                            if (values.isNotEmpty()) {
+                                val stepX = size.width / (values.size - 1).coerceAtLeast(1)
+                                selected = (offset.x / stepX).roundToInt()
+                                    .coerceIn(0, values.size - 1)
+                            }
+                        }
+                    )
+                }
         ) {
             val w = size.width
             val h = size.height
@@ -2019,6 +2034,17 @@ private fun TrendLine(
 
             val points = ratios.mapIndexed { index, r ->
                 Offset(index * stepX, h - r * (h - topPad))
+            }
+
+            // 选中点：先画一条竖向参考线，点本身描大一点
+            if (selected in points.indices) {
+                val p = points[selected]
+                drawLine(
+                    color = lineColor.copy(alpha = 0.35f),
+                    start = Offset(p.x, 0f),
+                    end = Offset(p.x, h),
+                    strokeWidth = 1.dp.toPx()
+                )
             }
 
             if (points.size >= 2) {
@@ -2043,7 +2069,12 @@ private fun TrendLine(
 
             points.forEachIndexed { index, p ->
                 if (values.getOrNull(index) != null && values[index] > 0L) {
-                    drawCircle(color = lineColor, radius = 2.5.dp.toPx(), center = p)
+                    val isSel = index == selected
+                    drawCircle(
+                        color = lineColor,
+                        radius = if (isSel) 4.5.dp.toPx() else 2.5.dp.toPx(),
+                        center = p
+                    )
                 }
             }
         }
@@ -2147,11 +2178,17 @@ private fun modeLabel(mode: String): String = when (mode) {
     else -> "定时"
 }
 
+/**
+ * 近 7 天柱状图。
+ *
+ * 柱高、星期标签都跟重组无关却要每次重算：label 还得过一次
+ * DateTimeFormatter（一天 7 个 formatter 实例）。一次性在
+ * remember 里算好，外层随便怎么重组都不会重跑。
+ *
+ * 与 [WeekBars] 同样支持手指停留 / 点击读数。
+ */
 @Composable
 private fun Last7Bars(values: List<Long>) {
-    // 柱高、星期标签都跟重组无关却要每次重算：label 还得过一次
-    // DateTimeFormatter（一天 7 个 formatter 实例）。一次性在
-    // remember 里算好，外层随便怎么重组都不会重跑。
     val bars = remember(values) {
         val days = values.asReversed()
         val max = days.maxOrNull()?.coerceAtLeast(60L) ?: 60L
@@ -2167,6 +2204,8 @@ private fun Last7Bars(values: List<Long>) {
     }
     val color = MaterialTheme.colorScheme.primary
     val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    var selected by remember { mutableStateOf(-1) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2174,16 +2213,25 @@ private fun Last7Bars(values: List<Long>) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Bottom
     ) {
-        bars.forEach { (label, sec, ratio) ->
+        bars.forEachIndexed { index, (label, sec, ratio) ->
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .pointerInput(index) {
+                        detectTapGestures(
+                            onPress = {
+                                selected = if (selected == index) -1 else index
+                            }
+                        )
+                    },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Bottom
             ) {
                 Text(
                     text = if (sec > 0L) "${sec / 60}" else "",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (index == selected) color else labelColor,
+                    fontWeight = if (index == selected) FontWeight.Bold else FontWeight.Normal
                 )
                 Spacer(Modifier.height(2.dp))
                 Box(
@@ -2191,7 +2239,11 @@ private fun Last7Bars(values: List<Long>) {
                         .fillMaxWidth()
                         .height((4 + ratio * 56).dp)
                         .background(
-                            color = if (sec > 0L) color else track,
+                            color = when {
+                                index == selected -> color
+                                sec > 0L -> color
+                                else -> track
+                            },
                             shape = RoundedCornerShape(4.dp)
                         )
                 )
@@ -2199,10 +2251,25 @@ private fun Last7Bars(values: List<Long>) {
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (index == selected) color else labelColor,
+                    fontWeight = if (index == selected) FontWeight.Bold else FontWeight.Normal
                 )
             }
         }
+    }
+    // 读数行：选中某天时显示「周三 · 时长」（连同日期更实用）
+    if (selected in bars.indices) {
+        Spacer(Modifier.height(4.dp))
+        val dayText = remember(selected) {
+            LocalDate.now().minusDays((6 - selected).toLong())
+                .format(DateTimeFormatter.ofPattern("M月d日"))
+        }
+        Text(
+            text = "$dayText 周${bars[selected].first} · ${formatDuration(bars[selected].second)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -2230,7 +2297,15 @@ private fun DailyTrendLine(values: List<Long>) {
     TrendLine(
         values = ordered,
         startLabel = if (ordered.isEmpty()) "" else "${ordered.size} 天前",
-        endLabel = "今天"
+        endLabel = "今天",
+        pointLabeler = { index ->
+            val daysAgo = ordered.size - 1 - index
+            when (daysAgo) {
+                0 -> "今天"
+                1 -> "昨天"
+                else -> "$daysAgo 天前"
+            }
+        }
     )
 }
 
@@ -2253,6 +2328,9 @@ private fun pieColor(index: Int): Color = PIE_COLORS[index % PIE_COLORS.size]
  *
  * 用环形而不是实心 Pie：中间能放总时长，信息密度比实心高，
  * 也不会被大扇区挡住图例的视线。
+ *
+ * 手指停留 / 点击某个扇区 → 环心换成那个学科的简略数据
+ * （名称 + 时长 + 占比），再点空白处回到总时长。
  */
 @Composable
 private fun SubjectPieChart(rows: List<Triple<String, Long, Int>>) {
@@ -2267,6 +2345,9 @@ private fun SubjectPieChart(rows: List<Triple<String, Long, Int>>) {
         }
     }
     val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    val lineColor = MaterialTheme.colorScheme.primary
+    // -1 = 没选中扇区（环心显示总计）
+    var selected by remember { mutableStateOf(-1) }
 
     Box(
         modifier = Modifier
@@ -2274,7 +2355,37 @@ private fun SubjectPieChart(rows: List<Triple<String, Long, Int>>) {
             .height(180.dp),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(180.dp)) {
+        Canvas(
+            modifier = Modifier
+                .size(180.dp)
+                .pointerInput(arcs) {
+                    detectTapGestures { offset ->
+                        // PointerInputScope 的 size 是 IntSize，没有 minDimension
+                        val cx = size.width / 2f
+                        val cy = size.height / 2f
+                        val dx = offset.x - cx
+                        val dy = offset.y - cy
+                        val dist = kotlin.math.hypot(dx, dy)
+                        val stroke = 34.dp.toPx()
+                        val outer = minOf(size.width, size.height) / 2f
+                        val inner = outer - stroke
+                        selected = if (dist in inner..outer) {
+                            // 屏幕坐标 y 向下、角度逆时针为正，与 Canvas 的
+                            // drawArc 口径（0° = 3 点钟、顺时针）一致：
+                            // atan2(dy, dx) 直接给出相对 3 点钟的顺时针角。
+                            var angle = Math.toDegrees(
+                                kotlin.math.atan2(dy.toDouble(), dx.toDouble())
+                            ).toFloat()
+                            if (angle < 0f) angle += 360f
+                            arcs.firstOrNull { (_, start, sweep) ->
+                                angle >= start && angle < start + sweep
+                            }?.first ?: -1
+                        } else {
+                            -1
+                        }
+                    }
+                }
+        ) {
             val stroke = Stroke(width = 34.dp.toPx())
             val inset = 34.dp.toPx() / 2f
             val diameter = size.minDimension - 34.dp.toPx()
@@ -2289,20 +2400,56 @@ private fun SubjectPieChart(rows: List<Triple<String, Long, Int>>) {
                     size = Size(diameter, diameter)
                 )
             }
+            // 选中扇区：同色再描一圈略粗的弧，指出「现在看的是这块」
+            if (selected in arcs.indices) {
+                val (_, startAngle, sweep) = arcs[selected]
+                drawArc(
+                    color = lineColor,
+                    startAngle = startAngle,
+                    sweepAngle = sweep,
+                    useCenter = false,
+                    style = Stroke(width = 40.dp.toPx()),
+                    topLeft = Offset(inset - 3.dp.toPx(), inset - 3.dp.toPx()),
+                    size = Size(diameter + 6.dp.toPx(), diameter + 6.dp.toPx())
+                )
+            }
         }
-        // 环心：总时长 + 科目数
+        // 环心：默认总时长 + 学科数；选中扇区时换成该学科简略数据
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = formatDuration(total),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "${rows.size} 个学科",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (selected in rows.indices) {
+                val (name, sec, _) = rows[selected]
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = formatDuration(sec),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "${(sec.toFloat() / total * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    text = formatDuration(total),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "${rows.size} 个学科",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

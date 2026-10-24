@@ -28,28 +28,6 @@ enum class StatsRange(val label: String) {
 }
 
 /**
- * 「时段分布」饼图的时间口径。
- *
- * 与 [StatsRange] 分开是因为两者回答的问题不同：StatsRange 决定上面那几
- * 张总览卡看多长的区间，时段分布要回答「我一般在什么时段学」——
- * 拿「全部」的时段分布合理，拿「今日」的就不成比例（一天 24 格只有
- * 几格有值，饼图碎成渣）。所以给它单独一套 日 / 周 / 月 / 自定义。
- */
-enum class HourBucketRange(val label: String) {
-    DAY("日"),
-    WEEK("周"),
-    MONTH("月"),
-    ALL("全部");
-
-    fun fromDay(today: LocalDate): String = when (this) {
-        DAY -> today.toString()
-        WEEK -> today.minusDays(6).toString()
-        MONTH -> today.withDayOfMonth(1).toString()
-        ALL -> ""
-    }
-}
-
-/**
  * 番茄钟统计。
  *
  * ## 口径说明（写死在这里，避免各处各算各的）
@@ -97,10 +75,6 @@ object PomodoroStats {
         val totalAllSec: Long = 0L,
         /** 累计完成的番茄数（全部时间）。 */
         val totalAllCompleted: Int = 0,
-        /** 时段分布：24 格（0–23 时），下标即小时，缺的小时为 0。 */
-        val hourly: List<Long> = List(24) { 0L },
-        /** 时段分布所对应的口径（饼图标题回显）。 */
-        val hourRange: HourBucketRange = HourBucketRange.WEEK,
         /** 有记录的自然天数（累计数据卡用）。 */
         val activeDays: Int = 0,
         /** 有记录的月份数（累计数据卡用）。 */
@@ -119,8 +93,7 @@ object PomodoroStats {
 
     suspend fun snapshot(
         dao: PomodoroDao,
-        range: StatsRange = StatsRange.ALL,
-        hourRange: HourBucketRange = HourBucketRange.WEEK
+        range: StatsRange = StatsRange.ALL
     ): Snapshot {
         val today = LocalDate.now()
         val from = range.fromDay(today)
@@ -155,15 +128,6 @@ object PomodoroStats {
         }
         val subjectTotals = dao.subjectTotalsOnce(from)
         val recent = dao.recentSessions(from, RECENT_LIMIT)
-
-        // ---- 时段分布：24 格补零 ----
-        val hourFrom = hourRange.fromDay(today)
-        val hourlySec = LongArray(24)
-        dao.hourlyTotalsSince(hourFrom).forEach {
-            val h = it.hour
-            // 防御：SQLite 的 CAST 结果理论上落在 0–23，脏数据不越界写数组
-            if (h in 0..23) hourlySec[h] = it.sec
-        }
 
         // ---- 近 12 个月：按 'yyyy-MM' 分组，缺月补 0 ----
         val monthKeys = (11 downTo 0).map { YearMonth.from(today).minusMonths(it.toLong()).toString() }
@@ -200,8 +164,6 @@ object PomodoroStats {
             range = range,
             totalAllSec = totalAllSec,
             totalAllCompleted = totalAllCompleted,
-            hourly = hourlySec.toList(),
-            hourRange = hourRange,
             activeDays = allDays.size,
             activeMonths = monthMap.keys.size,
             months12 = months12,
@@ -245,5 +207,21 @@ object PomodoroStats {
             cursor = cursor.minusDays(1)
         }
         return count
+    }
+
+    /**
+     * 单日卡翻页的目标日期；**翻到未来时返回 null（不许翻）**。
+     *
+     * 统计记录的是已发生的事实，「后一天」翻到明天只会看到一片空白，
+     * 还会让人以为数据丢了。抽成纯函数是为了钉住这条规则：
+     * 用户反馈过「左右点击切换日期居然能切换到未来」。
+     *
+     * @param current 当前翻到的日期
+     * @param delta +1 / -1 天
+     * @param today 今天
+     */
+    fun shiftDayClamped(current: LocalDate, delta: Long, today: LocalDate): LocalDate? {
+        val next = current.plusDays(delta)
+        return if (next.isAfter(today)) null else next
     }
 }

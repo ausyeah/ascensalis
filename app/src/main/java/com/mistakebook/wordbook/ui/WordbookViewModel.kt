@@ -59,10 +59,6 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     private val deferCount = mutableMapOf<String, Int>()
     private var sessionAnswerCount = 0
 
-    /** 循环复习轮次：轮次号与本轮开始时间（后者为 0 = 没开过轮）。 */
-    private var roundNumber = 0
-    private var roundStartedAt = 0L
-
     /**
      * 错词本抽词权重。
      *
@@ -232,16 +228,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             }
             observeDatabaseStats()
             prepareNextQuestion()
-            refreshRoundInfo()
             _uiState.update { it.copy(isLoading = false) }
-        }
-        // 轮次状态跟随设置变化（在设置页之外被别处改动也能同步）
-        viewModelScope.launch {
-            container.settingsStore.wordbookRound.collect { r ->
-                roundNumber = r.n
-                roundStartedAt = r.startedAt
-                refreshRoundInfo()
-            }
         }
         // 周统计刷新后实时同步到 UI 状态（切到统计页或答完题都会触发）
         viewModelScope.launch {
@@ -802,14 +789,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         fun blocked(word: String): Boolean =
             word in recentWords || word in pendingDeferWords || deferCount[word] != null && deferCount[word]!! >= MAX_DEFER_TIMES
 
-        // 2. 循环轮次队列（本轮没复习过的已学词，错得多的排最前）
-        val roundRemaining = roundQueue(allWords)
-            .filter { !blocked(it.word) && isEligibleSenseWord(it) }
-        if (roundRemaining.isNotEmpty()) {
-            return@withContext roundRemaining.first()
-        }
-
-        // 3. 错词本 70% / 新词 30%
+        // 2. 错词本 70% / 新词 30%
         val eligibleWrong = wrongWordsCache
             .filter { !blocked(it) }
             .mapNotNull { vocabRepo.getWord(it) }
@@ -873,81 +853,34 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /**
-     * 本轮剩余词：已学过、且本轮开始后还没再答过的词。
+     * 换一批释义：**不换词**，只把当前题的选项重新抽一遍。
      *
-     * **进度由每个词的 [WordProgress.updatedAt] 派生，不额外存字段**：
-     * 「属于本轮」= 学过（level>0 / 曾错 / 熟词 / 错过的次数>0）
-     * 且 updatedAt <= 本轮开始时间。答完一题它的 updatedAt 被推到当下，
-     * 于是自动离开队列。这样轮次进度天然跟随 progress 表，
-     * 不需要额外的表或列，也不会出现「计数器与实际作答不一致」。
+     * 用户诉求：「换一个词」理解错了——想要的不是抽一道新题，
+     * 而是「这几个释义/选项我看着别扭，换一批」。所以这里锚定
+     * [WordbookUiState.currentWord] 重新构题：
+     * - 四选一：重抽 3 个干扰项，答案还是当前词；
+     * - 义项辨析：重抽一个义项 + 新干扰项（[VocabRepo.buildSenseQuestion]
+     *   内部对同一单词随机取义项），构不出来时退回按当前词出四选一；
+     * - 拼写 / 卡片模式没有「一批选项」可换，按钮不出现。
      *
-     * 排序与 Web 版一致：错得多的先来 → 遗忘多的先来 → 最近错的先来
-     * → 按词序兜底保证稳定（否则每次排序抖动，用户会看到队列乱跳）。
+     * 作答状态整题复位（[presentWord] 里统一 copy），答过的题也能换。
+     * 不压历史栈：换的是同一道题的选项，「上一题」应回到上一个词，
+     * 而不是在同一词的两批选项之间打转。
      */
-    private fun roundQueue(allWords: List<Word>): List<Word> {
-        val startedAt = roundStartedAt
-        if (startedAt <= 0L) return emptyList()
-        return allWords.filter { w ->
-            val p = progressCache[w.word] ?: return@filter false
-            val studied = p.level > 0 || p.everWrong || p.isMastered || p.wrongCount > 0
-            studied && p.updatedAt <= startedAt
-        }.sortedWith(
-            compareByDescending<Word> { progressCache[it.word]?.wrongCount ?: 0 }
-                .thenByDescending { progressCache[it.word]?.lapses ?: 0 }
-                .thenByDescending { progressCache[it.word]?.lastAnsweredAt ?: 0L }
-                .thenBy { it.word }
-        )
-    }
-
-    /** 手动开启下一轮：轮次号 +1、开始时间设为此刻，并重开会话状态。 */
-    fun startNextRound() {
-        viewModelScope.launch {
-            val next = roundNumber + 1
-            val now = System.currentTimeMillis()
-            container.settingsStore.startWordbookRound(next, now)
-            roundNumber = next
-            roundStartedAt = now
-            resetSessionState()
+    fun reshuffleOptions() {
+        val state = _uiState.value
+        if (state.isLoading || isActionInProgress.get()) return
+        val word = state.currentWord
+        if (word == null || state.studyMode == StudyMode.SPELL) {
+            // 没有当前题（词库空了）：退回抽新题，别让按钮变成死的
             prepareNextQuestion()
-            refreshRoundInfo()
-            _uiState.update {
-                it.copy(snackbarMessage = "已开始第 $next 轮，共 ${it.roundRemaining} 词待过")
-            }
+            return
         }
-    }
-
-    /**
-     * 刷新轮次面板的数据。
-     *
-     * 「本轮剩余 / 已学总数」这两个数只在这几件事后变：开新一轮、
-     * 答完一题（updatedAt 被推出队列）、外部重置。所以在这三处调
-     * 即可，不必每帧算——每帧算就是对四千多个词做一次排序。
-     */
-    fun refreshRoundInfo() {
-        viewModelScope.launch {
-            val all = withContext(Dispatchers.IO) { vocabRepo.getAllWords() }
-            val studied = withContext(Dispatchers.IO) {
-                all.count { w ->
-                    val p = progressCache[w.word] ?: return@count false
-                    p.level > 0 || p.isMastered || p.everWrong || p.wrongCount > 0
-                }
-            }
-            val remaining = withContext(Dispatchers.IO) { roundQueue(all).size }
-            _uiState.update {
-                it.copy(roundNumber = roundNumber, roundRemaining = remaining, studiedWordCount = studied)
-            }
+        nextQuestionJob?.cancel()
+        nextQuestionJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            presentWord(word)
         }
-    }
-
-    /** 重置会话内的调度状态（历史栈、冷却窗口、重现队列）。 */
-    private fun resetSessionState() {
-        questionHistory.clear()
-        modeSnapshots.clear()
-        deferQueue.clear()
-        deferCount.clear()
-        recentWords.clear()
-        sessionAnswerCount = 0
-        _uiState.update { it.copy(hasPrevious = false) }
     }
 
     /**
@@ -1104,9 +1037,6 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         _uiState.update { st ->
             if (st.currentWord?.word == current.word) st.copy(currentProgress = newProgress) else st
         }
-        // 轮次队列由 updatedAt 派生，答完这一题它就离开队列了——
-        // 面板上的「剩余 N 词」要跟着减。
-        refreshRoundInfo()
     }
 
     /**

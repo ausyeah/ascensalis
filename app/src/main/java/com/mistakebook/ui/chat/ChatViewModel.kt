@@ -172,6 +172,20 @@ data class ChatUiState(
      * 而不是为每个模型各建一套配置（URL 抄 N 遍）。
      */
     val modelOptions: List<String> = emptyList(),
+
+    /**
+     * 已配置的供应商（接入配置）列表，供对话页直接切换。
+     *
+     * 用户诉求：「切换模型不能跳转切换供应商……点开设置里面就是几个
+     * 供应商列表，但是不能展开，可以自己选择哪个供应商来切换模型」。
+     * 所以这里给的是**扁平列表 + 点选即换**，不是可展开的编辑表单
+     * （编辑仍在设置页）。
+     */
+    val providerOptions: List<ChatProviderOption> = emptyList(),
+
+    /** 当前生效的供应商 id（与设置页同一份数据源，切换后两边同步）。 */
+    val activeProviderId: String? = null,
+
     /** 当前实际生效的模型名（选择面板与输入栏 chip 显示用）。 */
     val currentModel: String = "",
     /** 思考强度（模型面板右上角设置里可调，与设置页同一数据源）。 */
@@ -183,6 +197,17 @@ data class ChatUiState(
      * 空串 = 用配置里的默认模型。
      */
     val selectedModel: String = ""
+)
+
+/**
+ * 对话页模型面板里的一个供应商条目。
+ *
+ * 只带 id 与显示名：面板要能点选切换，又不必把整套 LlmProfile
+ * （URL、Key、路由表）塞进 UI 状态——那些是设置页的事。
+ */
+data class ChatProviderOption(
+    val id: String,
+    val name: String
 )
 
 /** 一次性事件。 */
@@ -272,11 +297,23 @@ class ChatViewModel(
     private var truncatedMessageId: Long? = null
 
     init {
-        // 思考强度跟随全局设置：模型选择面板的「设置」里可以直接调，
+        // 思考强度 / 供应商列表跟随全局设置：模型选择面板的「设置」里可以直接调，
         // 与设置页共用同一份数据源（SettingsStore），调完下一次发送即生效。
+        // 供应商列表也在这里同步——设置页增删配置、或对话页自己切换供应商后，
+        // 两边看到的是同一份。
         viewModelScope.launch {
             settingsStore.settings.collect { s ->
-                _state.value = _state.value.copy(reasoningEffort = s.reasoningEffort)
+                val profile = s.activeProfile
+                _state.value = _state.value.copy(
+                    reasoningEffort = s.reasoningEffort,
+                    providerOptions = s.llmProfiles.map { p ->
+                        ChatProviderOption(id = p.id, name = p.displayName())
+                    },
+                    activeProviderId = s.activeProfileId,
+                    modelOptions = profile?.availableModels().orEmpty(),
+                    // 芯片上显示的名字：用户切过就用切后的，否则用配置的默认模型
+                    currentModel = _state.value.selectedModel.ifBlank { profile?.model.orEmpty() }
+                )
             }
         }
         viewModelScope.launch {
@@ -487,6 +524,26 @@ class ChatViewModel(
      */
     fun selectModel(model: String) {
         _state.value = _state.value.copy(selectedModel = model, currentModel = model)
+    }
+
+    /**
+     * 切换供应商（接入配置）：对话页内直接换，**不跳设置页**。
+     *
+     * 写的是全局 activeProfileId（与设置页的 RadioButton 同一个字段），
+     * 所以两边永远同步。切换后清空 [ChatUiState.selectedModel]——
+     * 旧供应商的模型名在新供应商里大概率不存在，继续带着它只会
+     * 让下一次请求 404；清空即「用新供应商的默认模型」。
+     *
+     * 设置里没有配置任何供应商时给一条提示，别让用户点了没反应。
+     */
+    fun selectProvider(profileId: String) {
+        if (_state.value.activeProviderId == profileId) return
+        // 先清选择再落盘：落盘会触发 settings 流重发，届时 currentModel
+        // 会用新供应商的默认模型重算，不会读到旧的 selectedModel。
+        _state.value = _state.value.copy(selectedModel = "")
+        viewModelScope.launch {
+            settingsStore.setActiveProfileId(profileId)
+        }
     }
 
     /** 调整思考强度：写全局设置，下一次发送生效。 */

@@ -9,6 +9,7 @@
     <string name="action_save">保存</string>
     <string name="action_delete">删除</string>
     <string name="swipe_delete_hint">删除</string>
+    <string name="swipe_delete_confirm">确认删除</string>
     <string name="edit_audit">检查</string>
     <string name="action_undo">撤销</string>
     <string name="swipe_delete_action">删除这道题</string>
@@ -221,6 +222,7 @@
     <string name="settings_usage_prompt">输入 tokens</string>
     <string name="settings_usage_completion">输出 tokens</string>
     <string name="settings_usage_cached">缓存命中 tokens</string>
+    <string name="settings_usage_total">总计 tokens（输入 + 输出）</string>
     <string name="settings_usage_mineru_calls">MinerU 解析</string>
     <string name="settings_usage_mineru_pages">解析页数（计费额度按页算）</string>
     <string name="settings_usage_reset">清零重算</string>

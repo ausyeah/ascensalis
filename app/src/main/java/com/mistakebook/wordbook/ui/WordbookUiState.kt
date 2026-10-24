@@ -160,14 +160,6 @@ data class WordbookUiState(
     // 是否有可回退的「上一题」（按钮置灰用）
     val hasPrevious: Boolean = false,
 
-    // ---- 循环复习轮次 ----
-    /** 当前轮次号；0 = 还没开过任何一轮。 */
-    val roundNumber: Int = 0,
-    /** 本轮剩余待复习词数。 */
-    val roundRemaining: Int = 0,
-    /** 已学过的词数（进过轮次队列的总数）。 */
-    val studiedWordCount: Int = 0,
-
     // 错题本子页
     val wrongSubTab: WrongSubTab = WrongSubTab.WRONG_BOOK,
     val wrongBookList: List<Pair<Word, WordProgress>> = emptyList(),

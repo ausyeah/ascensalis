@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -66,6 +68,7 @@ import com.mistakebook.ui.common.containerViewModel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -84,32 +87,7 @@ fun ChatListScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<ChatListItemUi?>(null) }
     var renameText by remember { mutableStateOf("") }
-    // 单条会话删除：删除不可恢复，先弹窗再两步确认
-    var pendingDeleteSession by remember { mutableStateOf<Long?>(null) }
     val untitled = stringResource(R.string.chat_untitled)
-
-    pendingDeleteSession?.let { sessionId ->
-        AlertDialog(
-            onDismissRequest = { pendingDeleteSession = null },
-            title = { Text(stringResource(R.string.chat_delete_message)) },
-            text = { Text(stringResource(R.string.chat_delete_session_confirm_body)) },
-            confirmButton = {
-                com.mistakebook.ui.common.TwoStepConfirmTextButton(
-                    text = stringResource(R.string.chat_confirm),
-                    confirmText = stringResource(R.string.chat_delete_confirm_action),
-                    onConfirm = {
-                        pendingDeleteSession = null
-                        viewModel.delete(sessionId)
-                    }
-                )
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDeleteSession = null }) {
-                    Text(stringResource(R.string.chat_cancel))
-                }
-            }
-        )
-    }
 
     if (showClearConfirm) {
         AlertDialog(
@@ -247,7 +225,7 @@ fun ChatListScreen(
                         renameText = item.session.title
                         renaming = item
                     },
-                    onDelete = { pendingDeleteSession = item.session.id }
+                    onDelete = { viewModel.delete(item.session.id) }
                 )
                 HorizontalDivider()
             }
@@ -256,13 +234,15 @@ fun ChatListScreen(
 }
 
 /**
- * 右滑操作行：**蓝色重命名 + 红色删除**，复用主页错题本的滑动形式。
+ * 左滑操作行：**红色删除（原地两步确认）**，可选蓝色重命名。
  *
  * ## 交互（与 [com.mistakebook.ui.home.HomeScreen] 的划开删除同构）
  *
- * 1. 右滑 → 左侧露出蓝色「重命名」+ 红色「删除」两块，**卡片停住不收回**
- * 2. 再点一下色块 → 才真正执行（重命名弹窗 / 删除两步确认）
- * 3. 点卡片其余部分 → 收回色块，不进会话
+ * 1. **左滑** → 右侧露出操作色块，卡片停住不收回
+ * 2. 点「删除」→ **原地**变成更深红的「确认删除」，位置不变、不弹窗
+ *    （用户诉求：二次确认就像错题本那样在原来的位置点一下，再点一下才删）
+ * 3. 再点一次「确认删除」→ 真删；4 秒不点或划回去 → 自动收起
+ * 4. 点卡片其余部分 → 收回色块，不进会话
  *
  * 滑到位必须吸附展开：松手就回弹的话，用户根本没机会点色块——
  * 手势进行中是不能点击的。安全边界因此从「会不会误划」转移到
@@ -283,15 +263,30 @@ private fun SwipeableChatRow(
     // 「是否已划开」是**离散状态**，只在松手时翻转。
     // 位移本身走 `Modifier.offset { }`（只跑布局阶段，不重组）。
     var revealed by remember { mutableStateOf(false) }
+    // 删除的原地两步确认：第一击只是把色块换成更深的红，
+    // 第二击才真的删。收起（划回 / 点别处 / 超时）时复位。
+    var confirmingDelete by remember { mutableStateOf(false) }
+
+    // 确认态 4 秒无操作自动收起：停在这个界面上干别的，
+    // 回来时不该还悬着一颗「再点就删」的按钮。
+    LaunchedEffect(confirmingDelete) {
+        if (confirmingDelete) {
+            delay(4_000)
+            confirmingDelete = false
+            revealed = false
+            scope.launch { offsetX.animateTo(0f) }
+        }
+    }
 
     val dragState = rememberDraggableState { delta ->
         scope.launch {
-            offsetX.snapTo((offsetX.value + delta).coerceIn(0f, revealWidthPx))
+            offsetX.snapTo((offsetX.value + delta).coerceIn(-revealWidthPx, 0f))
         }
     }
 
     fun close() {
         revealed = false
+        confirmingDelete = false
         scope.launch { offsetX.animateTo(0f) }
     }
 
@@ -301,9 +296,12 @@ private fun SwipeableChatRow(
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // 底层：操作区。右滑后从左侧露出，**靠左对齐**——
-        // 卡片往右移，露出的正是最左边这两块。
-        Row(modifier = Modifier.matchParentSize()) {
+        // 底层：操作区。左滑后从右侧露出，**靠右对齐**——
+        // 卡片往左移，露出的正是最右边这两块。
+        Row(
+            modifier = Modifier.matchParentSize(),
+            horizontalArrangement = Arrangement.End
+        ) {
             SwipeActionBlock(
                 width = SwipeActionWidth,
                 color = MaterialTheme.colorScheme.primary,
@@ -317,18 +315,26 @@ private fun SwipeableChatRow(
             )
             SwipeActionBlock(
                 width = SwipeActionWidth,
-                color = MaterialTheme.colorScheme.error,
+                // 确认态换成更深的一档红：不用弹窗、不挪位置，
+                // 「在原来位置再点一次」的语义全在这块颜色里
+                color = if (confirmingDelete) SwipeDeleteConfirmRed
+                else MaterialTheme.colorScheme.error,
                 icon = Icons.Default.Delete,
-                label = stringResource(R.string.swipe_delete_hint),
+                label = if (confirmingDelete) stringResource(R.string.swipe_delete_confirm)
+                else stringResource(R.string.swipe_delete_hint),
                 enabled = revealed,
                 onClick = {
-                    close()
-                    onDelete()
+                    if (confirmingDelete) {
+                        close()
+                        onDelete()
+                    } else {
+                        confirmingDelete = true
+                    }
                 }
             )
         }
 
-        // 上层：卡片内容，跟随手势位移
+        // 上层：卡片内容，跟随手势位移（向左为负）
         Box(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
@@ -336,11 +342,12 @@ private fun SwipeableChatRow(
                     state = dragState,
                     orientation = Orientation.Horizontal,
                     onDragStopped = {
-                        val opened = offsetX.value > revealWidthPx * 0.35f
+                        val opened = offsetX.value < -revealWidthPx * 0.35f
                         revealed = opened
+                        if (!opened) confirmingDelete = false
                         scope.launch {
                             offsetX.animateTo(
-                                targetValue = if (opened) revealWidthPx else 0f,
+                                targetValue = if (opened) -revealWidthPx else 0f,
                                 animationSpec = spring(
                                     dampingRatio = Spring.DampingRatioMediumBouncy,
                                     stiffness = Spring.StiffnessMediumLow
@@ -465,6 +472,16 @@ private fun ChatRowContent(
 /** 右滑露出的总宽度：两块操作各 [SwipeActionWidth]。 */
 private val SwipeActionRevealWidth = 168.dp
 private val SwipeActionWidth = 84.dp
+
+/**
+ * 删除的「确认态」红色：比 error 更深一档。
+ *
+ * 语义上要能和「普通删除」一眼分开——同一位置、不弹窗、不移动，
+ * 颜色是唯一的状态信号，必须比第一击的 error 明显更深。
+ * 深色/浅色主题下都用固定深红，不跟主题色走（error 在深色主题下
+ * 会变亮，那时「更深」就反过来了）。
+ */
+private val SwipeDeleteConfirmRed = Color(0xFF8B0000)
 
 @Composable
 private fun QuestionTag(title: String) {
