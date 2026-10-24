@@ -282,6 +282,26 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ===== 手动录入草稿（T4，临时状态，存 DataStore 不进 Room）=====
+
+    /**
+     * 手动录入的自动暂存单槽：存一份 DraftBundle JSON（单题）。
+     *
+     * 与聊天草稿同思路：用户打了一半的字不该因为进程被杀而全丢。
+     * 空串 = 清槽（已保存 / 用户主动丢弃）。
+     */
+    suspend fun getManualDraftJson(): String {
+        val key = stringPreferencesKey("manual_draft_json")
+        return appContext.settingsDataStore.data.first()[key].orEmpty()
+    }
+
+    suspend fun setManualDraftJson(value: String?) {
+        val key = stringPreferencesKey("manual_draft_json")
+        appContext.settingsDataStore.edit { prefs ->
+            if (value.isNullOrBlank()) prefs.remove(key) else prefs[key] = value
+        }
+    }
+
     // ===== 裁剪会话（临时编辑状态，存 DataStore 不进 Room）=====
 
     suspend fun getCropSession(imagePath: String): CropSessionRecord? {

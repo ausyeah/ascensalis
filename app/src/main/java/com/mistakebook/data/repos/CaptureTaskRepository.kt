@@ -75,6 +75,18 @@ class CaptureTaskRepository(private val dao: CaptureTaskDao) {
         )
     }
 
+    /**
+     * 只写回 refinedJson 一列与 updatedAt（T4 自动暂存）。
+     *
+     * 绝不动 status：暂存发生时任务可能处于任意状态（DONE 之后用户
+     * 回来改题很常见），整包 update 拿旧快照会把 status/markdown 等
+     * 并发改动一起冲掉。
+     */
+    suspend fun updateRefinedJson(id: Long, refinedJson: String, now: Long) {
+        val task = dao.findById(id) ?: return
+        dao.update(task.copy(refinedJson = refinedJson, updatedAt = now))
+    }
+
     suspend fun delete(id: Long) = dao.deleteById(id)
 
     suspend fun failUnfinished(message: String) =
