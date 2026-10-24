@@ -41,7 +41,7 @@ class QuestionRepository(
             subjectFilter = filter.subjectId ?: 0L,
             notebookFilter = filter.notebookId ?: 0L,
             reasonName = filter.reason?.name.orEmpty(),
-            keyword = filter.keyword.trim(),
+            keyword = escapeLike(filter.keyword.trim()),
             limit = pageSize,
             offset = page.coerceAtLeast(0) * pageSize
         )
@@ -52,7 +52,7 @@ class QuestionRepository(
             subjectFilter = filter.subjectId ?: 0L,
             notebookFilter = filter.notebookId ?: 0L,
             reasonName = filter.reason?.name.orEmpty(),
-            keyword = filter.keyword.trim()
+            keyword = escapeLike(filter.keyword.trim())
         )
 
     fun observeTotalCount(): Flow<Int> = questionDao.observeTotalCount()
@@ -293,3 +293,13 @@ class QuestionRepository(
         const val PAGE_SIZE = 30
     }
 }
+
+/**
+ * LIKE 关键词转义（T9）：配合 QuestionDao 各查询里的 `ESCAPE '\'`。
+ *
+ * 不转义的话 `%`/`_` 会被当通配符——搜「100%」命中一切含「100」的题，
+ * 搜「a_b」把「a+b」也带出来。反斜杠必须**先**转，否则它会破坏
+ * 后两步刚写进去的转义序列（`\%` 里的 `\` 又被翻倍一次）。
+ */
+internal fun escapeLike(s: String): String =
+    s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
