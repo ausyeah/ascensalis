@@ -217,7 +217,12 @@ class MathRenderer(context: Context) {
         return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { scratchBitmap = it }
     }
 
-    /** 抓取页面左上角 width×height 的设备像素区域。 */
+    /**
+     * 抓取页面左上角 width×height 的设备像素区域。
+     *
+     * 返回的位图已裁掉四周透明边（见 [trimTransparent]）——
+     * math.html 的安全 padding 只是抓图阶段的保险，不带进排版。
+     */
     private suspend fun capture(view: WebView, width: Int, height: Int): Bitmap? {
         waitFrames(2)
         // 从未挂载到窗口的 WebView 不会自己产出合成帧，AwContents 里是空的，
@@ -242,7 +247,9 @@ class MathRenderer(context: Context) {
             bitmap.recycle()
             return null
         }
-        return bitmap
+        // 安全 padding 带来一圈透明边；行内公式的位图高度受 MathLayout 上限约束，
+        // 透明边会把公式整体压小，所以裁掉再返回。理由详见 [trimTransparent]。
+        return trimTransparent(bitmap)
     }
 
     /**
@@ -756,7 +763,56 @@ class MathRenderer(context: Context) {
             )
             return null
         }
-        return runCatching { Bitmap.createBitmap(sheet, safeX, safeY, safeW, safeH) }.getOrNull()
+        val sliced = runCatching { Bitmap.createBitmap(sheet, safeX, safeY, safeW, safeH) }.getOrNull()
+            ?: return null
+        // 同 [capture]：把安全 padding 留下的透明边裁掉再返回，
+        // 位图紧贴墨水，Compose 侧按字号换算才不受透明边干扰。
+        return trimTransparent(sliced)
+    }
+
+    /**
+     * 裁掉位图四周的透明边，只留「墨水 + [INK_MARGIN_PX] 余量」。
+     *
+     * ## 为什么抓完图还要再裁一刀
+     *
+     * math.html 的 `#out` / `.body` 都带了四边安全 padding——
+     * getBoundingClientRect() 量的是排版盒，而斜体修正、分式横线、
+     * 分式分子/分母、根号钩的墨水会溢出盒外，不留边就会被切
+     * （v0.0.30 真机事故：`\{x_n\}` 右花括号整个消失）。
+     * 所以抓图阶段必须留边。
+     *
+     * 但带着透明边去排版有两个问题：
+     * 1. 行内公式高度受 `INLINE_MATH_MAX_HEIGHT_RATIO` 上限约束，
+     *    透明边撑高位图，会把公式整体压小（竖向 padding 尤其明显）；
+     * 2. 左侧透明边把公式推离正文，行内基线对不齐。
+     *
+     * 因此分工是：**JS 侧负责「抓图不被切」，Kotlin 侧负责「排版不胖」**。
+     * 这里按不透明像素包围盒把透明边裁掉，裁完的位图紧贴墨水。
+     * [MathLayout.fit] 按「目标字号 / fontPx」换算，与位图实际尺寸无关，
+     * 所以裁剪对字号、对 PDF 打印都没有影响。
+     *
+     * 全透明时原样返回——调用方（capture / captureSheet）已经判过空白，
+     * 这里是双保险，不重复回收。
+     */
+    private fun trimTransparent(src: Bitmap, marginPx: Int = INK_MARGIN_PX): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w <= 0 || h <= 0) return src
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        val box = inkBoxOf(pixels, w, h) ?: return src
+        val left = (box.left - marginPx).coerceAtLeast(0)
+        val top = (box.top - marginPx).coerceAtLeast(0)
+        val right = (box.right + marginPx).coerceAtMost(w - 1)
+        val bottom = (box.bottom + marginPx).coerceAtMost(h - 1)
+        val newW = right - left + 1
+        val newH = bottom - top + 1
+        // 已经紧贴墨水（只剩余量）就不裁了，省一次位图分配
+        if (newW == w && newH == h) return src
+        return runCatching { Bitmap.createBitmap(src, left, top, newW, newH) }
+            .getOrNull()
+            ?.also { src.recycle() }
+            ?: src
     }
 
     companion object {
@@ -801,6 +857,15 @@ class MathRenderer(context: Context) {
 
         /** 批量长卷视口上限。12 个公式 × ~200 设备像素 + 余量，4096 绰绰有余。 */
         private const val BATCH_VIEWPORT_HEIGHT = 4096
+
+        /**
+         * 裁透明边后保留的余量（设备像素）。
+         *
+         * 2 设备像素约 0.7 CSS px：刚好盖住抗锯齿的半透明边缘，
+         * 又不至于把安全 padding 的收益全吃掉。
+         * 调大 → 位图边缘留白变多；调小 → 可能剩一圈毛边。
+         */
+        private const val INK_MARGIN_PX = 2
 
         /**
          * 浅色主题的公式前景色（墨黑），与 math.html 里 CSS 默认值一致。
@@ -935,3 +1000,99 @@ fun isBlankBySampling(
  * 再疏则开始有漏判风险。**真机出现漏判时先调这里。**
  */
 const val BLANK_SAMPLE_GRID = 48
+
+/**
+ * 位图里「有墨水」的像素包围盒，四个边界都是闭区间。
+ *
+ * alpha > 0 即算墨水：抗锯齿边缘、半透明字形都要算进来，
+ * 否则裁完还会剩一圈可见的毛边。
+ */
+data class InkBox(val left: Int, val top: Int, val right: Int, val bottom: Int)
+
+/**
+ * 在像素数组里求 alpha > 0 的包围盒。全透明（或数组装不下这张图）返回 null。
+ *
+ * ## 为什么是纯函数
+ *
+ * 和 [isBlankBySampling] 同一动机：`Bitmap` 在 JVM 单测里是空壳，
+ * 造不出来。所以这里只收 `IntArray`（`getPixels` 的产物），
+ * 测试直接造数组驱动——**而不是在测试里复制一份裁剪实现**，
+ * 那等于没有测试。
+ *
+ * ## 扫描顺序
+ *
+ * 先逐行定上下边界（找到即停），再在已定行范围内逐列定左右。
+ * 最坏 2×w×h 次比较；公式位图通常几十万像素，且整条渲染链路里
+ * 每个公式只跑一次，不进绘制循环。
+ *
+ * @param pixels ARGB_8888 的 `getPixels` 结果，长度必须 ≥ width × height
+ */
+fun inkBoxOf(pixels: IntArray, width: Int, height: Int): InkBox? {
+    if (width <= 0 || height <= 0) return null
+    if (pixels.size < width * height) return null
+
+    fun rowHasInk(y: Int): Boolean {
+        val start = y * width
+        var x = 0
+        while (x < width) {
+            if (pixels[start + x] ushr 24 != 0) return true
+            x++
+        }
+        return false
+    }
+
+    // 上边界：第一行有墨水的
+    var top = -1
+    var y = 0
+    while (y < height) {
+        if (rowHasInk(y)) {
+            top = y
+            break
+        }
+        y++
+    }
+    if (top < 0) return null // 整张图没有一个不透明像素
+
+    // 下边界：最后一行有墨水的
+    var bottom = -1
+    y = height - 1
+    while (y >= top) {
+        if (rowHasInk(y)) {
+            bottom = y
+            break
+        }
+        y--
+    }
+
+    // 左右边界只需要在 [top, bottom] 行范围内扫
+    var left = -1
+    var x = 0
+    while (x < width) {
+        var yy = top
+        while (yy <= bottom) {
+            if (pixels[yy * width + x] ushr 24 != 0) {
+                left = x
+                break
+            }
+            yy++
+        }
+        if (left >= 0) break
+        x++
+    }
+
+    var right = -1
+    x = width - 1
+    while (x >= left) {
+        var yy = top
+        while (yy <= bottom) {
+            if (pixels[yy * width + x] ushr 24 != 0) {
+                right = x
+                break
+            }
+            yy++
+        }
+        if (right >= 0) break
+        x--
+    }
+    return InkBox(left, top, right, bottom)
+}

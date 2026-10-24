@@ -68,6 +68,21 @@
 </tr>
 </table>
 
+#### 一、MinerU 解析 API（公式 / 表格 / 手写）
+
+Base `https://mineru.net/api/v4`，认证 `Authorization: Bearer <key>`。模型版本固定 `vlm`、语言固定 `ch`、强制 OCR 固定开启（见设置页）。
+
+1. **申请上传地址**
+   `POST file-urls/batch`
+   ```json
+   { "files": [ { "name": "错题.jpg", "is_ocr": true } ],
+     "model_version": "vlm",
+     "language": "ch",
+     "enable_formula": true,
+     "enable_table": true }
+   ```
+   → `data.batch_id` 与 `data.file_urls[]`（与 files 一一对应，按此顺序上传）
+
 2. **上传文件**：`PUT <file_url>`，body 为文件原始字节（无需认证头）。
 
 3. **轮询解析结果**
@@ -199,7 +214,7 @@ powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Tag "v0.0.2"
 
 ```bash
 ./gradlew assembleDebug                  # 构建（本地 local.properties 有 Key 时注入，仅限本机）
-./gradlew testDebugUnitTest              # 运行单元测试（450+ 用例）
+./gradlew testDebugUnitTest              # 运行单元测试（682 用例）
 ```
 
 ## 许可证

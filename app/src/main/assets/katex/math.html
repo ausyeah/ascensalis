@@ -19,12 +19,14 @@
     color: #1B1F26;
     white-space: nowrap;
     /*
-     * 右边/下边留一点余量：getBoundingClientRect() 返回的是排版盒，
-     * 而斜体修正、分式横线等的实际墨水会略微溢出盒外，不留边就会把最右侧切掉一点。
-     * 只加右/下 padding，内容仍然贴住 (0,0)，Android 侧按 (0,0) 起抠图才对得���。
+     * 四边安全 padding：getBoundingClientRect() 返回的是排版盒，而斜体修正、
+     * 分式横线、分式分子/分母、根号钩的实际墨水会略微溢出盒外，不留边就会被切。
+     * 左右各 10：右边吸收斜体修正/右花括号，左边防无左侧间距的字符（如 \lim 的 l）贴缘。
+     * 上下 14/16：分式分子上溢、分母下溢实测约 9~11 CSS px。
+     * 这些 padding 没有排版代价：Android 侧拿到位图后会按不透明像素的包围盒
+     * 把透明边裁掉（MathRenderer.trimTransparent），裁完紧贴墨水，Compose 侧无感。
      */
-    padding-right: 10px;
-    padding-bottom: 6px;
+    padding: 14px 10px 16px 10px;
   }
 
   /*
@@ -41,12 +43,21 @@
     color: #1B1F26;
   }
   #sheet .cell {
-    padding: 12px 10px 14px 0;
+    padding: 12px 0 14px 0;
     /* 不换行：行盒高度完全由本行公式决定，量到的 rect 就是它的实际墨水范围 */
     white-space: nowrap;
   }
+  /*
+   * 右边距放在 .body 上而不是 .cell 上：量到的 rect 是 holder 自己的包围盒，
+   * cell 的 padding 不计入 holder rect，加在 cell 上等于没加。
+   * 四边都要（与 #out 的 padding 同一目的）：吸收斜体修正、分隔符墨水的右缘溢出，
+   * 以及分式分子/分母、根号钩、上下标的上下溢出。
+   * 真机症状（v0.0.30 用户反馈）：\{x_n\} 的右花括号消失、x_n > 0 的 0 被竖向切成两半；
+   * 同类竖向事故：\frac{e^x-1}{x} 分子顶/分母底被切（实测溢出上 8.66/下 10.55 CSS px）。
+   */
   #sheet .body {
     display: inline-block;
+    padding: 14px 10px 16px 10px;
   }
 </style>
 </head>
@@ -103,6 +114,41 @@
   }
 
   /**
+   * 等全部 KaTeX 字体就绪。**测量尺寸之前必须等它。**
+   *
+   * katex.min.css 的 @font-face 没写 font-display，浏览器按默认的
+   * block 期处理：字体下载完成前，用**回退字体的度量**排版。
+   * 于是「渲染完立刻量 getBoundingClientRect()」量到的是回退字体的宽度，
+   * 而 Android 侧等几帧后 view.draw() 抓到的是真 KaTeX 字体（更宽）——
+   * 按窄尺寸切图，公式最右端被整块切掉。
+   *
+   * 真机症状（v0.0.30 用户反馈）：`\{x_n\}` 的右花括号整个消失、
+   * `x_n > 0` 的 `0` 被竖向切成左半边（看着像 `(`），
+   * 而公式中间的字符完好——只有最右端被切，极具迷惑性。
+   *
+   * 本地 file:// 字体下载只要几毫秒，但 block 期的度量错误是**必然**的：
+   * 只要测量发生在字体交换之前，量到的就是窄的。
+   * 所以正确解法不是多等几帧，而是在测量前把字体加载这件事**显式做完**。
+   *
+   * FontFace.load() 对每个 @font-face 逐个触发加载；load() 失败会 reject，
+   * 此时只能按现状继续（与修复前一致），不能让整条渲染链路挂死——
+   * Android 侧的互斥锁还等着这个返回值。
+   */
+  var fontsPromise = null;
+  function fontsReady() {
+    if (!fontsPromise) {
+      fontsPromise = Promise.all(
+        Array.prototype.map.call(document.fonts, function (f) { return f.load(); })
+      ).then(function () {
+        return document.fonts.ready;
+      }).catch(function () {
+        return null;
+      });
+    }
+    return fontsPromise;
+  }
+
+  /**
    * 输出 **MathML**（不是位图）。
    *
    * 用于 HTML 导出：浏览器自带 MathML 渲染能力（Chrome 109+ / Safari / Firefox 均支持），
@@ -128,7 +174,14 @@
     }
   }
 
-  function render(latex, displayMode, maxDevicePx) {
+  /**
+   * 单条渲染。**返回 Promise**（Android 的 evaluateJavascript 会拿到
+   * resolve 后的值，Kotlin 侧 awaitJavascript 无需改动）。
+   *
+   * async 的原因见 [fontsReady]：必须等字体就绪后再量尺寸，
+   * 否则量到的是 block 期回退字体的窄度量，切图切掉右端。
+   */
+  async function render(latex, displayMode, maxDevicePx) {
     var out = document.getElementById('out');
     // 单条路径只抠 #out，所以必须先把 #sheet 藏起来：
     // 两者都是 position:absolute 贴在 (0,0)，不藏会盖在 #out 上，
@@ -157,6 +210,12 @@
     } catch (e) {
       out.textContent = latex;
     }
+
+    // **关键一步**：先把刚插入的 DOM 排一次版（触发字体加载），
+    // 再等字体全部就绪。少这次预排版，document.fonts 里还没有 pending 的
+    // 加载任务，fontsReady() 会直接空转返回。
+    out.getBoundingClientRect();
+    await fontsReady();
 
     var rect = out.getBoundingClientRect();
     // 超宽公式整体缩字号，保证完整落在上限内
@@ -187,8 +246,13 @@
    *
    * 每个公式包在自己的容器里，容器是 inline-block 且不换行，
    * 因此行盒高度由每个公式自己的高度决定，互不干扰。
+   *
+   * **返回 Promise**：内部等字体就绪后再测量，理由同 [render]。
+   * 顺序不能反：必须先把所有公式渲染进 DOM（触发字体加载），
+   * 再一次 fontsReady() 统一等，然后才量——边渲染边量的话，
+   * 先量的公式用的是回退字体度量，照样被切。
    */
-  function renderBatch(items, maxDevicePx) {
+  async function renderBatch(items, maxDevicePx) {
     var dpr = window.devicePixelRatio || 1;
     var limit = Math.min((window.innerWidth || 700), (maxDevicePx || 2048) / dpr);
     var maxW = Math.max(120, limit - 8);
@@ -198,7 +262,7 @@
     sheet.style.display = 'block';
 
     // 排 + 量。偏移和尺寸都从 holder 自己的 rect 取，不受相邻行影响。
-    var out = [];
+    var holders = [];
     for (var i = 0; i < items.length; i++) {
       var cell = document.createElement('div');
       cell.className = 'cell';
@@ -206,6 +270,7 @@
       holder.className = 'body';
       cell.appendChild(holder);
       sheet.appendChild(cell);
+      holders.push(holder);
 
       var fontSize = BASE_PX;
       try {
@@ -221,31 +286,44 @@
 
       // 超宽公式在**渲染阶段**缩字号，保证完整落在上限内。
       // 事后裁剪会把公式右边切掉一半。
-      var rect = holder.getBoundingClientRect();
-      if (rect.width > maxW) {
-        fontSize = Math.max(8, Math.floor(BASE_PX * maxW / rect.width));
+      // 注意 rect.width 含 .body 的 padding-right（见 CSS 注释），
+      // 所以这里的上界比较已经把右安全距算进去了，不会撑爆长卷。
+      var rect0 = holder.getBoundingClientRect();
+      if (rect0.width > maxW) {
+        fontSize = Math.max(8, Math.floor(BASE_PX * maxW / rect0.width));
         holder.style.fontSize = fontSize + 'px';
-        rect = holder.getBoundingClientRect();
       }
+      // 暂存 fontSize，等字体就绪后连同最终 rect 一起输出
+      holders[i].__fontSize = fontSize;
+    }
 
+    // 先全部渲染完（字体加载已触发），再统一等字体，最后一次性测量。
+    // 见函数注释：这个顺序是修复「公式最右端被切」的关键。
+    sheet.getBoundingClientRect();
+    await fontsReady();
+
+    var out = [];
+    for (var j = 0; j < holders.length; j++) {
+      var holder = holders[j];
+      var rect = holder.getBoundingClientRect();
       out.push({
-        k: items[i].k,
+        k: items[j].k,
         x: Math.round(rect.left * dpr),
         y: Math.round(rect.top * dpr),
         w: Math.round(rect.width * dpr),
         h: Math.round(rect.height * dpr),
-        fs: Math.round(fontSize * dpr),
+        fs: Math.round(holder.__fontSize * dpr),
         // 与单条路径同一套判定；PDF 导出走的是批量路径，
         // 漏了这里就会把红色错误原样印到纸上
-        err: looksCorrupted(items[i].t) ? 1 : (hasRenderError(holder) ? 2 : 0)
+        err: looksCorrupted(items[j].t) ? 1 : (hasRenderError(holder) ? 2 : 0)
       });
     }
 
     // Android 侧会按这个高度重新撑大视口再抠图，
     // 所以这里返回的是**内容**高度，不是当前视口高度。
     var h = 0;
-    for (var j = 0; j < out.length; j++) {
-      var bottom = out[j].y + out[j].h;
+    for (var m = 0; m < out.length; m++) {
+      var bottom = out[m].y + out[m].h;
       if (bottom > h) h = bottom;
     }
     // 多留一点行间距余量：最后一个公式的下伸部（分母、根号钩）会略微溢出 rect
