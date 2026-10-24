@@ -361,7 +361,7 @@ private fun ManualEntryDialog(
 // =========================================================================
 
 @Composable
-private fun TimerTab(
+internal fun TimerTab(
     state: PomodoroUiState,
     viewModel: PomodoroViewModel,
     elapsedFlow: StateFlow<Long>
@@ -1445,7 +1445,7 @@ private fun SubjectChip(name: String, selected: Boolean, onClick: () -> Unit) {
  * 也看得到最近一个月的节奏。
  */
 @Composable
-private fun StatsTab(
+internal fun StatsTab(
     state: PomodoroUiState,
     onRangeChange: (StatsRange) -> Unit,
     onShiftDay: (Long) -> Unit,
