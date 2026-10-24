@@ -88,7 +88,7 @@ jobs:
       # 这正是 v0.0.12 之前踩过的坑，绝不允许再犯。
       # fork / PR / main 推送仍走 debug 降级，不影响贡献者。
       - name: Enforce release signing for tag builds (maintainer only)
-        if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'ausyeah/mistake-recorder'
+        if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'ausyeah/ascensalis'
         run: |
           set -euo pipefail
           if [ "${SIGNING:-off}" != "on" ]; then
@@ -173,7 +173,7 @@ jobs:
             refs/heads/main|refs/tags/*) ENFORCE=1 ;;
           esac
           if [ "$EXPECTED" != "$ACTUAL" ]; then
-            if [ "${GITHUB_REPOSITORY}" = "ausyeah/mistake-recorder" ] && [ "$ENFORCE" = "1" ]; then
+            if [ "${GITHUB_REPOSITORY}" = "ausyeah/ascensalis" ] && [ "$ENFORCE" = "1" ]; then
               echo "::error::签名证书与 signing/expected-cert-sha256.txt 不一致"
               echo "::error::已安装的用户将无法升级这个 App。请勿发布，先核对发布密钥。"
               echo "::error::  期望: $EXPECTED"
