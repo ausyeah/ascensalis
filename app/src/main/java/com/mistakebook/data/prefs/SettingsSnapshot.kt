@@ -64,7 +64,14 @@ data class SettingsSnapshot(
     val wordbookDailyGoal: Int = 20,
 
     /** 是否开启「单词书每日目标」本地提醒（到点未达标才通知）。 */
-    val wordbookReminderEnabled: Boolean = true
+    val wordbookReminderEnabled: Boolean = true,
+
+    /**
+     * 考试日期（epochDay，F3 考前排期用）。null = 未设置。
+     * 存 DataStore 而不是 Room：它是一条用户偏好，不是题目数据，
+     * 不值得为它动 schema。
+     */
+    val examDateEpochDay: Long? = null
 ) {
     // ===== 以下三项已固定，不再暴露给用户 =====
     //

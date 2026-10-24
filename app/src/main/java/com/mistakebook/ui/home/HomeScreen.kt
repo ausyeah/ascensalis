@@ -362,6 +362,9 @@ fun HomeScreen(
                 }
             }
 
+            // 考前倒计时（F3）：搜索栏与筛选行之间的常驻卡片，未设日期时是设置入口
+            ExamCountdownCard(container = container)
+
             FilterRow(
                 state = state,
                 onStatusChange = viewModel::setStatus,

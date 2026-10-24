@@ -171,6 +171,13 @@ interface QuestionDao {
     @Query("SELECT knowledgePointsJson FROM questions WHERE deletedAt IS NULL AND knowledgePointsJson != '[]'")
     suspend fun allKnowledgePointsJson(): List<String>
 
+    /**
+     * 考前排期（F3）：只挪 nextReviewAt，不动轮次与掌握状态——
+     * 排期是"什么时候见它"，不是"学得怎么样"。
+     */
+    @Query("UPDATE questions SET nextReviewAt = :epochDay, updatedAt = :now WHERE id = :id")
+    suspend fun updateNextReviewAt(id: Long, epochDay: Long, now: Long)
+
     @Insert
     suspend fun insert(question: Question): Long
 

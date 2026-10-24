@@ -112,7 +112,9 @@ class SettingsStore(context: Context) {
             reminderMinute = prefs[KEY_REMINDER_MINUTE] ?: 0,
             wordbookDailyGoal = (prefs[KEY_WORDBOOK_DAILY_GOAL] ?: DEFAULT_WORDBOOK_DAILY_GOAL)
                 .coerceIn(MIN_WORDBOOK_DAILY_GOAL, MAX_WORDBOOK_DAILY_GOAL),
-            wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true
+            wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true,
+            // DataStore 没有"可空 long"，-1 是"未设置"哨兵
+            examDateEpochDay = (prefs[KEY_EXAM_DATE] ?: -1L).takeIf { it > 0 }
         )
     }
 
@@ -342,6 +344,16 @@ class SettingsStore(context: Context) {
     suspend fun setWordbookReminderEnabled(value: Boolean) =
         editBoolean(KEY_WORDBOOK_REMINDER, value)
 
+    // ===== 考试日期（F3 考前排期） =====
+
+    /** 设置考试日期（epochDay）。传 null 清除。 */
+    suspend fun setExamDate(epochDay: Long?) {
+        appContext.settingsDataStore.edit { prefs ->
+            if (epochDay == null) prefs.remove(KEY_EXAM_DATE)
+            else prefs[KEY_EXAM_DATE] = epochDay
+        }
+    }
+
     // ===== 外观与主题 =====
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -415,6 +427,7 @@ class SettingsStore(context: Context) {
         // 单词书每日目标与提醒
         val KEY_WORDBOOK_DAILY_GOAL = intPreferencesKey("wordbook_daily_goal")
         val KEY_WORDBOOK_REMINDER = booleanPreferencesKey("wordbook_reminder_enabled")
+        val KEY_EXAM_DATE = longPreferencesKey("exam_date_epoch_day")
 
         const val DEFAULT_WORDBOOK_DAILY_GOAL = 20
         const val MIN_WORDBOOK_DAILY_GOAL = 5

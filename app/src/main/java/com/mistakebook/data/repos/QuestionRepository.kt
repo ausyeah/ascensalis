@@ -221,6 +221,19 @@ class QuestionRepository(
     suspend fun hardDelete(ids: List<Long>) = questionDao.hardDelete(ids)
 
     /**
+     * 应用考前排期（F3）：批量把到期题的下一复习日写到规划好的日子。
+     *
+     * 逐条 UPDATE 而不是事务整体替换：中途失败已写入的部分依然成立
+     * （每条独立有效），比"全成或全败"更符合排期的语义。
+     */
+    suspend fun applyExamSchedule(schedule: Map<Long, Long>) {
+        val now = System.currentTimeMillis()
+        schedule.forEach { (id, epochDay) ->
+            questionDao.updateNextReviewAt(id, epochDay, now)
+        }
+    }
+
+    /**
      * 设置「是否会了」。
      * 会了 → MASTERED，nextReviewAt 清空（不再进待复习队列与每日提醒）；
      * 不会 → ACTIVE，nextReviewAt 设为今天，次日提醒会重新算上。
