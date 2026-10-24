@@ -39,6 +39,9 @@ interface PomodoroDao {
     @Query("SELECT * FROM pomodoro_tasks WHERE name = :name AND archived = 0")
     suspend fun findTasksByName(name: String): List<PomodoroTask>
 
+    @Query("SELECT * FROM pomodoro_tasks WHERE id = :id")
+    suspend fun findTaskById(id: Long): PomodoroTask?
+
     @Insert
     suspend fun insertTask(task: PomodoroTask): Long
 
