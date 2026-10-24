@@ -64,7 +64,18 @@ data class SettingsSnapshot(
     val wordbookDailyGoal: Int = 20,
 
     /** 是否开启「单词书每日目标」本地提醒（到点未达标才通知）。 */
-    val wordbookReminderEnabled: Boolean = true
+    val wordbookReminderEnabled: Boolean = true,
+
+    // ===== 番茄钟（T2 到点闭环） =====
+
+    /** 番茄到点自动落库。默认开：到点后用户十有八九忘了点结束，自动记最准。 */
+    val pomodoroAutoRecord: Boolean = true,
+
+    /** 番茄结束后自动进入休息倒计时（休息时长见 [pomodoroBreakMinutes]）。 */
+    val pomodoroBreakLoop: Boolean = false,
+
+    /** 休息时长（分钟），可选 5 / 10。 */
+    val pomodoroBreakMinutes: Int = 10
 ) {
     // ===== 以下三项已固定，不再暴露给用户 =====
     //

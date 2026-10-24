@@ -68,8 +68,13 @@ interface PomodoroDao {
 
     // ------------------------------------------------------------ 统计
 
-    /** 某天总专注秒数。 */
-    @Query("SELECT COALESCE(SUM(durationSec), 0) FROM pomodoro_sessions WHERE day = :day")
+    /** 某天总专注秒数（不含休息，见 BREAK 口径说明）。 */
+    @Query(
+        """
+        SELECT COALESCE(SUM(durationSec), 0) FROM pomodoro_sessions
+        WHERE day = :day AND mode != 'BREAK'
+        """
+    )
     suspend fun totalSecOfDay(day: String): Long
 
     /** 某天完成的番茄数（只认走完目标的那几次）。 */
@@ -85,7 +90,7 @@ interface PomodoroDao {
     @Query(
         """
         SELECT day, SUM(durationSec) AS sec FROM pomodoro_sessions
-        WHERE day >= :fromDay
+        WHERE day >= :fromDay AND mode != 'BREAK'
         GROUP BY day
         ORDER BY day
         """
@@ -99,7 +104,7 @@ interface PomodoroDao {
                COALESCE(SUM(s.durationSec), 0) AS sec,
                COUNT(s.id) AS sessionCount
         FROM pomodoro_tasks t
-        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id AND s.day >= :fromDay
+        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id AND s.day >= :fromDay AND s.mode != 'BREAK'
         WHERE t.archived = 0
         GROUP BY t.id
         ORDER BY sec DESC
@@ -166,7 +171,7 @@ interface PomodoroDao {
         SELECT substr(day, 1, 7) AS month,
                COALESCE(SUM(durationSec), 0) AS sec
         FROM pomodoro_sessions
-        WHERE day >= :fromDay
+        WHERE day >= :fromDay AND mode != 'BREAK'
         GROUP BY month
         ORDER BY month
         """
@@ -179,7 +184,7 @@ interface PomodoroDao {
      * 连续天数要在内存里判：规则是「今天还没学不算断、昨天没学才断」，
      * 这种带业务语义的判断写成 SQL 只会更难维护。
      */
-    @Query("SELECT DISTINCT day FROM pomodoro_sessions WHERE day >= :fromDay ORDER BY day DESC")
+    @Query("SELECT DISTINCT day FROM pomodoro_sessions WHERE day >= :fromDay AND mode != 'BREAK' ORDER BY day DESC")
     suspend fun distinctDays(fromDay: String = ""): List<String>
 
     /**
@@ -188,10 +193,27 @@ interface PomodoroDao {
      * 传空串 `""` 即「全部」——SQLite 里任何非空日期串都 `>= ''`，
      * 这样「全部 / 今日 / 近 7 天 / 近 30 天」共用同一批 SQL，
      * 不必为每个区间各写一套。
+     *
+     * ## BREAK 口径（T2 休息循环）
+     *
+     * 两条规则，不许一刀切：
+     * - **番茄计数类**（pomodoroCountOfDay / pomodoroCountSince）：
+     *   只认 `mode = 'POMODORO'`，维持 v0.0.33 口径不变；
+     * - **时长 / 天数 / 完成率类**（本组其余全部查询）：
+     *   排除 `mode = 'BREAK'`——休息是到点自动落库的可追溯噪声，
+     *   不该稀释专注时长、连续天数和完成率。
+     *   **注意正计时（STOPWATCH）是真实专注，必须继续计入**：
+     *   这里绝不能写成 `mode = 'POMODORO'`，否则正计时用户的全部
+     *   时长会被清零（回归事故）。
      */
 
-    /** 区间内总专注秒数（fromDay 传 "" = 全部）。 */
-    @Query("SELECT COALESCE(SUM(durationSec), 0) FROM pomodoro_sessions WHERE day >= :fromDay")
+    /** 区间内总专注秒数（fromDay 传 "" = 全部；不含休息）。 */
+    @Query(
+        """
+        SELECT COALESCE(SUM(durationSec), 0) FROM pomodoro_sessions
+        WHERE day >= :fromDay AND mode != 'BREAK'
+        """
+    )
     suspend fun totalSecSince(fromDay: String): Long
 
     /** 区间内完成的番茄数（只认 mode = POMODORO 且 completed）。 */
@@ -203,12 +225,22 @@ interface PomodoroDao {
     )
     suspend fun pomodoroCountSince(fromDay: String): Int
 
-    /** 区间内总会话次数（完成率的分母）。 */
-    @Query("SELECT COUNT(*) FROM pomodoro_sessions WHERE day >= :fromDay")
+    /** 区间内总会话次数（完成率的分母；休息会话是自动落库的噪声，不稀释完成率）。 */
+    @Query(
+        """
+        SELECT COUNT(*) FROM pomodoro_sessions
+        WHERE day >= :fromDay AND mode != 'BREAK'
+        """
+    )
     suspend fun sessionCountSince(fromDay: String): Int
 
-    /** 区间内完成次数（完成率的分子）。 */
-    @Query("SELECT COUNT(*) FROM pomodoro_sessions WHERE completed = 1 AND day >= :fromDay")
+    /** 区间内完成次数（完成率的分子；不含休息）。 */
+    @Query(
+        """
+        SELECT COUNT(*) FROM pomodoro_sessions
+        WHERE completed = 1 AND day >= :fromDay AND mode != 'BREAK'
+        """
+    )
     suspend fun completedSessionCount(fromDay: String): Int
 
     /**
@@ -224,7 +256,7 @@ interface PomodoroDao {
                COALESCE(SUM(s.durationSec), 0) AS sec,
                COUNT(s.id) AS sessionCount
         FROM pomodoro_tasks t
-        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id AND s.day >= :fromDay
+        LEFT JOIN pomodoro_sessions s ON s.taskId = t.id AND s.day >= :fromDay AND s.mode != 'BREAK'
         WHERE t.archived = 0
         GROUP BY t.subjectId
         ORDER BY sec DESC

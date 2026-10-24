@@ -112,7 +112,10 @@ class SettingsStore(context: Context) {
             reminderMinute = prefs[KEY_REMINDER_MINUTE] ?: 0,
             wordbookDailyGoal = (prefs[KEY_WORDBOOK_DAILY_GOAL] ?: DEFAULT_WORDBOOK_DAILY_GOAL)
                 .coerceIn(MIN_WORDBOOK_DAILY_GOAL, MAX_WORDBOOK_DAILY_GOAL),
-            wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true
+            wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true,
+            pomodoroAutoRecord = prefs[KEY_POMODORO_AUTO_RECORD] ?: true,
+            pomodoroBreakLoop = prefs[KEY_POMODORO_BREAK_LOOP] ?: false,
+            pomodoroBreakMinutes = prefs[KEY_POMODORO_BREAK_MINUTES] ?: 10
         )
     }
 
@@ -342,6 +345,20 @@ class SettingsStore(context: Context) {
     suspend fun setWordbookReminderEnabled(value: Boolean) =
         editBoolean(KEY_WORDBOOK_REMINDER, value)
 
+    // ===== 番茄钟（T2 到点闭环） =====
+
+    /** 开关「到点自动记录」。 */
+    suspend fun setPomodoroAutoRecord(value: Boolean) =
+        editBoolean(KEY_POMODORO_AUTO_RECORD, value)
+
+    /** 开关「休息循环」。 */
+    suspend fun setPomodoroBreakLoop(value: Boolean) =
+        editBoolean(KEY_POMODORO_BREAK_LOOP, value)
+
+    /** 设置休息时长（分钟），只允许 5 / 10。 */
+    suspend fun setPomodoroBreakMinutes(value: Int) =
+        editInt(KEY_POMODORO_BREAK_MINUTES, if (value == 5) 5 else 10)
+
     // ===== 外观与主题 =====
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -415,6 +432,11 @@ class SettingsStore(context: Context) {
         // 单词书每日目标与提醒
         val KEY_WORDBOOK_DAILY_GOAL = intPreferencesKey("wordbook_daily_goal")
         val KEY_WORDBOOK_REMINDER = booleanPreferencesKey("wordbook_reminder_enabled")
+
+        // 番茄钟（T2）
+        val KEY_POMODORO_AUTO_RECORD = booleanPreferencesKey("pomodoro_auto_record")
+        val KEY_POMODORO_BREAK_LOOP = booleanPreferencesKey("pomodoro_break_loop")
+        val KEY_POMODORO_BREAK_MINUTES = intPreferencesKey("pomodoro_break_minutes")
 
         const val DEFAULT_WORDBOOK_DAILY_GOAL = 20
         const val MIN_WORDBOOK_DAILY_GOAL = 5
