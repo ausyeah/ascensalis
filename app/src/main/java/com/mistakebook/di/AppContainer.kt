@@ -251,7 +251,8 @@ class AppContainer(context: Context) {
             taskRepository = captureTaskRepository,
             mineruClient = mineruClient,
             llmClient = llmClient,
-            settingsStore = settingsStore
+            settingsStore = settingsStore,
+            files = files
         )
     }
 
