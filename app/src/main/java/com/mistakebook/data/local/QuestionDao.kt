@@ -3,6 +3,7 @@ package com.mistakebook.data.local
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.mistakebook.data.local.entities.Question
 import kotlinx.coroutines.flow.Flow
@@ -153,6 +154,22 @@ interface QuestionDao {
 
     @Update
     suspend fun update(question: Question)
+
+    /**
+     * 复习结果原子落库（T1）：一条 review_log + 一次 question 推进，
+     * 任一失败整体回滚。原来这两步是分开写的死代码（ReviewRules 全库无调用方），
+     * 复习状态从不推进、每日提醒永远报全量——闭环接回来之后必须保证
+     * 「记录」与「推进」要么都成功要么都不发生，否则会出现日志有了、
+     * 队列没变的半更新状态。
+     */
+    @Transaction
+    suspend fun applyReviewResult(log: com.mistakebook.data.local.entities.ReviewLog, updated: Question) {
+        insertReviewLog(log)
+        update(updated)
+    }
+
+    @Insert
+    abstract suspend fun insertReviewLog(log: com.mistakebook.data.local.entities.ReviewLog)
 
     @Query("UPDATE questions SET deletedAt = :now, updatedAt = :now WHERE id = :id")
     suspend fun softDelete(id: Long, now: Long)

@@ -42,6 +42,9 @@ object Routes {
     const val QUESTION_EDIT = "questionEdit"
     const val NOTEBOOKS = "notebooks"
 
+    /** 独立复习页（T1）：走完今日到期队列。无参数。 */
+    const val REVIEW = "review"
+
     /** AI 对话：按题目进入。questionId 用 -1 表示自由会话。 */
     const val CHAT = "chat"
 
@@ -118,7 +121,17 @@ fun MistakeBookNavHost(
                 onOpenPrint = { navController.navigate(Routes.PRINT) },
                 onOpenNotebooks = { navController.navigate(Routes.NOTEBOOKS) },
                 onOpenChatList = { navController.navigate(Routes.CHAT_LIST) },
-                onOpenQuestion = { id -> navController.navigate(Routes.detail(id)) }
+                onOpenQuestion = { id -> navController.navigate(Routes.detail(id)) },
+                onStartReview = { navController.navigate(Routes.REVIEW) }
+            )
+        }
+
+        composable(Routes.REVIEW) {
+            com.mistakebook.ui.review.ReviewScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+                // 「去看看错题本」：首页就在栈底，返回即到
+                onGoNotebook = { navController.popBackStack() }
             )
         }
 

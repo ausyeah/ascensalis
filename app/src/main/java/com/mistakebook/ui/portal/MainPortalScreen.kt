@@ -69,7 +69,8 @@ fun MainPortalScreen(
     onOpenPrint: () -> Unit,
     onOpenNotebooks: () -> Unit = {},
     onOpenQuestion: (Long) -> Unit,
-    onOpenChatList: () -> Unit = {}
+    onOpenChatList: () -> Unit = {},
+    onStartReview: () -> Unit = {}
 ) {
     val pagerState = rememberPagerState(initialPage = 0) { 4 }
     val scope = rememberCoroutineScope()
@@ -145,7 +146,8 @@ fun MainPortalScreen(
                         onOpenPrint = onOpenPrint,
                         onOpenNotebooks = onOpenNotebooks,
                         onOpenQuestion = onOpenQuestion,
-                        onOpenChatList = onOpenChatList
+                        onOpenChatList = onOpenChatList,
+                        onStartReview = onStartReview
                     )
                 }
                 1 -> {

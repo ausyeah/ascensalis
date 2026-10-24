@@ -230,6 +230,50 @@ class QuestionRepository(
         )
     }
 
+    /**
+     * 复习结果原子落库（T1 复习闭环）。
+     *
+     * 一次事务完成两件事：
+     * 1. 插入 [ReviewLog]（stageIndex 记**当前**轮次，即评分前的轮次）；
+     * 2. 推进 question：reviewStage / nextReviewAt / status。
+     *
+     * 与 setMastered() 的约定对齐：达到 MAX_STAGE 时 nextReviewAt = null
+     * （不再进队列、不再进每日提醒）。
+     *
+     * 返回是否落库成功。题不存在或 `deletedAt != null`（复习中途被删）
+     * 时静默跳过返回 false——调用方照常切下一题即可，不要报错打断复习流。
+     */
+    suspend fun applyReviewResult(
+        questionId: Long,
+        result: ReviewResult,
+        now: Long = System.currentTimeMillis(),
+        today: LocalDate = LocalDate.now()
+    ): Boolean {
+        val question = questionDao.findById(questionId) ?: return false
+        if (question.deletedAt != null) return false
+        val newStage = ReviewRules.nextStage(question.reviewStage, result)
+        val updated = question.copy(
+            reviewStage = newStage,
+            nextReviewAt = if (newStage >= ReviewRules.MAX_STAGE) {
+                null
+            } else {
+                ReviewRules.nextReviewDay(question.reviewStage, result, today).toEpochDay()
+            },
+            status = ReviewRules.statusFor(newStage, question.status),
+            updatedAt = now
+        )
+        questionDao.applyReviewResult(
+            log = ReviewLog(
+                questionId = questionId,
+                reviewedAt = now,
+                stageIndex = question.reviewStage,
+                result = result
+            ),
+            updated = updated
+        )
+        return true
+    }
+
     private suspend fun resolveSubjectId(draft: QuestionDraft): Long? {
         val id = draft.subjectId
         if (id != null && subjectDao.findById(id) != null) return id
