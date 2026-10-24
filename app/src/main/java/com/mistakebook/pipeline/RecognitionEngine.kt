@@ -56,9 +56,17 @@ class RecognitionEngine(
     fun submit(taskId: Long) = submit(listOf(taskId))
 
     fun cancel(taskId: Long) {
+        // jobs 的取消照常执行（幂等）：把还在跑的协程停掉总没错。
+        // 但**落库要挑状态**（T6）：任务恰好已经 DONE（或早就 FAILED）时，
+        // 无条件的 fail() 会把已完成覆写成「已取消」——用户盯着编辑页
+        // 里的题忽然发现任务显示失败，进度页还回不去了。
         jobs.remove(taskId)?.cancel(CancellationException("已取消"))
         scope.launch {
-            taskRepository.fail(taskId, CANCELLED_MESSAGE, System.currentTimeMillis())
+            val task = taskRepository.findById(taskId) ?: return@launch
+            when (task.status) {
+                TaskStatus.DONE, TaskStatus.FAILED -> return@launch
+                else -> taskRepository.fail(taskId, CANCELLED_MESSAGE, System.currentTimeMillis())
+            }
         }
     }
 
