@@ -13,10 +13,14 @@ import androidx.core.app.NotificationCompat
 import com.mistakebook.MainActivity
 import com.mistakebook.MistakeBookApp
 import com.mistakebook.R
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -35,15 +39,22 @@ import kotlinx.coroutines.launch
  * 而 `shortService` 只有约 3 分钟就会被系统停掉，所以只能用
  * `specialUse`（Manifest 里附了 property 说明用途）。
  *
- * ## 通知为什么用系统 chronometer
+ * ## 通知为什么自己每秒刷文字（不用系统 chronometer）
  *
- * 旧版通知是一段静态文字，用户吐槽「没有具体的时间」。自己每秒
- * `notify()` 刷文字当然行，但那是应用自己在干活；而
- * [NotificationCompat.setUsesChronometer] 把「实时走秒」交给
- * **系统**渲染——锁屏、通知栏、以及 MIUI 的焦点通知（俗称灵动岛）
- * 都会接管这个计时器自己显示，电量与一致性都比应用每秒重发好。
- * 倒计时用 `setChronometerCountDown(true)` + 结束时刻，正计时用
- * 开始时刻，系统自己会算。
+ * 旧版用 [NotificationCompat.setUsesChronometer] + `setChronometerCountDown(true)`，
+ * 把走秒交给系统渲染。实测真机（用户反馈）：**倒计时通知一直显示 0**。
+ *
+ * 根因：chronometer 的 countdown 标志在部分系统/SystemUI 上不生效，
+ * 系统退化成正计时渲染 `now - when`，而 when 是**未来时刻**，
+ * 差值为负被 clamp 成 0——现象就是"通知栏一直 00:00"，且完全看不出是哪坏了。
+ *
+ * 自己每秒 `notify()` 刷一行文字当然不如系统渲染省电，但：
+ * 1. 显示完全可控，"剩余 12:34" 是这行文字本身，不依赖任何系统换算；
+ * 2. 锁屏、通知栏、焦点通知里都是这段文字，行为一致；
+ * 3. 每秒一次 `notify()` 的开销可以忽略（`setOnlyAlertOnce` + `setSilent` 已设，
+ *    不会反复响铃震动）。
+ * 倒计时/正计时/暂停三种形态都在 [buildNotification] 里按状态生成文字，
+ * 暂停时时间冻结，tick 循环随之停掉，不空转。
  */
 class PomodoroService : Service() {
 
@@ -52,6 +63,15 @@ class PomodoroService : Service() {
 
     /** 最近一次启动通知时带的任务名：重建通知（暂停/继续）时沿用。 */
     private var lastTaskName: String = ""
+
+    /**
+     * 每秒刷新通知文字的循环。运行中才跑；暂停时间冻结、结束即停。
+     *
+     * 用 [refreshNotification] 重建整条通知而不是只改文字：
+     * 倒计时到点要切换成"已完成"、暂停要撤掉计时态，
+     * 重建时这些分支天然会走到，不用另养一套状态。
+     */
+    private var tickJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -64,12 +84,14 @@ class PomodoroService : Service() {
                 // 通知里的「暂停」直接操作计时核心单例：界面每秒一轮的
                 // 同步循环会把新状态带到 UI，不需要（也不该）反向依赖界面。
                 timer.pause()
+                stopTicking()
                 refreshNotification()
                 return START_NOT_STICKY
             }
 
             ACTION_RESUME -> {
                 timer.resume()
+                startTicking()
                 refreshNotification()
                 return START_NOT_STICKY
             }
@@ -88,12 +110,30 @@ class PomodoroService : Service() {
 
         lastTaskName = intent?.getStringExtra(EXTRA_TASK).orEmpty()
         startForeground(NOTIFICATION_ID, buildNotification(lastTaskName))
+        startTicking()
         return START_STICKY
     }
 
     override fun onDestroy() {
+        stopTicking()
         scope.cancel()
         super.onDestroy()
+    }
+
+    /** 启动每秒刷新；已在跑就不重复起（重复 startForeground 会走到这里）。 */
+    private fun startTicking() {
+        if (tickJob?.isActive == true) return
+        tickJob = scope.launch {
+            while (isActive) {
+                delay(1000)
+                refreshNotification()
+            }
+        }
+    }
+
+    private fun stopTicking() {
+        tickJob?.cancel()
+        tickJob = null
     }
 
     /** 用当前计时状态重建通知（暂停/继续后调用）。 */
@@ -132,19 +172,13 @@ class PomodoroService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOnlyAlertOnce(true)
 
-        // 运行中：把走秒交给系统 chronometer（锁屏/焦点通知会接管显示）。
-        // 暂停时撤掉 chronometer，改用静态文字——否则系统会继续跑秒，
-        // 显示的时间比实际暂停的多。
+        // 运行中：每秒重刷的静态文字。见类文档——系统 chronometer 的
+        // countdown 在部分系统上失效会一直显示 0，不能再用。
+        // 暂停时时间冻结，tick 循环停掉，不会"暂停了还在走秒"。
         if (running && state.targetMs > 0L) {
-            builder.setUsesChronometer(true)
-                .setChronometerCountDown(true)
-                .setWhen(System.currentTimeMillis() + remaining)
-                .setContentText("剩余 ${formatClock(remaining)}")
+            builder.setContentText("剩余 ${formatClock(remaining)}")
         } else if (running) {
-            builder.setUsesChronometer(true)
-                .setChronometerCountDown(false)
-                .setWhen(System.currentTimeMillis() - elapsed)
-                .setContentText("已专注 ${formatClock(elapsed)}")
+            builder.setContentText("已专注 ${formatClock(elapsed)}")
         } else {
             builder.setContentText(
                 if (state.targetMs > 0L) "已暂停 · 剩余 ${formatClock(remaining)}"
