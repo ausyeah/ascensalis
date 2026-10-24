@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.BarChart
 import kotlin.math.roundToInt
 import com.mistakebook.ui.theme.DeleteReveal
 import androidx.compose.material.icons.Icons
@@ -234,6 +235,8 @@ fun HomeScreen(
     var showWeeklyReport by remember { mutableStateOf(false) }
     // 思维导图（F4）：同上，轻量弹层入口
     var showMindmap by remember { mutableStateOf(false) }
+    // 错题统计（F5）：分布图表弹层
+    var showStats by remember { mutableStateOf(false) }
 
     // 相册入口直接拉起系统选择器：原先中间还夹一个「从相册选择」页，
     // 整页只有一个按钮，等于多点一次屏幕才能到真正的选择器，已删除。
@@ -368,6 +371,15 @@ fun HomeScreen(
                     Icon(
                         imageVector = Icons.Default.AccountTree,
                         contentDescription = stringResource(R.string.mindmap_title),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                // 错题统计（F5）：错因/难度/学科/知识点分布
+                IconButton(onClick = { showStats = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.BarChart,
+                        contentDescription = stringResource(R.string.stats_title),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(22.dp)
                     )
@@ -567,6 +579,13 @@ fun HomeScreen(
         MindmapDialog(
             container = container,
             onDismiss = { showMindmap = false }
+        )
+    }
+
+    if (showStats) {
+        QuestionStatsDialog(
+            container = container,
+            onDismiss = { showStats = false }
         )
     }
 }

@@ -171,6 +171,24 @@ interface QuestionDao {
     @Query("SELECT knowledgePointsJson FROM questions WHERE deletedAt IS NULL AND knowledgePointsJson != '[]'")
     suspend fun allKnowledgePointsJson(): List<String>
 
+    // ===== 错题统计页（F5）聚合 =====
+
+    @Query(
+        """
+        SELECT subjectId AS subjectId, COUNT(*) AS count FROM questions
+        WHERE deletedAt IS NULL GROUP BY subjectId
+        """
+    )
+    suspend fun subjectDistribution(): List<SubjectCountRow>
+
+    @Query(
+        """
+        SELECT CAST(difficulty AS TEXT) AS name, COUNT(*) AS count FROM questions
+        WHERE deletedAt IS NULL GROUP BY difficulty ORDER BY difficulty
+        """
+    )
+    suspend fun difficultyDistribution(): List<NameCount>
+
     /**
      * 思维导图（F4）用：按学科过滤的知识点 JSON 清单。
      * [subjectFilter] 传 0 表示不限学科（与列表查询的约定一致）。
@@ -227,5 +245,11 @@ data class QuestionTitleRow(
  */
 data class NameCount(
     val name: String,
+    val count: Int
+)
+
+/** 学科分布行（统计页用）：subjectId 可空（未分学科的题）。 */
+data class SubjectCountRow(
+    val subjectId: Long?,
     val count: Int
 )
