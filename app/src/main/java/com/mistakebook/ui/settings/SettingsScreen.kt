@@ -61,7 +61,6 @@ fun SettingsScreen(
     var showAddProfile by remember { mutableStateOf(false) }
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
-    var showModels by remember { mutableStateOf(false) }
 
     val restoreLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -152,6 +151,12 @@ fun SettingsScreen(
 
             // ---- 使用偏好 ----
             SettingsSectionHeader("使用偏好")
+            // 网络代理紧跟主题：都是「打开设置最常改」的全局行为
+            NetworkProxySection(
+                state = state,
+                viewModel = viewModel
+            )
+
             PrintDefaultsSection(
                 state = state,
                 viewModel = viewModel
@@ -177,8 +182,7 @@ fun SettingsScreen(
             LlmProfilesSection(
                 state = state,
                 viewModel = viewModel,
-                onAddProfileClick = { showAddProfile = true },
-                onShowModelsClick = { showModels = true }
+                onAddProfileClick = { showAddProfile = true }
             )
 
             // 大模型用量紧跟大模型配置：请求次数 / 输入 / 输出 / 缓存命中。
@@ -253,23 +257,6 @@ fun SettingsScreen(
                         "已设为 %02d:%02d".format(hour, minute)
                     )
                 }
-            }
-        )
-    }
-
-    if (showModels) {
-        SettingsModelsDialog(
-            models = state.models,
-            pickedModel = state.pickedModel,
-            loadingModels = state.loadingModels,
-            onDismiss = { showModels = false },
-            onPickModel = { model -> viewModel.pickModel(model) },
-            onFetchModels = {
-                val draft = state.snapshot.activeProfile
-                if (draft != null) {
-                    viewModel.fetchModels(draft)
-                }
-                showModels = false
             }
         )
     }

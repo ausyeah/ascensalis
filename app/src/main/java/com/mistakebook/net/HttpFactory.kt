@@ -32,6 +32,9 @@ object HttpFactory {
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .callTimeout(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            // 代理规则走 NetworkRouter：设置页改模式后下一个请求即生效，
+            // 不需要（也无法）重建这里建好的客户端。
+            .proxySelector(NetworkRouter.proxySelector)
             .addInterceptor(loggingInterceptor())
             .build()
 

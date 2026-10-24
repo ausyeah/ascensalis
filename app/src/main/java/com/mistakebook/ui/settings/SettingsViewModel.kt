@@ -2,8 +2,8 @@ package com.mistakebook.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mistakebook.data.prefs.LlmKeyEntry
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.prefs.NetworkMode
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.SettingsSnapshot
 import com.mistakebook.data.prefs.SettingsStore
@@ -54,9 +54,7 @@ data class SettingsUiState(
     /** 正在测试的配置 id；`null` 表示当前没有测试在进行。 */
     val llmTestingProfileId: String? = null,
     val loadingModels: Boolean = false,
-    val models: List<String> = emptyList(),
     val modelsError: String? = null,
-    val pickedModel: String? = null,
 
     /**
      * **按配置 id 归���**的已拉取模型列表。
@@ -87,9 +85,7 @@ data class SettingsUiState(
 // 测试连接的瞬时状态
 /** 拉模型列表相关的一组状态（合并进 combine，避免超过 5 个参数的上限）。 */
 private data class ModelsState(
-    val list: List<String>,
     val error: String?,
-    val picked: String?,
     val byProfile: Map<String, List<String>>,
     val sourcesByProfile: Map<String, Map<String, String>>
 )
@@ -123,12 +119,10 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val mineruTestOk = MutableStateFlow(false)
     private val llmTestingProfileId = MutableStateFlow<String?>(null)
     private val llmTestResults = MutableStateFlow<Map<String, TestOutcome>>(emptyMap())
-    private val models = MutableStateFlow<List<String>>(emptyList())
     private val fetchedModelsByProfile = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     /** 每个模型是从哪把 key 拉到的（profileId → model → 「主 Key」/「Key 2」）。 */
     private val modelSourcesByProfile = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
     private val modelsError = MutableStateFlow<String?>(null)
-    private val pickedModel = MutableStateFlow<String?>(null)
     private val backupMessage = MutableStateFlow<String?>(null)
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -143,15 +137,13 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             combine(llmTestingProfileId, llmTestResults) { id, map -> id to map }
         ) { flags, llm -> TestState(flags, llm.first, llm.second) },
         combine(
-            models, modelsError, pickedModel, fetchedModelsByProfile, modelSourcesByProfile
+            modelsError, fetchedModelsByProfile, modelSourcesByProfile
         ) { values ->
             @Suppress("UNCHECKED_CAST")
             ModelsState(
-                list = values[0] as List<String>,
-                error = values[1] as String?,
-                picked = values[2] as String?,
-                byProfile = values[3] as Map<String, List<String>>,
-                sourcesByProfile = values[4] as Map<String, Map<String, String>>
+                error = values[0] as String?,
+                byProfile = values[1] as Map<String, List<String>>,
+                sourcesByProfile = values[2] as Map<String, Map<String, String>>
             )
         },
         backupMessage
@@ -164,9 +156,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             mineruTestOk = test.mineruOk,
             llmTestResults = test.llmOutcomes,
             llmTestingProfileId = test.llmTestingId,
-            models = modelsPair.list,
             modelsError = modelsPair.error,
-            pickedModel = modelsPair.picked,
             fetchedModelsByProfile = modelsPair.byProfile,
             modelSourcesByProfile = modelsPair.sourcesByProfile,
             backupMessage = backup
@@ -185,6 +175,18 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         // 配置改了，之前那次测试的结论就不再代表当前配置
         clearLlmTestResult(current.id)
         store.upsertProfile(profile.copy(id = current.id))
+    }
+
+    /**
+     * 保存**指定**那一套配置（按草稿自带的 id）。
+     *
+     * 展开式交互下用户可以编辑任意一套配置（不只是当前使用的那套），
+     * 此时若还走 [saveActiveProfile]，B 的草稿会被存进 A 的 id——
+     * 点开 B 改一堆，保存后 A 变了、B 原封不动。
+     */
+    fun saveProfile(profile: LlmProfile) = viewModelScope.launch {
+        clearLlmTestResult(profile.id)
+        store.upsertProfile(profile)
     }
 
     fun addProfile(profile: LlmProfile) = viewModelScope.launch {
@@ -335,19 +337,19 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
      * 其余 key 供应的模型一个都看不见——也就无从勾选，更谈不上调用。
      *
      * 所以逐把 key 探测一次，把结果**合并去重**成一个完整模型池；
-     * 同时记下「哪个模型是哪把 key 看到的」，据此自动把模型绑到能调用它的
-     * key 上（用户不必手动在每把 key 下面填模型名）。
+     * 同时生成两张表：
+     * - **路由表**（model -> keyId）：主 key 看得见的模型一律走主 key，
+     *   只有附加 key 看得见的才绑到那把 key。用户不填、也看不到这张表，
+     *   保存后 [LlmProfile.resolveKey] 按它找到正确的 key；
+     * - **来源标注**（model -> 「主 Key、Key 2」）：给用户看这个模型
+     *   有几把钥匙能开。
      *
-     * ## 绑定策略：主 key 优先，附加 key 只补位
-     *
-     * 一个模型如果主 key 也能调、附加 key 也能调，就**不绑**，让它走主 key
-     * （主 key 通常是主账号，额度与稳定性最好）；只有主 key 看不见的模型，
-     * 才绑到能看见它的那把附加 key 上。这样合并出来的池子里的**每一个**
-     * 模型都一定有 key 能调它——这正是「选好之后都能够调用」的保证。
+     * 两张表合起来保证：**合并池里的每一个模型都一定有 key 能调它**——
+     * 这正是「选好之后都能够调用」的承诺。
      */
     fun fetchModels(
         draft: LlmProfile,
-        onReady: (List<String>, List<LlmKeyEntry>) -> Unit = { _, _ -> }
+        onReady: (List<String>, Map<String, String>) -> Unit = { _, _ -> }
     ) {
         viewModelScope.launch {
             loadingModels.value = true
@@ -376,7 +378,6 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             seen.values.forEach { merged += it }
 
             if (merged.isEmpty()) {
-                models.value = emptyList()
                 fetchedModelsByProfile.value = fetchedModelsByProfile.value - draft.id
                 modelSourcesByProfile.value = modelSourcesByProfile.value - draft.id
                 loadingModels.value = false
@@ -390,51 +391,48 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
             val mainModels = seen[LlmProfile.MAIN_KEY_ID].orEmpty().toSet()
 
-            // model -> 来源标签（给用户看「这把钥匙是谁的」）
-            val labelOf = mutableMapOf<String, String>()
-            keys.forEachIndexed { index, entry ->
-                val label = if (entry.id == LlmProfile.MAIN_KEY_ID) "主 Key" else "Key ${index + 1}"
-                seen[entry.id].orEmpty().forEach { m ->
-                    // 主 key 能看到就算主 key 的：绑定策略是主 key 优先
-                    if (m !in labelOf || entry.id == LlmProfile.MAIN_KEY_ID) {
-                        labelOf[m] = label
+            // keyId -> 展示标签（「主 Key」/「Key 2」）
+            val labelOfKey = keys.associate { entry ->
+                entry.id to if (entry.id == LlmProfile.MAIN_KEY_ID) "主 Key"
+                else "Key ${keys.indexOf(entry) + 1}"
+            }
+
+            // model -> 看得见它的全部 key 标签（灰色小字，展示用）
+            val sources = mutableMapOf<String, String>()
+            merged.forEach { m ->
+                val labels = keys.filter { seen[it.id]?.contains(m) == true }
+                    .mapNotNull { labelOfKey[it.id] }
+                if (labels.isNotEmpty()) sources[m] = labels.joinToString("、")
+            }
+
+            // model -> keyId 路由表：主 key 优先，只有主 key 看不见的才绑附加 key
+            val bindings = mutableMapOf<String, String>()
+            merged.forEach { m ->
+                if (m in mainModels) {
+                    bindings[m] = LlmProfile.MAIN_KEY_ID
+                } else {
+                    val extra = keys.firstOrNull {
+                        it.id != LlmProfile.MAIN_KEY_ID && seen[it.id]?.contains(m) == true
                     }
+                    bindings[m] = extra?.id ?: LlmProfile.MAIN_KEY_ID
                 }
             }
 
-            // 自动绑定：只绑「主 key 看不见」的那些模型给能看到它的附加 key，
-            // 用户手填的绑定保留（可能在探测失败的情况下仍然有效）。
-            val boundKeys = draft.extraKeys.map { entry ->
-                if (entry.key.isBlank()) return@map entry
-                val visible = seen[entry.id].orEmpty().filter { it !in mainModels }
-                val union = LinkedHashSet<String>(entry.models)
-                union += visible
-                entry.copy(models = union.toList().distinct())
-            }
-
             val list = merged.toList()
-            models.value = list
             fetchedModelsByProfile.value = fetchedModelsByProfile.value + (draft.id to list)
-            modelSourcesByProfile.value = modelSourcesByProfile.value + (draft.id to labelOf)
+            modelSourcesByProfile.value = modelSourcesByProfile.value + (draft.id to sources)
             loadingModels.value = false
-            // 直接把选择弹窗打开：用户点这个按钮就是想选模型，
-            // 让他再点一次「可用模型」纯属多余
-            onReady(list, boundKeys)
+            onReady(list, bindings)
         }
     }
 
     fun consumeModels() {
-        models.value = emptyList()
         modelsError.value = null
     }
 
-    /** 从模型列表里选一个，回填到当前配置的模型输入框。 */
-    fun pickModel(model: String) {
-        pickedModel.value = model
-    }
-
-    fun consumePickedModel() {
-        pickedModel.value = null
+    /** 设置网络出口模式（系统代理 / 直连 / 自动）。 */
+    fun setNetworkMode(mode: NetworkMode) = viewModelScope.launch {
+        store.setNetworkMode(mode)
     }
 
     private fun describeError(error: ApiError, prefix: String): String {

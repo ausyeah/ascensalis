@@ -245,16 +245,17 @@
     <string name="settings_base_url">Base URL</string>
     <string name="settings_api_key">API Key</string>
     <string name="settings_model">模型名称</string>
-    <string name="settings_model_hint">点右侧按钮自动获取，也可手填</string>
-    <!-- 多 Key：中转站场景，一个 URL 配多个 key，各管不同模型 -->
+    <string name="settings_model_hint">手动填写，或在下方模型列表点「设为主模型」</string>
+    <!-- 多 Key：中转站场景，一个 URL 配多个 key，模型合并池 + 自动路由 -->
     <string name="settings_extra_keys">附加 Key（同一个 URL 下多 Key）</string>
-    <string name="settings_extra_keys_hint">中转站常用：一个 URL 下多个 Key，各自可用模型不同。填了模型名就绑定到该 Key，留空则作兜底。</string>
+    <string name="settings_extra_keys_hint">中转站常用：一个 URL 下多个 Key，各自可用模型不同。每把 Key 都可独立查看、独立删除；拉取模型时会自动合并所有 Key 可见的模型并分配路由。</string>
     <string name="settings_add_key">添加 Key</string>
-    <string name="settings_key_models_hint">该 Key 负责的模型（逗号分隔）</string>
     <string name="settings_remove_key">删除该 Key</string>
-    <string name="settings_provider_models">本配置可用的模型</string>
-    <string name="settings_provider_models_hint">逗号分隔。填了之后对话页可直接切换模型</string>
-    <string name="settings_pick_provider_models">勾选本配置可用的模型</string>
+    <!-- 模型获取与选择：一键拉取所有 Key 可见模型，勾选后进对话页选项 -->
+    <string name="settings_models_fetch_title">模型获取与选择</string>
+    <string name="settings_models_fetch_hint">一键获取该 URL 下所有 Key 可见的模型并合并。勾选的模型才会出现在对话页的模型选项里，每个模型自动路由到能调用它的 Key。</string>
+    <string name="settings_pick_provider_models_count">共 %1$d 个模型，勾选可用范围：</string>
+    <string name="settings_fetching_models">获取中…</string>
     <string name="settings_set_as_main">设为主模型</string>
     <string name="settings_select_all">全选</string>
     <string name="settings_select_none">全不选</string>
@@ -280,6 +281,16 @@
     <string name="settings_theme_hint_light">已固定使用经典浅色暖纸护眼主题</string>
     <string name="settings_theme_hint_dark">已固定使用墨砚深色夜读主题</string>
 
+    <!-- 网络代理：系统代理 / 直连 / 自动（MinerU 国内服务默认直连） -->
+    <string name="settings_network_title">网络代理</string>
+    <string name="settings_network_desc">选择 App 的网络请求怎么走。MinerU 是国内服务，走代理常常连不上。</string>
+    <string name="settings_network_system">系统代理</string>
+    <string name="settings_network_direct">直连</string>
+    <string name="settings_network_auto">自动</string>
+    <string name="settings_network_hint_system">所有请求都跟随系统代理（Wi-Fi 代理 / 系统 VPN 代填的代理）。</string>
+    <string name="settings_network_hint_direct">所有请求都直连，忽略系统代理。适合代理规则漏放行国内服务的场景。</string>
+    <string name="settings_network_hint_auto">MinerU 等国内服务直连，大模型等其余请求跟随系统代理（推荐）。</string>
+
     <string name="settings_print_defaults">打印默认项</string>
     <string name="settings_review_reminder">每日复习提醒</string>
     <string name="settings_reminder_time">提醒时间</string>
@@ -288,8 +299,6 @@
     <string name="settings_blank_height_title">重做区高度</string>
     <string name="settings_blank_height_range">%1$d pt</string>
     <string name="settings_fetch_models">获取模型列表</string>
-    <string name="settings_models_title">可用模型</string>
-    <string name="settings_models_pick_hint">点选后填入模型名称</string>
     <string name="settings_test_reminder_done">已触发一次提醒检查</string>
     <string name="settings_test_connection">测试连接</string>
     <string name="settings_test_mineru">测试 MinerU</string>

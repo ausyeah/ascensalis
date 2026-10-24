@@ -23,11 +23,15 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Whatshot
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -73,10 +77,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.data.prefs.LlmKeyEntry
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.prefs.NetworkMode
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.ThemeMode
 import com.mistakebook.data.prefs.UsageSnapshot
@@ -488,7 +494,6 @@ internal fun PasswordField(label: String, value: String, onValueChange: (String)
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ProfileRow(
     profile: LlmProfile,
@@ -499,10 +504,11 @@ internal fun ProfileRow(
     /**
      * 拉模型列表。传的是**当前输入框内容**，不是已保存的配置——
      * 否则「填了 URL 和 Key 但没按保存」时必然失败。
+     *
+     * 回调带两样东西：合并后的模型池、以及**自动生成的路由表**
+     * （model -> keyId，哪个模型走哪把 key，由探测结果决定，不用用户手填）。
      */
-    // 拉模型的结果回调带两样东西：合并后的模型池、以及**自动绑定后的 key 列表**
-    // （哪个模型归哪把 key 调，由探测结果决定，不用用户手填）。
-    onFetchModels: (LlmProfile, (List<String>, List<LlmKeyEntry>) -> Unit) -> Unit,
+    onFetchModels: (LlmProfile, (List<String>, Map<String, String>) -> Unit) -> Unit,
     /** 每个模型是从哪把 key 拉到的（「主 Key」/「Key 2」）。 */
     modelSources: Map<String, String> = emptyMap(),
     onTest: (LlmProfile) -> Unit,
@@ -529,8 +535,6 @@ internal fun ProfileRow(
     result: String?,
     resultOk: Boolean,
     fetchingModels: Boolean = false,
-    pickedModel: String? = null,
-    onPickedModelConsumed: () -> Unit = {},
 
     /**
      * 这套配置**已拉取到的模型列表**（按配置 id 归属）。
@@ -540,29 +544,33 @@ internal fun ProfileRow(
      *
      * 所以拉到列表后不能只让用户「挑一个填进模型名」——
      * 而是要能**勾选若干个**作为「本配置可用模型」，
-     * 对话页据此提供模型切换。
+     * 对话页据此提供模型切换；没勾选的不出现。
      */
     fetchedModels: List<String> = emptyList()
 ) {
+    // 展开态跟着配置 id 走：点标题栏展开/收起， RadioButton 仍负责「当前使用」
+    var expanded by remember(profile.id) { mutableStateOf(selected) }
     var name by remember(profile.id) { mutableStateOf(profile.name) }
     var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
     var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
     var model by remember(profile.id) { mutableStateOf(profile.model) }
 
-    // **附加 Key 池**：同一个 baseUrl 下的其他 key，各自绑定一批模型。
+    // **附加 Key 池**：同一个 baseUrl 下的其他 key。
     // 中转站（one-api / new-api）就是这个形态：一个 URL、多份 key，
-    // 每份 key 的可用模型与额度都不同。
+    // 每份 key 的可用模型与额度都不同。哪把 key 调哪个模型由拉列表时
+    // 自动生成的路由表决定，不需要（也不再提供）手填绑定。
     var extraKeys by remember(profile.id) {
         mutableStateOf(profile.extraKeys.toList())
     }
 
-    // **本 provider 供应的模型列表**：中转站常挂着几十个模型，
-    // 用户想在 App 里直接切着用，而不是为每个模型各建一套配置。
-    var providerModelList by remember(profile.id) {
+    // **勾选的可用模型**：对话页的模型选项只从这里出，没勾选的不出现。
+    var checkedModels by remember(profile.id) {
         mutableStateOf(profile.models.toList())
     }
-    var providerModelsText by remember(profile.id) {
-        mutableStateOf(profile.models.joinToString(", "))
+
+    // **模型 -> keyId 路由表**：拉列表时自动生成，用户不填也看不到。
+    var modelKeys by remember(profile.id) {
+        mutableStateOf(profile.modelKeys)
     }
 
     // 这个模型能不能直接看图。不识图的模型在对话里收到图片时，
@@ -576,22 +584,13 @@ internal fun ProfileRow(
         apiKey = apiKey,
         model = model,
         supportsVision = supportsVision,
-        models = providerModelList,
-        extraKeys = extraKeys
+        models = checkedModels,
+        extraKeys = extraKeys,
+        modelKeys = modelKeys
     )
 
     // 只有域名和 Key 齐了才能发请求；模型名**不**参与判断
     val canRequest = baseUrl.isNotBlank() && apiKey.isNotBlank()
-
-    // 模型列表里选中某个模型后回填到输入框
-    LaunchedEffect(pickedModel) {
-        if (!pickedModel.isNullOrBlank()) {
-            model = pickedModel
-            // 回填也是改动：换了个模型，之前那次的测试结论不再作数
-            onDraftChanged()
-            onPickedModelConsumed()
-        }
-    }
 
     Surface(
         shape = MaterialTheme.shapes.small,
@@ -599,7 +598,14 @@ internal fun ProfileRow(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // 标题栏：点整行展开/收起配置详情；RadioButton 仍负责标记「当前使用」
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 RadioButton(selected = selected, onClick = onSelect)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -614,14 +620,19 @@ internal fun ProfileRow(
                         )
                     }
                 }
-                IconButton(onClick = onDelete, enabled = profile.model.isNotBlank()) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                IconButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,
                         contentDescription = stringResource(R.string.settings_delete_profile)
                     )
                 }
             }
-            if (selected) {
+            if (expanded) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it; onDraftChanged() },
@@ -650,8 +661,9 @@ internal fun ProfileRow(
                 // 用户诉求：「不能给一个 URL 配置多个 key，从而实现一个 provider
                 // 供应多种模型，适配中转站实用」。
                 //
-                // 做法：主 Key 之外可以再加若干 Key，每个 Key 声明自己管哪些模型；
-                // 发请求时按模型名反查该用哪个 Key。模型名留空 = 通用兜底 Key。
+                // 做法：主 Key 之外可以再加若干 Key。**每把 Key 独立查看 / 独立删除**，
+                // 不再手填「该 Key 负责哪些模型」——拉模型列表时会逐把 Key 探测，
+                // 自动生成 model -> keyId 路由表，用户勾选模型即可调用。
                 Text(
                     text = stringResource(R.string.settings_extra_keys),
                     style = MaterialTheme.typography.bodyMedium
@@ -663,44 +675,20 @@ internal fun ProfileRow(
                 )
                 extraKeys.forEachIndexed { index, entry ->
                     Spacer(Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = entry.key,
-                            onValueChange = { value ->
-                                extraKeys = extraKeys.toMutableList().also {
-                                    it[index] = entry.copy(key = value)
-                                }
-                                onDraftChanged()
-                            },
-                            label = { Text(stringResource(R.string.settings_api_key)) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = {
-                            extraKeys = extraKeys.toMutableList().also { it.removeAt(index) }
-                            onDraftChanged()
-                        }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.settings_remove_key)
-                            )
-                        }
-                    }
-                    OutlinedTextField(
-                        value = entry.models.joinToString(", "),
-                        onValueChange = { value ->
-                            val models = value.split(',', '，')
-                                .map { it.trim() }
-                                .filter { it.isNotEmpty() }
+                    // 每把附加 Key 自带「显示 / 隐藏」与删除：多把 Key 长得一样，
+                    // 不能显示就没法确认哪把是哪把，更不能单独删掉失效的那把。
+                    ExtraKeyRow(
+                        entry = entry,
+                        onChange = { value ->
                             extraKeys = extraKeys.toMutableList().also {
-                                it[index] = entry.copy(models = models)
+                                it[index] = entry.copy(key = value)
                             }
                             onDraftChanged()
                         },
-                        label = { Text(stringResource(R.string.settings_key_models_hint)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        onRemove = {
+                            extraKeys = extraKeys.toMutableList().also { it.removeAt(index) }
+                            onDraftChanged()
+                        }
                     )
                 }
                 Spacer(Modifier.height(6.dp))
@@ -715,91 +703,59 @@ internal fun ProfileRow(
                     Spacer(Modifier.width(4.dp))
                     Text(stringResource(R.string.settings_add_key))
                 }
-                // 这个配置实际能用哪些模型：主模型 + 各 Key 绑定的模型。
-                val providerModels = remember(extraKeys, model, providerModelList) {
-                    buildList {
-                        if (model.isNotBlank()) add(model.trim())
-                        providerModelList.filter { it.isNotBlank() }.forEach { add(it.trim()) }
-                        extraKeys.forEach { e ->
-                            e.models.filter { it.isNotBlank() }.forEach { add(it.trim()) }
-                        }
-                    }.distinct()
-                }
-                if (providerModels.size > 1) {
-                    Text(
-                        text = stringResource(R.string.settings_provider_models) + "：" +
-                            providerModels.joinToString(", "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it; onDraftChanged() },
-                    label = { Text(stringResource(R.string.settings_model)) },
-                    placeholder = { Text(stringResource(R.string.settings_model_hint)) },
-                    singleLine = true,
-                    // 尾部的下拉按钮：点了直接拉列表并弹选择框。
-                    // 原来这个功能是单独一个「可用模型」按钮，且要求模型名非空才显示——
-                    // 而拉列表的目的正是拿到模型名，等于死锁。
-                    trailingIcon = {
-                        IconButton(
-                            onClick = {
-                                onFetchModels(draft()) { _, bindings ->
-                                    // 探测出「哪个模型归哪把 key」后写回草稿：
-                                    // 保存之后 resolveKey 才能按模型名找到正确的 key，
-                                    // 选了就能调，而不是只有主 key 那几个模型真能用。
-                                    extraKeys = bindings
-                                    onDraftChanged()
-                                }
-                            },
-                            enabled = canRequest && !fetchingModels
-                        ) {
-                            if (fetchingModels) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = stringResource(R.string.settings_fetch_models)
-                                )
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(Modifier.height(8.dp))
-                // **本 provider 供应的模型列表**（中转站常挂几十个模型）。
-                // 填了之后，对话页就能直接切模型，不用为每个模型各建一套配置。
-                OutlinedTextField(
-                    value = providerModelsText,
-                    onValueChange = { value ->
-                        providerModelsText = value
-                        providerModelList = value.split(',', '，')
-                            .map { it.trim() }
-                            .filter { it.isNotEmpty() }
-                            .distinct()
-                        onDraftChanged()
-                    },
-                    label = { Text(stringResource(R.string.settings_provider_models)) },
-                    placeholder = { Text(stringResource(R.string.settings_provider_models_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // ===== 模型勾选区 =====
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(12.dp))
+                // ===== 模型获取与选择 =====
                 //
-                // 拉到的模型列表直接列出来让用户**勾选**哪些算「本配置可用模型」。
-                // 勾选结果写进 providerModelList（= profile.models），
-                // 对话页据此提供模型切换。
+                // 一键获取该 URL 下**所有 Key**可见的模型，合并去重后勾选。
+                // 勾选的模型写进 profile.models——对话页的模型选项只从这里出，
+                // 没勾选的不出现。路由表（model -> keyId）在拉取时自动生成，
+                // 保存后 resolveKey 按它找到正确的 Key，选任何一个都调得动。
+                Text(
+                    text = stringResource(R.string.settings_models_fetch_title),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = stringResource(R.string.settings_models_fetch_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        onFetchModels(draft()) { _, bindings ->
+                            // 探测出的路由表写回草稿：保存之后 resolveKey
+                            // 才能按模型名找到正确的 key，选了就能调。
+                            modelKeys = bindings
+                            onDraftChanged()
+                        }
+                    },
+                    enabled = canRequest && !fetchingModels,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (fetchingModels) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.settings_fetching_models))
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.settings_fetch_models))
+                    }
+                }
+
                 if (fetchedModels.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(10.dp))
                     Text(
-                        text = stringResource(R.string.settings_pick_provider_models),
+                        text = stringResource(
+                            R.string.settings_pick_provider_models_count,
+                            fetchedModels.size
+                        ),
                         style = MaterialTheme.typography.labelMedium
                     )
                     Column(
@@ -808,19 +764,18 @@ internal fun ProfileRow(
                         )
                     ) {
                         fetchedModels.forEach { m ->
-                            val checked = providerModelList.any { it.equals(m, ignoreCase = true) }
+                            val checked = checkedModels.any { it.equals(m, ignoreCase = true) }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        val next = providerModelList.toMutableList()
+                                        val next = checkedModels.toMutableList()
                                         if (checked) {
                                             next.removeAll { it.equals(m, ignoreCase = true) }
                                         } else {
                                             next.add(m)
                                         }
-                                        providerModelList = next.distinct()
-                                        providerModelsText = next.joinToString(", ")
+                                        checkedModels = next.distinct()
                                         onDraftChanged()
                                     }
                                     .padding(vertical = 4.dp),
@@ -828,32 +783,33 @@ internal fun ProfileRow(
                             ) {
                                 Checkbox(
                                     checked = checked,
-                                    onCheckedChange = {
-                                        val next = providerModelList.toMutableList()
-                                        if (it) next.add(m) else {
+                                    onCheckedChange = { on ->
+                                        val next = checkedModels.toMutableList()
+                                        if (on) next.add(m) else {
                                             next.removeAll { e -> e.equals(m, ignoreCase = true) }
                                         }
-                                        providerModelList = next.distinct()
-                                        providerModelsText = next.joinToString(", ")
+                                        checkedModels = next.distinct()
                                         onDraftChanged()
                                     }
                                 )
-                                Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = m,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                // 来源标注：这个模型是哪几把 key 探到的（灰色小字，跟在名称右边）。
+                                // 多 key 中转站里「看得见」和「调得动」是两件事——
+                                // 标出来用户才知道勾选之后到底走的哪把钥匙。
+                                val source = modelSources[m]
+                                if (source != null) {
                                     Text(
-                                        text = m,
-                                        style = MaterialTheme.typography.bodySmall
+                                        text = source,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
                                     )
-                                    // 来源标注：这个模型是哪把 key 探到的。
-                                    // 多 key 中转站里「看得见」和「调得动」是两件事——
-                                    // 标出来用户才知道勾选之后到底走的哪把钥匙。
-                                    val source = modelSources[m]
-                                    if (source != null) {
-                                        Text(
-                                            text = source,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
                                 }
                                 // 一键把某个模型设为主模型
                                 TextButton(onClick = {
@@ -871,17 +827,27 @@ internal fun ProfileRow(
                     // 全选 / 全不选
                     Row {
                         TextButton(onClick = {
-                            providerModelList = fetchedModels.toList()
-                            providerModelsText = providerModelList.joinToString(", ")
+                            checkedModels = fetchedModels.toList()
                             onDraftChanged()
                         }) { Text(stringResource(R.string.settings_select_all)) }
                         TextButton(onClick = {
-                            providerModelList = emptyList()
-                            providerModelsText = ""
+                            checkedModels = emptyList()
                             onDraftChanged()
                         }) { Text(stringResource(R.string.settings_select_none)) }
                     }
                 }
+
+                Spacer(Modifier.height(8.dp))
+                // 默认模型：手动填写，或在上方列表点「设为主模型」。
+                // 服务端不提供 /models 列表时，这是唯一的模型名入口。
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it; onDraftChanged() },
+                    label = { Text(stringResource(R.string.settings_model)) },
+                    placeholder = { Text(stringResource(R.string.settings_model_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(Modifier.height(4.dp))
                 Row(
@@ -976,8 +942,7 @@ internal fun MineruKeySection(
 internal fun LlmProfilesSection(
     state: SettingsUiState,
     viewModel: SettingsViewModel,
-    onAddProfileClick: () -> Unit,
-    onShowModelsClick: () -> Unit
+    onAddProfileClick: () -> Unit
 ) {
     SettingsGroup(title = stringResource(R.string.settings_llm_profiles)) {
         state.snapshot.llmProfiles.forEach { profile ->
@@ -986,12 +951,11 @@ internal fun LlmProfilesSection(
                 selected = profile.id == state.snapshot.activeProfileId,
                 onSelect = { viewModel.selectProfile(profile.id) },
                 onDelete = { viewModel.deleteProfile(profile.id) },
-                onSave = viewModel::saveActiveProfile,
+                onSave = { draft -> viewModel.saveProfile(draft) },
                 onDraftChanged = { viewModel.clearLlmTestResult(profile.id) },
                 onFetchModels = { draft, onDone ->
                     viewModel.fetchModels(draft) { list, bindings ->
                         onDone(list, bindings)
-                        onShowModelsClick()
                     }
                 },
                 onTest = viewModel::testLlm,
@@ -999,8 +963,6 @@ internal fun LlmProfilesSection(
                 result = state.llmOutcome(profile.id)?.message,
                 resultOk = state.llmOutcome(profile.id)?.ok ?: false,
                 fetchingModels = state.loadingModels,
-                pickedModel = state.pickedModel,
-                onPickedModelConsumed = viewModel::consumePickedModel,
                 // 这套配置自己拉到的模型列表（勾选区用）
                 fetchedModels = state.fetchedModelsByProfile[profile.id].orEmpty(),
                 modelSources = state.modelSourcesByProfile[profile.id].orEmpty()
@@ -1018,6 +980,106 @@ internal fun LlmProfilesSection(
             Spacer(Modifier.height(8.dp))
             FirstRunHint(R.string.settings_hint_llm_key)
         }
+    }
+}
+
+/**
+ * 一把附加 Key 的输入行：密码框 + **自己的**「显示 / 隐藏」+ 删除。
+ *
+ * 为什么每把 key 都要独立显示：一个 URL 下挂多把 key 时它们长得一模一样
+ * （都是一串圆点），不能显示就没法确认哪把是哪把；某把 key 过期了，
+ * 也得能单独删掉它而不是清空整套配置。
+ */
+@Composable
+private fun ExtraKeyRow(
+    entry: LlmKeyEntry,
+    onChange: (String) -> Unit,
+    onRemove: () -> Unit
+) {
+    var visible by remember(entry.id) { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = entry.key,
+            onValueChange = onChange,
+            label = { Text(stringResource(R.string.settings_api_key)) },
+            singleLine = true,
+            visualTransformation = if (visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            trailingIcon = {
+                TextButton(onClick = { visible = !visible }) {
+                    Text(if (visible) "隐藏" else "显示")
+                }
+            },
+            modifier = Modifier.weight(1f)
+        )
+        IconButton(onClick = onRemove) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = stringResource(R.string.settings_remove_key)
+            )
+        }
+    }
+}
+
+/**
+ * 网络代理分区：系统代理 / 直连 / 自动。
+ *
+ * 用户诉求：「mineru 走代理就会说没网，把它改成直连吧，在设置里面加一个
+ * 网络代理怎么走的设置」。三种模式与主题三卡片的选法保持一致，
+ * 选中即写入，下一个请求生效（见 [com.mistakebook.net.NetworkRouter]）。
+ */
+@Composable
+internal fun NetworkProxySection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    SettingsGroup(title = stringResource(R.string.settings_network_title)) {
+        Text(
+            text = stringResource(R.string.settings_network_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ThemeOptionCard(
+                title = stringResource(R.string.settings_network_system),
+                icon = Icons.Default.Public,
+                selected = state.snapshot.networkMode == NetworkMode.SYSTEM,
+                onClick = { viewModel.setNetworkMode(NetworkMode.SYSTEM) },
+                modifier = Modifier.weight(1f)
+            )
+            ThemeOptionCard(
+                title = stringResource(R.string.settings_network_direct),
+                icon = Icons.Default.WifiOff,
+                selected = state.snapshot.networkMode == NetworkMode.DIRECT,
+                onClick = { viewModel.setNetworkMode(NetworkMode.DIRECT) },
+                modifier = Modifier.weight(1f)
+            )
+            ThemeOptionCard(
+                title = stringResource(R.string.settings_network_auto),
+                icon = Icons.Default.BrightnessAuto,
+                selected = state.snapshot.networkMode == NetworkMode.AUTO,
+                onClick = { viewModel.setNetworkMode(NetworkMode.AUTO) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        val hintText = when (state.snapshot.networkMode) {
+            NetworkMode.SYSTEM -> stringResource(R.string.settings_network_hint_system)
+            NetworkMode.DIRECT -> stringResource(R.string.settings_network_hint_direct)
+            NetworkMode.AUTO -> stringResource(R.string.settings_network_hint_auto)
+        }
+        Text(
+            text = hintText,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary
+        )
     }
 }
 

@@ -357,6 +357,14 @@ class AppContainer(context: Context) {
                 runCatching { settingsStore.snapshotNow().ocrStrength }.getOrDefault(2)
             )
         }
+        // 网络出口模式喂给 NetworkRouter：设置页改完后下一个请求就走新规则。
+        // 客户端（含 ChatCompletionStream 的派生副本）共享同一个 ProxySelector，
+        // 不需要重建。放在最后：settingsStore 是直接属性，此时必然已初始化。
+        appScope.launch {
+            settingsStore.settings.collect { snapshot ->
+                com.mistakebook.net.NetworkRouter.mode = snapshot.networkMode
+            }
+        }
     }
 
     private companion object {

@@ -3,7 +3,7 @@ package com.mistakebook.data.prefs
 import kotlinx.serialization.Serializable
 
 /**
- * 一个附加的 API Key，以及它**绑定的模型**。
+ * 一个附加的 API Key。
  *
  * ## 为什么需要
  *
@@ -12,30 +12,21 @@ import kotlinx.serialization.Serializable
  *
  * 中转站（one-api / new-api 这类）的典型形态是：**一个 baseUrl，
  * 多个 key，每个 key 的可用模型和额度都不一样**。
- * 比如 key-A 只能用 deepseek，key-B 只能用 gpt-4o。
- * 而现在的模型是「一套配置 = 一个 baseUrl + 一个 key + 一个模型」，
- * 用户只能为同一个中转站重复建好几套配置，URL 抄三遍。
  *
- * 所以这里把「key」提升成一等公民：一个配置里可以放多个 key，
- * 每个 key 声明自己管哪些模型；请求时按模型名反查该用哪个 key。
+ * ## 为什么不再有「该 Key 负责的模型」
+ *
+ * 最早的版本让每把 key 手填自己管哪些模型。实测下来这个输入框是多余的：
+ * 设置页底部本来就会「一键获取所有 Key 可见的模型」并合并成池，
+ * 探测时自然知道每个模型是哪把 key 看到的——路由表（[LlmProfile.modelKeys]）
+ * 在拉列表时就自动生成，用户再手填一遍只会两头不一致。
  */
 @Serializable
 data class LlmKeyEntry(
     val id: String = java.util.UUID.randomUUID().toString(),
 
     /** 这个 key 本身。 */
-    val key: String = "",
-
-    /**
-     * 这个 key 负责的模型名列表（**精确匹配**，大小写不敏感）。
-     *
-     * 空列表 = 「通用 key」：没有模型显式指定它时，作为兜底使用。
-     */
-    val models: List<String> = emptyList()
+    val key: String = ""
 ) {
-    fun matches(model: String): Boolean =
-        models.any { it.isNotBlank() && it.trim().equals(model.trim(), ignoreCase = true) }
-
     /** 是否可以真正用于请求。 */
     fun isUsable(): Boolean = key.isNotBlank()
 }
@@ -55,11 +46,10 @@ data class LlmProfile(
     val note: String = "",
 
     /**
-     * 这个 provider **供应的模型列表**（可选，手填或从 /models 拉来）。
+     * 这个 provider **勾选后供应的模型列表**（从 /models 拉来后勾选）。
      *
      * 一个中转站常常挂着几十个模型，用户想在 App 里直接切着用。
-     * 没有这个列表的话，用户只能为每个模型各建一套配置——
-     * 那正是「一个 URL 只能配一个模型」的痛点。
+     * 只有勾进这里的模型（外加主模型）会出现在对话页的模型选项里。
      *
      * 留空表示「只有主模型」，行为与旧版完全一致。
      */
@@ -72,6 +62,17 @@ data class LlmProfile(
      * 否则老用户的配置直接崩掉。
      */
     val extraKeys: List<LlmKeyEntry> = emptyList(),
+
+    /**
+     * 模型 -> keyId 的自动路由表。
+     *
+     * 「一键获取所有模型」时逐把 key 探测生成：主 key 看得见的模型全部
+     * 路由到主 key，只有附加 key 看得见的才绑到那把 key 上。
+     * 用户不填这个表，也不该看到这个表——它是探测结果的落盘。
+     *
+     * 路由表指向的 key 被删除时（[resolveKey]），自动回退主 key。
+     */
+    val modelKeys: Map<String, String> = emptyMap(),
 
     /**
      * 这个模型**能不能直接看图**。
@@ -102,7 +103,7 @@ data class LlmProfile(
      * 所有可用的 key：主 key 在前，附加 key 在后。
      *
      * 主 key 排第一是刻意的——它承担「兜底」角色，
-     * 附加 key 只有在自己绑定了模型时才会被优先选中。
+     * 路由表没绑定的模型都走它。
      *
      * 主 key 用**固定 id**（而不是随机 UUID）：它是每次调用现算出来的
      * 临时对象，id 若随机，「这个模型来自哪个 key」就没法稳定回溯，
@@ -111,7 +112,7 @@ data class LlmProfile(
     fun allKeys(): List<LlmKeyEntry> =
         buildList {
             if (apiKey.isNotBlank()) {
-                add(LlmKeyEntry(id = MAIN_KEY_ID, key = apiKey, models = emptyList()))
+                add(LlmKeyEntry(id = MAIN_KEY_ID, key = apiKey))
             }
             addAll(extraKeys.filter { it.key.isNotBlank() })
         }
@@ -119,15 +120,14 @@ data class LlmProfile(
     /**
      * 按模型名找出**所有**能调用它的 key。
      *
-     * 与 [resolveKey] 的区别：那个只给一个最终答案，这个给全部候选——
-     * 设置页要拿它告诉用户「这个模型有几把钥匙能开」。
+     * 口径：路由表绑定的那把 + 主 key（主 key 是兜底，
+     * 任何模型都至少可以试着走它）。空模型名无从判断，返回空。
      */
     fun keysServing(model: String): List<LlmKeyEntry> {
         val target = model.trim()
         if (target.isBlank()) return emptyList()
-        return allKeys().filter {
-            it.isUsable() && (it.models.isEmpty() || it.matches(target))
-        }
+        val bound = bindingFor(target)
+        return allKeys().filter { it.isUsable() && (it.id == bound || it.id == MAIN_KEY_ID) }
     }
 
     companion object {
@@ -136,35 +136,50 @@ data class LlmProfile(
     }
 
     /**
+     * 路由表查找：**大小写不敏感**。
+     *
+     * /models 返回的模型名与用户手填/芯片上显示的名字偶尔大小写不一致
+     * （DeepSeek-Chat vs deepseek-chat），精确查会莫名丢掉绑定、
+     * 落回主 key——而主 key 恰恰调不动这个模型。
+     */
+    private fun bindingFor(model: String): String? =
+        modelKeys.entries.firstOrNull { it.key.trim().equals(model.trim(), ignoreCase = true) }?.value
+
+    /**
      * 按模型名解析出该用的 key。
      *
      * 规则：
-     * 1. 附加 key 里凡是**绑定到这个模型**的，优先用（最后一个匹配的优先，
-     *    便于用户在设置里往上加新绑定来「覆盖」旧的）；
-     * 2. 否则用主 key；
+     * 1. 路由表（[modelKeys]）绑定的 key 优先——那是拉列表时探测出的
+     *    「这把 key 真能调这个模型」的结论；
+     * 2. 绑定的 key 已被删除（配置里找不到）时，退回主 key；
      * 3. 主 key 为空时，退回第一个可用的附加 key。
      *
      * 解析不出来就返回空串——调用方要按「未配置」处理。
      */
     fun resolveKey(model: String): String {
-        val matched = extraKeys.filter { it.isUsable() && it.matches(model) }
-        if (matched.isNotEmpty()) return matched.last().key
+        val target = model.trim()
+        bindingFor(target)?.let { id ->
+            val entry = if (id == MAIN_KEY_ID) {
+                allKeys().firstOrNull { it.id == MAIN_KEY_ID }
+            } else {
+                extraKeys.firstOrNull { it.id == id }
+            }
+            if (entry != null && entry.isUsable()) return entry.key
+        }
         if (apiKey.isNotBlank()) return apiKey
         return extraKeys.firstOrNull { it.isUsable() }?.key.orEmpty()
     }
 
     /**
-     * 这个配置下**所有**可用的模型名（主模型 + 各 key 绑定的模型）。
+     * 这个配置下**对话页可见**的模型名（主模型 + 勾选的模型）。
      *
-     * 设置页用它给出「这个 provider 到底供应哪些模型」的提示。
+     * 没勾选的模型不会出现在这里——用户明确要求过：
+     * 「没有勾选的就不需要出现在对话的模型选项里面了」。
      */
     fun availableModels(): List<String> {
         val out = LinkedHashSet<String>()
         if (model.isNotBlank()) out += model.trim()
         models.filter { it.isNotBlank() }.forEach { out += it.trim() }
-        extraKeys.forEach { entry ->
-            entry.models.filter { it.isNotBlank() }.forEach { out += it.trim() }
-        }
         return out.toList()
     }
 

@@ -29,6 +29,11 @@ data class SettingsSnapshot(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
 
     /**
+     * 网络出口模式。默认 [NetworkMode.AUTO]：MinerU 直连、其余走系统代理。
+     */
+    val networkMode: NetworkMode = NetworkMode.AUTO,
+
+    /**
      * 对话思考强度。默认 HIGH：整理错题、总结题目时「想清楚」比「答得快」重要。
      * 服务端不认对应字段时会自动降级（见 ReasoningFallback），用户无感。
      */

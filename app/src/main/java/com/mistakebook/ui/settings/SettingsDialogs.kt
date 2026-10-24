@@ -58,63 +58,6 @@ internal fun SettingsTimePickerDialog(
 }
 
 @Composable
-internal fun SettingsModelsDialog(
-    models: List<String>,
-    pickedModel: String?,
-    loadingModels: Boolean,
-    onDismiss: () -> Unit,
-    onPickModel: (String) -> Unit,
-    onFetchModels: () -> Unit
-) {
-    // 选完模型就关掉对话框，模型名由 ProfileRow 回填
-    LaunchedEffect(pickedModel) {
-        if (pickedModel != null) onDismiss()
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings_models_title)) },
-        text = {
-            Column(modifier = Modifier.heightIn(max = 360.dp)) {
-                if (models.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.settings_models_title),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    models.forEach { model ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = model,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            TextButton(onClick = { onPickModel(model) }) {
-                                Text(stringResource(R.string.action_confirm))
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onFetchModels,
-                enabled = !loadingModels
-            ) { Text(stringResource(R.string.settings_fetch_models)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_close))
-            }
-        }
-    )
-}
-
-@Composable
 internal fun AddProfileDialog(onDismiss: () -> Unit, onConfirm: (LlmProfile) -> Unit) {
     var name by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }

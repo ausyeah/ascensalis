@@ -94,6 +94,7 @@ class SettingsStore(context: Context) {
             llmProfiles = profiles,
             activeProfileId = activeId,
             themeMode = ThemeMode.fromKey(prefs[KEY_THEME_MODE]),
+            networkMode = NetworkMode.fromKey(prefs[KEY_NETWORK_MODE]),
             reasoningEffort = ReasoningEffort.fromKey(prefs[KEY_REASONING_EFFORT]),
             // mineruModelVersion / ocrLanguage / forceOcr 已固定，不再从 prefs 读。
             // 旧版本存下的值会被自然忽略——它们不再是 SettingsSnapshot 的构造参数。
@@ -385,6 +386,16 @@ class SettingsStore(context: Context) {
         editString(KEY_THEME_MODE, value)
     }
 
+    /** 设置网络出口模式。写入即生效（NetworkRouter 每次建连前读）。 */
+    suspend fun setNetworkMode(mode: NetworkMode) {
+        val value = when (mode) {
+            NetworkMode.SYSTEM -> "system"
+            NetworkMode.DIRECT -> "direct"
+            NetworkMode.AUTO -> "auto"
+        }
+        editString(KEY_NETWORK_MODE, value)
+    }
+
     /** 设置对话思考强度。写入即生效，下一次请求带上。 */
     suspend fun setReasoningEffort(effort: ReasoningEffort) {
         editString(KEY_REASONING_EFFORT, effort.key ?: "off")
@@ -420,6 +431,7 @@ class SettingsStore(context: Context) {
         // KEY_MINERU_MODEL / KEY_OCR_LANGUAGE / KEY_FORCE_OCR 已删：
         // 对应设置项固定为 vlm / ch / 开启，不再可配。旧库里的这些键会被忽略。
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        val KEY_NETWORK_MODE = stringPreferencesKey("network_mode")
         val KEY_REASONING_EFFORT = stringPreferencesKey("reasoning_effort")
         val KEY_ATTACH_IMAGE = booleanPreferencesKey("attach_original_image")
         val KEY_IMAGE_LONG_EDGE = intPreferencesKey("image_long_edge")
