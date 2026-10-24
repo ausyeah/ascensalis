@@ -360,6 +360,13 @@
     <string name="detail_variant_save">存为错题</string>
     <string name="detail_variant_regenerate">重新生成</string>
     <string name="detail_variant_failed">生成失败</string>
+    <string name="weekly_report_title">AI 学习周报</string>
+    <string name="weekly_report_generating">正在生成本周诊断…</string>
+    <string name="weekly_report_generate">生成本周周报</string>
+    <string name="weekly_report_regenerate">重新生成本周周报</string>
+    <string name="weekly_report_retry">重试</string>
+    <string name="weekly_report_empty">还没有周报。点「生成本周周报」，AI 会根据你的错因分布和薄弱知识点给出诊断与下周建议。</string>
+    <string name="weekly_report_wait">生成中…</string>
     <string name="probe_math_title">公式渲染探针</string>
     <string name="probe_math_display_label">独立行公式：</string>
     <string name="error_no_key_action">去设置填写</string>

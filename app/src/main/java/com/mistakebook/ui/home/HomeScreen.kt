@@ -29,6 +29,7 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Insights
 import kotlin.math.roundToInt
 import com.mistakebook.ui.theme.DeleteReveal
 import androidx.compose.material.icons.Icons
@@ -228,6 +229,8 @@ fun HomeScreen(
     var showKeyGate by remember { mutableStateOf(false) }
     var mineruMissing by remember { mutableStateOf(false) }
     var llmMissing by remember { mutableStateOf(false) }
+    // AI 学习周报（F2）：错题本搜索栏右侧的入口弹层
+    var showWeeklyReport by remember { mutableStateOf(false) }
 
     // 相册入口直接拉起系统选择器：原先中间还夹一个「从相册选择」页，
     // 整页只有一个按钮，等于多点一次屏幕才能到真正的选择器，已删除。
@@ -344,6 +347,15 @@ fun HomeScreen(
                     Icon(
                         imageVector = Icons.Default.Forum,
                         contentDescription = stringResource(R.string.chat_list_title),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                // AI 学习周报：诊断 + 建议，与打印/对话并列的轻量入口
+                IconButton(onClick = { showWeeklyReport = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Insights,
+                        contentDescription = stringResource(R.string.weekly_report_title),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(22.dp)
                     )
@@ -526,6 +538,13 @@ fun HomeScreen(
             onOpenSettings = onOpenSettings,
             onManualEntry = onAddManual,
             onDismiss = { showKeyGate = false }
+        )
+    }
+
+    if (showWeeklyReport) {
+        WeeklyReportDialog(
+            container = container,
+            onDismiss = { showWeeklyReport = false }
         )
     }
 }

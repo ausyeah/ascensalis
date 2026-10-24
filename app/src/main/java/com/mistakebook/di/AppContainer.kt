@@ -255,6 +255,16 @@ class AppContainer(context: Context) {
         )
     }
 
+    /** 周报数据（F2）：observeLatest 供入口角标，历史列表在弹层里直接查。 */
+    val weeklyReportDao: com.mistakebook.data.local.WeeklyReportDao by lazy {
+        database.weeklyReportDao()
+    }
+
+    /** 周报生成编排（F2）：与 recognitionEngine 同构的「data+net」编排者。 */
+    val weeklyReportGenerator: com.mistakebook.report.WeeklyReportGenerator by lazy {
+        com.mistakebook.report.WeeklyReportGenerator(database, llmClient, settingsStore)
+    }
+
     val imageImporter: ImageImporter by lazy {
         // 增强开关每次导入时读一次当前设置，改设置后无需重启即可生效。
         // snapshotNow() 是挂起函数，这里在 appScope 里起个协程取值。

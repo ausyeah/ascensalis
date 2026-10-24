@@ -148,6 +148,29 @@ interface QuestionDao {
     @Query("SELECT COUNT(*) FROM questions WHERE deletedAt IS NULL AND errorReason = :reasonName")
     suspend fun countByReason(reasonName: String): Int
 
+    // ===== 周报聚合（F2）：一次性 suspend 查询，报表生成时才跑，不做 Flow =====
+
+    @Query(
+        """
+        SELECT errorReason AS name, COUNT(*) AS count FROM questions
+        WHERE deletedAt IS NULL GROUP BY errorReason
+        """
+    )
+    suspend fun reasonDistribution(): List<NameCount>
+
+    @Query("SELECT COUNT(*) FROM questions WHERE deletedAt IS NULL AND createdAt >= :sinceMs")
+    suspend fun countCreatedSince(sinceMs: Long): Int
+
+    @Query("SELECT COUNT(*) FROM questions WHERE deletedAt IS NULL AND status = 'MASTERED'")
+    suspend fun countMastered(): Int
+
+    /**
+     * 拉全部未删题的知识点 JSON 做频次统计。知识点存在 JSON 数组里，
+     * SQL 聚合不了；千级题量下一次加载再在 Kotlin 里数，开销可忽略。
+     */
+    @Query("SELECT knowledgePointsJson FROM questions WHERE deletedAt IS NULL AND knowledgePointsJson != '[]'")
+    suspend fun allKnowledgePointsJson(): List<String>
+
     @Insert
     suspend fun insert(question: Question): Long
 
@@ -176,4 +199,13 @@ interface QuestionDao {
 data class QuestionTitleRow(
     val id: Long,
     val title: String
+)
+
+/**
+ * GROUP BY 计数行（周报聚合用）。字段名 `name`/`count`
+ * 必须与 SQL 里的 `AS name, COUNT(*) AS count` 投影一致。
+ */
+data class NameCount(
+    val name: String,
+    val count: Int
 )
