@@ -389,6 +389,12 @@
     <string name="exam_date_day">日</string>
     <string name="exam_date_invalid">日期无效或早于今天</string>
     <string name="exam_date_clear">清除日期</string>
+    <string name="mindmap_title">知识体系思维导图</string>
+    <string name="mindmap_generating">正在生成知识体系导图…</string>
+    <string name="mindmap_generate">生成导图</string>
+    <string name="mindmap_regenerate">重新生成</string>
+    <string name="mindmap_retry">重试</string>
+    <string name="mindmap_empty_hint">选一个学科，AI 会把你的薄弱知识点（🔴≥3道 / 🟠2道）织进该学科的知识体系，生成可缩放拖拽的导图。</string>
     <string name="probe_math_title">公式渲染探针</string>
     <string name="probe_math_display_label">独立行公式：</string>
     <string name="error_no_key_action">去设置填写</string>

@@ -172,6 +172,19 @@ interface QuestionDao {
     suspend fun allKnowledgePointsJson(): List<String>
 
     /**
+     * 思维导图（F4）用：按学科过滤的知识点 JSON 清单。
+     * [subjectFilter] 传 0 表示不限学科（与列表查询的约定一致）。
+     */
+    @Query(
+        """
+        SELECT knowledgePointsJson FROM questions
+        WHERE deletedAt IS NULL AND knowledgePointsJson != '[]'
+          AND (:subjectFilter = 0 OR subjectId = :subjectFilter)
+        """
+    )
+    suspend fun allKnowledgePointsJsonOf(subjectFilter: Long): List<String>
+
+    /**
      * 考前排期（F3）：只挪 nextReviewAt，不动轮次与掌握状态——
      * 排期是"什么时候见它"，不是"学得怎么样"。
      */

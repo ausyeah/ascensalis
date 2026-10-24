@@ -265,6 +265,11 @@ class AppContainer(context: Context) {
         com.mistakebook.report.WeeklyReportGenerator(database, llmClient, settingsStore)
     }
 
+    /** 思维导图生成编排（F4）：薄弱点聚合 + LLM 层级 markdown + 树解析。 */
+    val mindmapGenerator: com.mistakebook.mindmap.MindmapGenerator by lazy {
+        com.mistakebook.mindmap.MindmapGenerator(database, llmClient, settingsStore)
+    }
+
     val imageImporter: ImageImporter by lazy {
         // 增强开关每次导入时读一次当前设置，改设置后无需重启即可生效。
         // snapshotNow() 是挂起函数，这里在 appScope 里起个协程取值。

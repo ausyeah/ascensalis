@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #fafafa; }
+        svg { width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+<svg id="svg"></svg>
+<!-- d3 与 markmap-view 均为本地 assets，整页离线可用（无 CDN 依赖） -->
+<script src="./d3.min.js"></script>
+<script src="./markmap-view.js"></script>
+<script>
+    // 树由 Kotlin 侧解析 markdown 后以 JSON 注入（占位符替换），
+    // 页面只负责渲染：这样解析逻辑可以脱网单测，WebView 保持哑渲染。
+    const TREE = __TREE_JSON__;
+    window.addEventListener('load', function () {
+        try {
+            const mm = window.markmap.Markmap.create('#svg', { duration: 300 }, TREE);
+            if (mm && mm.fit) mm.fit();
+        } catch (e) {
+            document.body.innerHTML = '<pre style="padding:16px">渲染失败: ' + e + '</pre>';
+        }
+    });
+</script>
+</body>
+</html>
