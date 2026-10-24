@@ -13,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import android.util.Log
 import com.mistakebook.di.AppContainer
 import com.mistakebook.ui.capture.CaptureScreen
 import com.mistakebook.ui.chat.ChatListScreen
@@ -110,7 +111,12 @@ fun MistakeBookNavHost(
                 filterDueRequest = filterDueRequest,
                 pickedNotebookId = homeNotebookPick,
                 onNotebookPicked = { homeNotebookPick = it },
-                onAddByPhoto = { navController.navigate(Routes.CAPTURE) },
+                onAddByPhoto = {
+                    // T11：每个相机入口都显式设置用途，不依赖默认值——
+                    // 上次从对话进来残留 CHAT 的话，这里必须扳回来
+                    container.cameraPurpose = AppContainer.CameraPurpose.QUESTION
+                    navController.navigate(Routes.CAPTURE)
+                },
                 onImportPdf = { navController.navigate(Routes.PDF_IMPORT) },
                 onAddManual = { navController.navigate(Routes.MANUAL_EDIT) },
                 onCropImage = { path ->
@@ -155,13 +161,25 @@ fun MistakeBookNavHost(
             CaptureScreen(
                 container = container,
                 onCropped = { cropPath ->
+                    // CHAT 用途：产物走「裁切 → 回对话」链路，不进识别管线（T11/T12）。
+                    // 必须带 popUpTo(CAPTURE) inclusive——否则裁切确认后
+                    // popBackStack 会回到相机而不是对话页（QUESTION 分支同理）。
+                    if (container.cameraPurpose == AppContainer.CameraPurpose.CHAT) {
+                        container.chatCropping = true
+                    }
                     navController.navigate(Routes.crop(cropPath)) {
                         popUpTo(Routes.CAPTURE) { inclusive = true }
                     }
                 },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onManualEntry = { navController.navigate(Routes.MANUAL_EDIT) },
-                onBack = { navController.popBackStack() }
+                onManualEntry = {
+                    container.cameraPurpose = AppContainer.CameraPurpose.QUESTION
+                    navController.navigate(Routes.MANUAL_EDIT)
+                },
+                onBack = {
+                    container.cameraPurpose = AppContainer.CameraPurpose.QUESTION
+                    navController.popBackStack()
+                }
             )
         }
 
@@ -173,6 +191,22 @@ fun MistakeBookNavHost(
             // 重新识别（先裁切再识别）：详情页入口置上的题目 id。
             // 与 recrop 互斥——前者要提交识别，后者只换图。
             val reRecognizeQuestionId = container.reRecognizeQuestionId
+            val chatCropping = container.chatCropping
+            // 三个模式标志互斥（T11）。同时为真视为 bug：按
+            // recropOnly > reRecognize > chatCropping 的优先级取第一个，
+            // 其余清掉并留日志——静默择一会把产物送进错误的链路。
+            if (listOf(recrop, reRecognizeQuestionId != null, chatCropping).count { it } > 1) {
+                Log.w(
+                    "MistakeBookNavHost",
+                    "裁切页模式标志冲突: recropOnly=$recrop reRecognize=$reRecognizeQuestionId chatCropping=$chatCropping"
+                )
+                if (recrop) {
+                    container.reRecognizeQuestionId = null
+                    container.chatCropping = false
+                } else if (reRecognizeQuestionId != null) {
+                    container.chatCropping = false
+                }
+            }
             CropScreen(
                 container = container,
                 imagePath = entry.arguments?.getString("imagePath").orEmpty(),
@@ -195,6 +229,9 @@ fun MistakeBookNavHost(
                 onBack = {
                     container.recropping = false
                     container.reRecognizeQuestionId = null
+                    // 聊天附件模式同样要在退出时清（T11）：不清的话下一次
+                    // 正常拍题的裁切确认会被当成「回对话」而丢失产物
+                    container.chatCropping = false
                     // 用户中途退出裁剪页时必须清掉来源标记，
                     // 否则下一次拍照提交会被错标成「相册导入」
                     container.cropSourceIsGallery = false

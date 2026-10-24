@@ -320,6 +320,36 @@ class AppContainer(context: Context) {
     var cropSourceIsGallery: Boolean = false
 
     /**
+     * 这台扫描相机这次为谁服务（T11）。
+     *
+     * QUESTION = 拍错题（原有链路，快门前查 Key、产物进识别管线）；
+     * CHAT = 对话页拍照（T12，跳过 Key 门禁、产物经裁切回对话当附件）。
+     *
+     * **每个进入相机的入口都必须显式设置**，不依赖默认值——上次从对话
+     * 进来 purpose 残留 CHAT，下次首页拍题就会走错产物路径，这正是
+     * [cropSourceIsGallery] 注释里警告过的那类状态泄漏。
+     */
+    enum class CameraPurpose { QUESTION, CHAT }
+
+    @Volatile
+    var cameraPurpose: CameraPurpose = CameraPurpose.QUESTION
+
+    /**
+     * 裁切页的「聊天附件」模式（T11/T12）：与 [recropping]、
+     * [reRecognizeQuestionId] 互斥。置位时裁切确认不走识别提交，
+     * 产物复制进聊天附件暂存后经 [pendingChatAttachmentPath] 交回对话页。
+     */
+    var chatCropping: Boolean by mutableStateOf(false)
+
+    /**
+     * 裁切页交给对话页的待发附件路径（T12）。ChatScreen 的
+     * LaunchedEffect 观察它：非空则把该图加入待发附件并清空。
+     * 进程死亡不持久化（与现状一致）。
+     */
+    @Volatile
+    var pendingChatAttachmentPath: String? = null
+
+    /**
      * 重裁剪产生的新原图路径。
      * 必须是快照状态：普通 @Volatile 字段不会触发 Compose 重组，
      * 编辑页读不到变化，原图看起来就没被替换。
