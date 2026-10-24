@@ -114,7 +114,7 @@
   }
 
   /**
-   * 等全部 KaTeX 字体就绪。**测量尺寸之前必须等它。**
+   * 等全部 KaTeX 字体就绪。**由页面加载阶段调用一次，之后 render 全程同步。**
    *
    * katex.min.css 的 @font-face 没写 font-display，浏览器按默认的
    * block 期处理：字体下载完成前，用**回退字体的度量**排版。
@@ -129,6 +129,19 @@
    * 本地 file:// 字体下载只要几毫秒，但 block 期的度量错误是**必然**的：
    * 只要测量发生在字体交换之前，量到的就是窄的。
    * 所以正确解法不是多等几帧，而是在测量前把字体加载这件事**显式做完**。
+   *
+   * ## 为什么这个等待不能放进 render() 里（v0.0.33 事故）
+   *
+   * render() 曾经是 async 函数、内部 await fontsReady()。
+   * 但 Android 的 WebView.evaluateJavascript **不会 await Promise**：
+   * 它把返回值 JSON.stringify 一下，Promise 序列化成 `{}`，
+   * Kotlin 侧 parseSize 拿不到 w/h，整条链路断裂（v0.0.31~32 全量渲染失败）。
+   * Playwright 的 page.evaluate 会自动 await，所以当时的"终验全过"是假象。
+   *
+   * 因此分工改为：**字体等待只在页面加载阶段做一次**（本函数 + 下面的
+   * initFonts），完成后经 AndroidMath 桥通知 Kotlin；Kotlin 的 pageLoaded
+   * 门等这个信号，门之后的 render()/renderBatch() 全部同步返回，
+   * 与 evaluateJavascript 的语义精确匹配。
    *
    * FontFace.load() 对每个 @font-face 逐个触发加载；load() 失败会 reject，
    * 此时只能按现状继续（与修复前一致），不能让整条渲染链路挂死——
@@ -146,6 +159,32 @@
       });
     }
     return fontsPromise;
+  }
+
+  /**
+   * 页面加载阶段的字体就绪流程：渲染探测公式（把全部 KaTeX 字体族
+   * 拉进加载状态）→ 等字体 → 通知 Android。
+   *
+   * 探测公式必须覆盖 KaTeX 用到的每个字体族，漏一个就仍有窄度量风险。
+   * 渲染完立即清掉 #out，不影响后续 render()（它自己也会清）。
+   */
+  function initFonts() {
+    var probe = '\\alpha\\beta\\gamma\\delta\\epsilon\\zeta\\eta\\theta' +
+      '\\Gamma\\Delta\\Theta\\Lambda\\Xi\\Pi\\Sigma\\Phi\\Psi\\Omega' +
+      '\\sum\\int\\prod\\sqrt{}\\frac{}{}\\mathbb{R}\\mathcal{F}' +
+      '\\mathfrak{g}\\mathscr{A}\\mathtt{x}\\mathsf{y}\\mathrm{d}' +
+      '\\left(\\right[0123456789+-=<>';
+    try {
+      katex.render(probe, document.getElementById('out'), {
+        displayMode: false, throwOnError: false, strict: false, output: 'html'
+      });
+    } catch (e) { /* 探测失败不阻塞：fontsReady 仍会尝试直接加载 */ }
+    document.getElementById('out').innerHTML = '';
+    fontsReady().then(function () {
+      if (window.AndroidMath && window.AndroidMath.onFontsReady) {
+        window.AndroidMath.onFontsReady();
+      }
+    });
   }
 
   /**
@@ -175,13 +214,13 @@
   }
 
   /**
-   * 单条渲染。**返回 Promise**（Android 的 evaluateJavascript 会拿到
-   * resolve 后的值，Kotlin 侧 awaitJavascript 无需改动）。
+   * 单条渲染。**同步返回 JSON 字符串**（与 Android evaluateJavascript 语义匹配）。
    *
-   * async 的原因见 [fontsReady]：必须等字体就绪后再量尺寸，
-   * 否则量到的是 block 期回退字体的窄度量，切图切掉右端。
+   * 字体就绪在页面加载阶段已完成（initFonts → AndroidMath 桥 → Kotlin pageLoaded 门），
+   * 这里量到的必然是 KaTeX 字体度量。历史教训见 [fontsReady] 注释：
+   * 这个函数曾经是 async 的，导致 v0.0.31~32 全量渲染失败，**不要再改回 async**。
    */
-  async function render(latex, displayMode, maxDevicePx) {
+  function render(latex, displayMode, maxDevicePx) {
     var out = document.getElementById('out');
     // 单条路径只抠 #out，所以必须先把 #sheet 藏起来：
     // 两者都是 position:absolute 贴在 (0,0)，不藏会盖在 #out 上，
@@ -211,12 +250,7 @@
       out.textContent = latex;
     }
 
-    // **关键一步**：先把刚插入的 DOM 排一次版（触发字体加载），
-    // 再等字体全部就绪。少这次预排版，document.fonts 里还没有 pending 的
-    // 加载任务，fontsReady() 会直接空转返回。
-    out.getBoundingClientRect();
-    await fontsReady();
-
+    // 字体在页面加载阶段已就绪（见 [fontsReady]/initFonts），直接量即可。
     var rect = out.getBoundingClientRect();
     // 超宽公式整体缩字号，保证完整落在上限内
     if (rect.width > maxW) {
@@ -247,12 +281,11 @@
    * 每个公式包在自己的容器里，容器是 inline-block 且不换行，
    * 因此行盒高度由每个公式自己的高度决定，互不干扰。
    *
-   * **返回 Promise**：内部等字体就绪后再测量，理由同 [render]。
-   * 顺序不能反：必须先把所有公式渲染进 DOM（触发字体加载），
-   * 再一次 fontsReady() 统一等，然后才量——边渲染边量的话，
-   * 先量的公式用的是回退字体度量，照样被切。
+   * **同步返回**：字体在页面加载阶段已就绪（initFonts → AndroidMath 桥）。
+   * 历史教训：这个函数曾经是 async 的，evaluateJavascript 不等 Promise，
+   * 导致 v0.0.31~32 批量路径（PDF 导出）全废，**不要再改回 async**。
    */
-  async function renderBatch(items, maxDevicePx) {
+  function renderBatch(items, maxDevicePx) {
     var dpr = window.devicePixelRatio || 1;
     var limit = Math.min((window.innerWidth || 700), (maxDevicePx || 2048) / dpr);
     var maxW = Math.max(120, limit - 8);
@@ -297,11 +330,7 @@
       holders[i].__fontSize = fontSize;
     }
 
-    // 先全部渲染完（字体加载已触发），再统一等字体，最后一次性测量。
-    // 见函数注释：这个顺序是修复「公式最右端被切」的关键。
-    sheet.getBoundingClientRect();
-    await fontsReady();
-
+    // 字体已在页面加载阶段就绪（initFonts），这里直接量最终 rect。
     var out = [];
     for (var j = 0; j < holders.length; j++) {
       var holder = holders[j];
@@ -340,6 +369,11 @@
     // 避免它盖在 #out 上影响单条抠图。两条路径互斥，各自管各自的。
     return result;
   }
+
+  // 页面加载即启动字体就绪流程；完成后经 AndroidMath 桥放行 Kotlin 的 pageLoaded 门。
+  // 放在这里而不是 DOMContentLoaded 里：katex.min.js 是本 script 之前同步加载的，
+  // 执行到这里 katex 一定已就绪。
+  initFonts();
 </script>
 </body>
 </html>

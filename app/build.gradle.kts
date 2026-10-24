@@ -248,3 +248,10 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+// MathHtmlContractTest 直接读 assets/katex/math.html 做契约断言（防 render 被改回
+// async 导致 evaluateJavascript 拿不到返回值）。Gradle 默认不跟踪测试进程自读的
+// 文件，不声明输入的话改 math.html 后测试不会重跑——v0.0.31 事故就会复现。
+tasks.withType<Test>().configureEach {
+    inputs.file("src/main/assets/katex/math.html")
+}

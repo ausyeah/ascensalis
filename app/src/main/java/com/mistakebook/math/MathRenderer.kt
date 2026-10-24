@@ -460,14 +460,24 @@ class MathRenderer(context: Context) {
         view.isHorizontalScrollBarEnabled = false
         // 关键：不设 SOFTWARE 层，WebView 内容在硬件 surface 里，draw 到软件画布必然全空
         view.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        // 字体就绪桥：math.html 的 initFonts() 等全部 KaTeX 字体加载完后经它放行
+        // pageLoaded 门。必须在 loadUrl 之前注入，否则页面脚本首次执行时桥还不存在。
+        view.addJavascriptInterface(FontsReadyBridge(pageLoaded), "AndroidMath")
 
-        val loaded = CompletableDeferred<Unit>()
-        pageLoaded = loaded
+        val loaded = pageLoaded
         view.webViewClient = object : android.webkit.WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 Log.i(TAG, "KaTeX 页面加载完成: $url")
                 view?.let { relayout(it) }
-                loaded.complete(Unit)
+                // 兜底：字体桥 3 秒内没回调也放行（字体加载失败时降级继续，
+                // 与 v0.0.30 及之前的行为一致，绝不让渲染链路卡死）。
+                // 正常路径由 FontsReadyBridge 先完成，这里重复 complete 是幂等的。
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (!loaded.isCompleted) {
+                        Log.w(TAG, "字体就绪桥超时（3s），降级放行")
+                        loaded.complete(Unit)
+                    }
+                }, FONTS_BRIDGE_TIMEOUT_MS)
             }
 
             override fun onReceivedError(
@@ -483,6 +493,26 @@ class MathRenderer(context: Context) {
         view.loadUrl(ASSET_URL)
         webView = view
         return view
+    }
+
+    /**
+     * math.html → Kotlin 的字体就绪桥。
+     *
+     * v0.0.31 事故的修复核心：render()/renderBatch() 曾是 async 函数，
+     * 而 evaluateJavascript 不等 Promise，Kotlin 只拿到 "{}"，全量渲染失败。
+     * 现在「等字体」只在页面加载阶段做一次，完成后经本桥放行 [pageLoaded]，
+     * 之后的渲染调用全部同步返回，与 evaluateJavascript 语义精确匹配。
+     */
+    private class FontsReadyBridge(
+        private val pageLoaded: CompletableDeferred<Unit>
+    ) {
+        @android.webkit.JavascriptInterface
+        fun onFontsReady() {
+            if (!pageLoaded.isCompleted) {
+                Log.i("MathRenderer", "KaTeX 字体全部就绪（AndroidMath 桥）")
+                pageLoaded.complete(Unit)
+            }
+        }
     }
 
     private suspend fun awaitJavascript(view: WebView, script: String): String? =
@@ -821,6 +851,12 @@ class MathRenderer(context: Context) {
         private const val CACHE_BYTES = 24 * 1024 * 1024
         private const val MAX_BITMAP_EDGE = 2048
         private const val PAGE_LOAD_TIMEOUT_MS = 8_000L
+        /**
+         * 字体就绪桥的兜底超时（onPageFinished 之后多久没桥回调也放行）。
+         * 本地 file:// 字体加载通常 <100ms，3 秒足够；超时只意味着降级到
+         * 旧行为（可能量到回退字体度量），不会卡死渲染链路。
+         */
+        private const val FONTS_BRIDGE_TIMEOUT_MS = 3_000L
         private const val TOLERANCE = 12
         private const val DEFAULT_FONT_PX = 112f
     private const val MATHML_CACHE_ENTRIES = 400
