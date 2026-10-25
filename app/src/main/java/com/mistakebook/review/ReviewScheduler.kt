@@ -82,10 +82,7 @@ object ReviewScheduler {
 
     // App 启动时登记每日周期任务：首次延迟到用户设定的时刻，之后每 24 小时一次。
     fun schedule(context: Context, hour: Int = DEFAULT_HOUR, minute: Int = DEFAULT_MINUTE) {
-        val now = java.time.LocalDateTime.now()
-        var target = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
-        if (!target.isAfter(now)) target = target.plusDays(1)
-        val delayMinutes = java.time.Duration.between(now, target).toMinutes().coerceAtLeast(1)
+        val delayMinutes = initialDelayMinutes(java.time.LocalDateTime.now(), hour, minute)
         val request = PeriodicWorkRequestBuilder<ReviewWorker>(1, TimeUnit.DAYS)
             .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
             .build()
@@ -105,6 +102,25 @@ object ReviewScheduler {
             request
         )
     }
+
+    /**
+     * 从 [now] 到当天 [hour]:[minute] 的首次延迟分钟数；时刻已过则顺延到次日。
+     *
+     * 抽成纯函数是为了单测「initialDelay 语义」——改提醒时间到 21:00，
+     * 现在 10:00，首次延迟必须是 660 分钟（11 小时）而不是 24 小时。
+     * 恰好踩点时（now == 目标）视为已过、顺延次日，避免 initialDelay=0
+     * 让 WorkManager 立刻触发、把「每天一次」变成「启动就响」。
+     */
+    internal fun initialDelayMinutes(
+        now: java.time.LocalDateTime,
+        hour: Int,
+        minute: Int
+    ): Long {
+        var target = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
+        if (!target.isAfter(now)) target = target.plusDays(1)
+        return java.time.Duration.between(now, target).toMinutes().coerceAtLeast(1)
+    }
+
     const val DEFAULT_HOUR = 20
     const val DEFAULT_MINUTE = 0
 }
