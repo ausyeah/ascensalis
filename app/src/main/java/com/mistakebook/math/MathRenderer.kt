@@ -52,8 +52,23 @@ data class RenderedMath(
 class MathRenderer(context: Context) {
 
     private val appContext = context.applicationContext
+
+    /**
+     * 公式位图缓存上限。
+     *
+     * 24MB 在长对话里不够用：每条完整公式约 100~200KB，一场几十条消息
+     * 的辅导对话轻松越过 24MB，LruCache 开始淘汰——用户把消息划出屏幕
+     * 再划回来就是整批重渲染（真机反馈「划回来重新渲染导致超级卡顿」）。
+     * 提到 96MB 后正常强度的对话整轮会话内都不会淘汰；
+     * 低内存设备（isLowRamDevice）自动降到 32MB。
+     */
+    private val cacheBytes: Int = run {
+        val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        if (am?.isLowRamDevice == true) 32 * 1024 * 1024 else 96 * 1024 * 1024
+    }
+
     private val mutex = Mutex()
-    private val cache = object : android.util.LruCache<String, RenderedMath>(CACHE_BYTES) {
+    private val cache = object : android.util.LruCache<String, RenderedMath>(cacheBytes) {
         override fun sizeOf(key: String, value: RenderedMath): Int = value.bitmap.byteCount
     }
 
@@ -667,18 +682,28 @@ class MathRenderer(context: Context) {
                     pending.forEach { (key, _) -> results[key] = null }
                     return@withLock
                 }
+                // 竞态去重（必须在锁内、拿返回前）：并发调用（同屏两条消息
+                // 含同一公式、流式重排与滚动加载同时发生）在等锁期间，
+                // 同 key 可能已被先到者渲染并写入缓存——直接复用，不再重画。
+                // 不去重的话同一个公式要过两遍 WebView，卡顿翻倍。
+                val deduped = mutableListOf<Triple<String, String, Boolean>>()
+                pending.forEach { item ->
+                    val hit = cache.get(item.first)
+                    if (hit != null) results[item.first] = hit else deduped += item
+                }
+                if (deduped.isEmpty()) return@withLock
                 // 批量路径同样要先推主题色：长卷里每个公式都继承 #sheet 的 color。
                 pushForegroundColor(view)
-                val script = buildBatchScript(pending)
+                val script = buildBatchScript(deduped)
                 val raw = awaitJavascript(view, script)
                 if (raw == null) {
                     Log.w(TAG, "批量渲染 evaluateJavascript 无返回")
-                    pending.forEach { (key, _) -> results[key] = null }
+                    deduped.forEach { (key, _) -> results[key] = null }
                     return@withLock
                 }
                 val layout = BatchProtocol.parse(raw) ?: run {
                     Log.w(TAG, "批量布局解析失败, 原始返回(截断): ${raw.take(200)}")
-                    pending.forEach { (key, _) -> results[key] = null }
+                    deduped.forEach { (key, _) -> results[key] = null }
                     return@withLock
                 }
                 // 视口要先撑到长卷高度，view.draw 才画得到全部内容。
@@ -686,7 +711,7 @@ class MathRenderer(context: Context) {
                 relayoutForBatch(view, layout.sheetHeight)
                 val sheet = captureSheet(view, layout.sheetWidth, layout.sheetHeight)
                 if (sheet == null) {
-                    pending.forEach { (key, _) -> results[key] = null }
+                    deduped.forEach { (key, _) -> results[key] = null }
                     return@withLock
                 }
                 layout.entries.forEach { entry ->
@@ -848,7 +873,6 @@ class MathRenderer(context: Context) {
     companion object {
         private const val TAG = "MathRenderer"
         private const val ASSET_URL = "file:///android_asset/katex/math.html"
-        private const val CACHE_BYTES = 24 * 1024 * 1024
         private const val MAX_BITMAP_EDGE = 2048
         private const val PAGE_LOAD_TIMEOUT_MS = 8_000L
         /**

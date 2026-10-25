@@ -82,7 +82,16 @@ fun rememberAutoScrollEffect(
     LaunchedEffect(latestItemKey, coordinator.following) {
         if (coordinator.following && latestItemKey != null) {
             snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }
-            state.animateScrollToItem(0)
+            // 双保险：动画启动**前**再验一次仍在底部。
+            //
+            // following 的翻转经 snapshotFlow 异步落地，effect 重启（key 变化）
+            // 与位置驱动的 pause() 之间存在竞态窗口——窗口里发起的
+            // animateScrollToItem 会把正往上翻历史的人一把拽回底部
+            // （真机反馈「生成时不触底却也会往下滑」）。动画前按当前几何
+            // 复核一次，不在底部就不滚，等用户自己回去再由 resume 触发。
+            if (coordinator.following && state.isAtBottom(tolerancePx)) {
+                state.animateScrollToItem(0)
+            }
         }
     }
 

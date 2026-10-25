@@ -236,9 +236,14 @@ fun RichText(
                 )
 
                 is MarkdownParser.Block.Math -> if (block.complete) {
+                    val key = "d:${block.latex}"
                     MathImage(
                         latex = block.latex,
-                        rendered = mathCache["d:${block.latex}"],
+                        rendered = mathCache[key],
+                        // 渲染中（键还没进缓存）只留占位，**不闪源码**；
+                        // 渲染失败（缓存里是 null）才回退源码——用户反馈
+                        // 「渲染后再显示」：先看到版式稳定的位置，公式到位即换。
+                        pending = !mathCache.containsKey(key),
                         targetFontPx = targetFontPx,
                         display = true,
                         centered = true,
@@ -383,11 +388,13 @@ internal fun tableCellToPlainText(raw: String): String {
 private fun MathImage(
     latex: String,
     rendered: com.mistakebook.math.RenderedMath?,
+    /** true = 渲染尚未完成（键还没进缓存），只留占位；false 且 rendered=null = 渲染失败，回退源码。 */
+    pending: Boolean,
     targetFontPx: Float,
     display: Boolean,
     centered: Boolean,
     color: Color,
-    /** 渲染未就绪时是否回退显示 latex 源码。流式时为 false，只留空白。 */
+    /** 渲染失败时是否回退显示 latex 源码。流式时为 false，只留空白。 */
     showSourceFallback: Boolean = true
 ) {
 val image = rendered?.bitmap
@@ -430,6 +437,16 @@ val image = rendered?.bitmap
                 }
             }
         }
+    } else if (pending) {
+        // 渲染中：留一个正文字号高度的占位，版式先稳住，公式到位后原地替换。
+        // 不显示源码——「渲染后再显示」，避免先闪源码再跳公式的抖动。
+        Spacer(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(with(LocalDensity.current) {
+                    com.mistakebook.math.MathLayout.lineBoxPx(targetFontPx).toDp()
+                })
+        )
     } else if (showSourceFallback) {
         Text(
             text = latex,
@@ -555,7 +572,11 @@ private fun InlineRow(
                         is InlineSpan.Math -> {
                             // `\[..\]` 用块级渲染缓存与更大的高度上限：
                             // display 公式（求和/积分/矩阵）按行内高度压就剩一线，没法看。
-                            val rendered = mathCache[mathKey(span)]
+                            val key = mathKey(span)
+                            val rendered = mathCache[key]
+                            // 键不在缓存 = 还在渲染队列里，占位不闪源码；
+                            // 缓存里是 null = 渲染失败，才回退源码（静态文本）。
+                            val pending = !mathCache.containsKey(key)
                             val image = rendered?.bitmap
                             val maxHeightPx = if (span.display) {
                                 com.mistakebook.math.MathLayout.displayMathMaxHeightPx(targetFontPx)
@@ -604,7 +625,8 @@ private fun InlineRow(
                                                 with(density) { h.toDp() }
                                             )
                                         )
-                                    } else if (showSourceFallback) {
+                                    } else if (!pending && showSourceFallback) {
+                                        // 只在**渲染失败**后回退源码；渲染中的占位框里不放字
                                         Text(
                                             text = span.latex,
                                             style = MaterialTheme.typography.bodySmall,
