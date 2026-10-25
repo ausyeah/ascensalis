@@ -643,14 +643,32 @@ class ChatViewModel(
      *
      * 追加而不是覆盖：`updateNote` 会 trim，这里自己拼好换行——
      * 用户此前的笔记一个字都不能丢。
+     *
+     * ## 没有静默出口（用户反馈「点了没反应」后补的）
+     *
+     * 每个走不下去的分支都给 snackbar 说明；正常情况下自由会话
+     * 根本不显示这个按钮（入口在 ChatScreen 按 questionId 门控），
+     * 这里的防御分支只是兜底。
      */
     fun saveToNote(messageId: Long) {
-        val qid = questionId ?: return
+        val qid = questionId
+        if (qid == null) {
+            _events.trySend(ChatEvent.Info("只有题目会话才能存入备注"))
+            return
+        }
         viewModelScope.launch {
-            val message = repository.findMessageById(messageId) ?: return@launch
+            val message = repository.findMessageById(messageId)
+            if (message == null) {
+                _events.trySend(ChatEvent.Error("这条消息已不存在，无法存入备注"))
+                return@launch
+            }
+            val body = message.content.trim().take(2000)
+            if (body.isBlank()) {
+                _events.trySend(ChatEvent.Info("这条回复没有内容可存"))
+                return@launch
+            }
             val existing = questionRepository.findById(qid)?.note.orEmpty()
             val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
-            val body = message.content.trim().take(2000)
             val merged = buildString {
                 if (existing.isNotBlank()) {
                     append(existing.trim())

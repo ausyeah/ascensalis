@@ -433,8 +433,11 @@ fun ChatScreen(
                             pendingDeleteId = id
                             showDeleteDialog = true
                         },
-                        // T13：批改结果「存入题目备注」（仅题目会话的 ChatScreen 传得进来）
-                        onSaveToNote = viewModel::saveToNote
+                        // T13：批改结果「存入题目备注」。**只有题目会话才显示按钮**：
+                        // 早先无条件传回调，自由会话里图标照画、点下去 saveToNote
+                        // 第一行 questionId==null 静默退出——用户看到的就是
+                        // 「第二个图标点了没反应」。
+                        onSaveToNote = questionId?.let { viewModel::saveToNote }
                     )
                 }
 
