@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -60,10 +62,93 @@ data class VariantState(
     val visible: Boolean get() = generating || draft != null || error != null
 }
 
+/**
+ * 辅助图（F-IMG-4）的界面状态。
+ *
+ * 与 [VariantState] 同理：独立于 [DetailUiState]——题目数据刷新
+ * （改难度、改备注）不该把已经生成的图清掉，它有自己的生命周期。
+ */
+data class AuxImageState(
+    val generating: Boolean = false,
+    /** 已生成的图片路径（磁盘缓存文件）。 */
+    val path: String? = null,
+    /** 模型写的生图描述（出图后展示来源）。 */
+    val prompt: String? = null,
+    val error: String? = null
+) {
+    val visible: Boolean get() = generating || path != null || error != null
+}
+
 class DetailViewModel(
     private val container: AppContainer,
     private val questionId: Long
 ) : ViewModel() {
+
+    private val _auxImage = MutableStateFlow(AuxImageState())
+    val auxImage: StateFlow<AuxImageState> = _auxImage.asStateFlow()
+
+    init {
+        // 进详情页先回填缓存：这道题出过辅助图就直接显示，不用再点一次按钮。
+        viewModelScope.launch {
+            val question = uiState.mapNotNull { it.question }.first()
+            val profile = container.settingsStore.snapshotNow().activeImageProfile ?: return@launch
+            val key = container.imageDiskCache.keyFor(auxSeed(question), profile.model)
+            container.imageDiskCache.peek(key)?.let { file ->
+                _auxImage.value = AuxImageState(path = file.absolutePath)
+            }
+        }
+    }
+
+    /**
+     * 生图缓存种子：题目 id + 题干 hash。
+     *
+     * 带题干 hash 而不是只用 id：改过题干的题是另一道题，
+     * 图也该重新生成（否则「改了题、图还是旧的」）。
+     */
+    private fun auxSeed(question: Question): String =
+        "q$questionId-${question.stem.hashCode()}"
+
+    /**
+     * 生成这道题的辅助图：**LLM 出英文描述 → 生图 API 出图 → 磁盘缓存**。
+     *
+     * 与单词场景图共用 [com.mistakebook.pipeline.SceneImageGenerator]，
+     * 差别只在提示词与缓存种子。
+     */
+    fun generateAuxImage() {
+        viewModelScope.launch {
+            val question = uiState.value.question ?: return@launch
+            if (_auxImage.value.generating) return@launch
+            _auxImage.value = AuxImageState(generating = true)
+            val body = buildString {
+                append(question.stem.trim())
+                if (question.answer.isNotBlank()) append("\nAnswer: ").append(question.answer.trim())
+            }
+            val result = container.sceneImageGenerator.generate(
+                cacheKeySeed = auxSeed(question),
+                systemPrompt = "Based on this problem, describe a simple educational illustration. " +
+                    "Reply with ONLY the image prompt, 50 words max.",
+                userPrompt = body
+            )
+            _auxImage.value = when (result) {
+                is com.mistakebook.pipeline.SceneImageResult.Cached ->
+                    AuxImageState(path = result.file.absolutePath)
+
+                is com.mistakebook.pipeline.SceneImageResult.Generated ->
+                    AuxImageState(path = result.file.absolutePath, prompt = result.prompt)
+
+                is com.mistakebook.pipeline.SceneImageResult.NotConfigured ->
+                    AuxImageState(error = "尚未配置生图渠道：请到设置 → 生图设置里添加一套")
+
+                is com.mistakebook.pipeline.SceneImageResult.Failed ->
+                    AuxImageState(error = result.message)
+            }
+        }
+    }
+
+    /** 关掉辅助图（失败提示用；图本身留在缓存里，下次进来还在）。 */
+    fun dismissAuxImage() {
+        _auxImage.value = AuxImageState()
+    }
     val uiState: StateFlow<DetailUiState> = combine(
         container.questionRepository.observeById(questionId),
         container.subjectRepository.observeAll(),

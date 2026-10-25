@@ -399,6 +399,12 @@
     <string name="edit_subject_manual_hint">例如：通信原理</string>
     <string name="detail_note_saved">备注已保存</string>
     <string name="detail_variant_generate">举一反三：出一道同源变式题</string>
+
+    <!-- 辅助图（F-IMG-4） -->
+    <string name="detail_aux_image">辅助图</string>
+    <string name="detail_aux_generate">生成辅助图</string>
+    <string name="detail_aux_generating">生成中…</string>
+    <string name="detail_aux_dismiss">知道了</string>
     <string name="detail_variant_title">变式题</string>
     <string name="detail_variant_generating">正在基于这道题出变式…</string>
     <string name="detail_variant_save">存为错题</string>
