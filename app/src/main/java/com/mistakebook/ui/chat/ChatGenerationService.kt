@@ -189,6 +189,11 @@ class ChatGenerationService : Service() {
         // 与 role=tool 两种本地域模型（OutgoingMessage）表达不了的消息。
         val llmMessages = context.messages.map { it.toLlm() }.toMutableList()
 
+        // 用户这条原始问题：搜索时作为 ori_question 传给 DeepSeek Search API，
+        // 官方用它改进 query 理解（模型生成的 query 有时过度精简）。
+        val lastUserQuestion = context.messages.lastOrNull { it.role == ChatRole.USER }
+            ?.text?.takeIf { it.isNotBlank() }
+
         val buffer = StringBuilder()
         val thinking = StringBuilder()
         val fullAnswer = StringBuilder()
@@ -337,7 +342,10 @@ class ChatGenerationService : Service() {
                     val result = if (query == null) {
                         "搜索未执行：参数缺少 query 字段，请修正后重试。"
                     } else {
-                        executeWebSearch(container, settings, profile, query)
+                        executeWebSearch(
+                            container, settings, profile, query,
+                            oriQuestion = lastUserQuestion
+                        )
                     }
                     ChatGenerationBus.publish(
                         ChatGenerationBus.Snapshot(assistantId = assistantId, content = "", sessionId = sessionId)
@@ -490,13 +498,20 @@ class ChatGenerationService : Service() {
         container: com.mistakebook.di.AppContainer,
         settings: com.mistakebook.data.prefs.SettingsSnapshot,
         profile: com.mistakebook.data.prefs.LlmProfile,
-        query: String
+        query: String,
+        /** 用户原始问题：传给 DeepSeek Search API 的 ori_question，改进 query 理解。 */
+        oriQuestion: String? = null
     ): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {
             kotlinx.coroutines.withTimeoutOrNull(60_000L) {
-                val deepSeekKey = profile.apiKey.takeIf {
-                    it.isNotBlank() && profile.baseUrl.contains("deepseek", ignoreCase = true)
-                }
+                // DeepSeek 搜索 Key 三级来源：设置里单独配的 > 对话模型的
+                // DeepSeek Key（复用）。两者都空时该出口不可用。
+                val deepSeekKey = com.mistakebook.data.chat.pickSearchKey(
+                    explicitKey = settings.deepseekSearchApiKey,
+                    fallbackKey = profile.apiKey.takeIf {
+                        it.isNotBlank() && profile.baseUrl.contains("deepseek", ignoreCase = true)
+                    }
+                )
                 val tavilyKey = settings.tavilyApiKey.takeIf { it.isNotBlank() }
                 val attempts: List<Pair<Int, String>> = when (settings.chatSearchProvider) {
                     com.mistakebook.data.chat.ChatSearchProvider.DEEPSEEK ->
@@ -510,12 +525,14 @@ class ChatGenerationService : Service() {
                 }
                 if (attempts.isEmpty()) {
                     return@withTimeoutOrNull "搜索未执行：未配置可用的搜索渠道" +
-                        "（DeepSeek 渠道 Key 或 Tavily API Key，见设置页）。"
+                        "（DeepSeek API Key 或 Tavily API Key，见设置页「联网搜索」）。"
                 }
                 for ((which, key) in attempts) {
                     val results = runCatching {
                         if (which == 0) {
-                            com.mistakebook.data.chat.DeepSeekSearch.search(container.searchHttpClient, key, query)
+                            com.mistakebook.data.chat.DeepSeekSearch.search(
+                                container.searchHttpClient, key, query, oriQuestion
+                            )
                         } else {
                             com.mistakebook.data.chat.TavilySearch.search(container.searchHttpClient, key, query)
                         }

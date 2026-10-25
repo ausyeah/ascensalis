@@ -116,6 +116,7 @@ class SettingsStore(context: Context) {
             wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true,
             chatSearchEnabled = prefs[KEY_CHAT_SEARCH_ENABLED] ?: true,
             chatSearchProvider = ChatSearchProvider.fromKey(prefs[KEY_CHAT_SEARCH_PROVIDER]),
+            deepseekSearchApiKey = prefs[KEY_DEEPSEEK_SEARCH_API_KEY].orEmpty(),
             tavilyApiKey = prefs[KEY_TAVILY_API_KEY].orEmpty(),
             pomodoroAutoRecord = prefs[KEY_POMODORO_AUTO_RECORD] ?: true,
             pomodoroBreakLoop = prefs[KEY_POMODORO_BREAK_LOOP] ?: false,
@@ -423,6 +424,10 @@ class SettingsStore(context: Context) {
     suspend fun setChatSearchProvider(provider: ChatSearchProvider) =
         editString(KEY_CHAT_SEARCH_PROVIDER, provider.name.lowercase())
 
+    /** 保存 DeepSeek 搜索服务专用 API Key（留空 = 复用 DeepSeek 模型 Key）。 */
+    suspend fun setDeepseekSearchApiKey(key: String) =
+        editString(KEY_DEEPSEEK_SEARCH_API_KEY, key.trim())
+
     /** 保存 Tavily API Key（去掉首尾空白）。 */
     suspend fun setTavilyApiKey(key: String) =
         editString(KEY_TAVILY_API_KEY, key.trim())
@@ -487,6 +492,7 @@ class SettingsStore(context: Context) {
         val KEY_POMODORO_BREAK_MINUTES = intPreferencesKey("pomodoro_break_minutes")
         val KEY_CHAT_SEARCH_ENABLED = booleanPreferencesKey("chat_search_enabled")
         val KEY_CHAT_SEARCH_PROVIDER = stringPreferencesKey("chat_search_provider")
+        val KEY_DEEPSEEK_SEARCH_API_KEY = stringPreferencesKey("deepseek_search_api_key")
         val KEY_TAVILY_API_KEY = stringPreferencesKey("tavily_api_key")
 
         const val DEFAULT_WORDBOOK_DAILY_GOAL = 20

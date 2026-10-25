@@ -70,40 +70,37 @@ class WebSearchTest {
     }
 
     @Test
-    fun deepSeekParseMergesBlocksAndCitations() {
+    fun deepSeekParseReadsResultsArray() {
+        // v0.0.43 起 DeepSeek 出口走原生 Search API（/v1/tools/search）：
+        // results 数组逐条映射，summary 优先作摘录（官方 intended for a model to read）。
         val body = """
-            {"content":[
-              {"type":"web_search_tool_result","web_search_tool_result":[
-                 {"type":"web_search_result","url":"https://d.com/1","title":"DeepSeek 官网"},
-                 {"type":"web_search_result","url":"https://d.com/2","title":"第二条"}
-              ]},
-              {"type":"text","text":"回答正文[1]…","citations":[
-                 {"type":"web_search_result_location","url":"https://d.com/1","cited_text":"这是第一条的原文摘录","title":"DeepSeek 官网"}
-              ]}
+            {"results":[
+              {"rerank_score":2.4,"title":"DeepSeek 官网","url":"https://d.com/1",
+               "snippet":"短摘","summary":"模型可读的长摘要","authority":3},
+              {"rerank_score":1.1,"title":"第二条","url":"https://d.com/2","content":"正文"}
             ]}
         """.trimIndent()
         val results = DeepSeekSearch.parse(body)
         assertEquals(2, results.size)
         assertEquals("DeepSeek 官网", results[0].title)
         assertEquals("https://d.com/1", results[0].url)
-        assertEquals("这是第一条的原文摘录", results[0].snippet)
-        // 没有 citation 的条目摘录为空，不硬造
-        assertEquals("", results[1].snippet)
+        assertEquals("模型可读的长摘要", results[0].snippet)
+        // 没有 summary 时降级 content
+        assertEquals("正文", results[1].snippet)
     }
 
     @Test
-    fun deepSeekParseDeduplicatesByUrl() {
-        val body = """
-            {"content":[
-              {"type":"web_search_tool_result","web_search_tool_result":[
-                 {"type":"web_search_result","url":"https://d.com/1","title":"A"},
-                 {"type":"web_search_result","url":"https://d.com/1","title":"A 重复"}
-              ]}
-            ]}
-        """.trimIndent()
+    fun deepSeekParseKeepsEveryResultEntry() {
+        // 原生 API 每个 result 独立成条：没有「来源块 + 引用块」两处合并的问题，
+        // 也就不需要 dedup——出现两条同 url 就原样保留两条，交给调用方格式化。
+        val body = """{"results":[
+            {"title":"A","url":"https://d.com/1","summary":"s1"},
+            {"title":"B","url":"https://d.com/1","summary":"s2"}
+        ]}"""
         val results = DeepSeekSearch.parse(body)
-        assertEquals(1, results.size)
+        assertEquals(2, results.size)
         assertEquals("A", results[0].title)
+        assertEquals("B", results[1].title)
     }
 
     @Test

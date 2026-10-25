@@ -14,25 +14,23 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * 会话联网搜索（v0.0.41）。
+ * 会话联网搜索。
  *
  * ## 两个实现，一条注入路径
  *
- * - **DeepSeek**（默认）：官方搜索走 Anthropic 兼容端点
- *   `/anthropic/v1/messages`，在请求里声明服务端工具
- *   `web_search_20250305`，服务端完成搜索后把结构化来源放进
- *   `web_search_tool_result` 内容块——复用用户已配的 DeepSeek Key，
- *   无需新密钥；
+ * - **DeepSeek**：官方原生 Search API（`/v1/tools/search`），Bearer 鉴权，
+ *   结构化 results——与 Tavily 同级的纯搜索服务，**不绑定对话模型**：
+ *   对话用别家大模型时，单独配一把 DeepSeek Key 即可调用它的搜索；
  * - **Tavily**：独立搜索服务，POST /search 返回 results 数组，
  *   需要单独的 Key（免费档每月 1000 次）。
  *
  * 两条路都汇成 [WebSearchResult] 列表，经 [WebSearchFormatter.format]
- * 变成注入上下文的文本块——模型怎么用这些结果是它自己的事，
+ * 变成工具结果回传给模型——模型怎么用这些结果是它自己的事，
  * 我们只负责把新鲜的网页信息递到它面前。
  *
  * ## 搜索是尽力而为
  *
- * 任何失败（无 Key / 网络 / 解析）由调用方吞掉并跳过注入，
+ * 任何失败（无 Key / 网络 / 解析）由调用方吞掉并降级说明，
  * 绝不因为搜索失败把整轮对话打死——没有联网结果的普通回答
  * 也远好过报错。
  */
@@ -44,7 +42,7 @@ data class WebSearchResult(
 
 /** 搜索出口的配置形态（存 DataStore 的是 name）。 */
 enum class ChatSearchProvider {
-    /** DeepSeek 官方服务端搜索（复用 DeepSeek 渠道的 Key）。 */
+    /** DeepSeek 官方原生 Search API（独立 Key，可复用 DeepSeek 模型 Key）。 */
     DEEPSEEK,
 
     /** Tavily 独立搜索服务（独立 Key）。 */
@@ -130,113 +128,81 @@ object TavilySearch {
 }
 
 /**
- * DeepSeek 官方服务端搜索：Anthropic 兼容 `/anthropic/v1/messages`
- * 携带 `web_search_20250305` 服务端工具。
+ * DeepSeek 官方搜索服务（2026-10-17 开放的原生 Search API）。
  *
- * 来源从 `web_search_tool_result` 内容块取（结构化，绝不从模型
- * 自由文本里抓 URL）；摘录从 text 块的 citations 里按 url 关联
- * （cited_text）——官方教程口径。
+ * `POST https://api.deepseek.com/v1/tools/search`，Bearer 鉴权，
+ * 返回结构化 results 数组——与 [TavilySearch] 同级的**纯搜索服务**，
+ * 与对话用哪个模型完全解耦：
+ *
+ * - 对话模型是 DeepSeek 官方：可复用同一把 Key；
+ * - 对话模型是别家（GPT / Qwen / Kimi…）：在设置里单独配一把
+ *   DeepSeek Key，照样能调它的搜索服务——搜索能力不绑定对话模型。
+ *
+ * 计费按成功请求（$0.75/千次，失败与空结果不计费），账号级 QPS 5。
+ *
+ * ## 为什么换掉旧的 Anthropic 兼容实现
+ *
+ * 旧版走 `/anthropic/v1/messages` + 服务端工具 `web_search_20250305`，
+ * 本质是**让 DeepSeek 模型替我们搜**：慢、烧 token、还依赖模型端点。
+ * 原生 Search API 是一次纯 HTTP 检索，官方明确定位为
+ * "give agents and RAG applications access to live web content"。
  */
 object DeepSeekSearch {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** 纯解析函数（可单测）：/messages 响应体 → 结果列表。 */
+    private const val ENDPOINT = "https://api.deepseek.com/v1/tools/search"
+
+    /** 默认取回条数。官方上限 50；5 条够模型作答又不撑爆上下文。 */
+    private const val RESULT_COUNT = 5
+
+    /**
+     * 纯解析函数（可单测）：Search API 响应体 → 结果列表。
+     *
+     * 摘录字段三选一，按「官方推荐模型阅读的粒度」优先：
+     * `summary`（600~800 字符，官方明确说 intended for a model to read）
+     * > `content`（全文，need_content=true 才有） > `snippet`（短摘）。
+     */
     fun parse(body: String): List<WebSearchResult> {
         val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return emptyList()
-        val content = (root["content"] as? kotlinx.serialization.json.JsonArray) ?: return emptyList()
-        val byUrl = linkedMapOf<String, WebSearchResult>()
-        val snippets = linkedMapOf<String, String>()
-        for (el in content) {
-            val block = el as? JsonObject ?: continue
-            when ((block["type"] as? JsonPrimitive)?.contentOrNull) {
-                "web_search_tool_result" -> {
-                    // 块内可能是 {"web_search_tool_result": [条目...]} 或直接是数组，两形态都容
-                    val entries = (block["web_search_tool_result"] as? kotlinx.serialization.json.JsonArray)
-                        ?: continue
-                    for (entry in entries) {
-                        val o = entry.jsonObject
-                        val url = (o["url"] as? JsonPrimitive)?.contentOrNull.orEmpty()
-                        if (url.isBlank() || url in byUrl) continue
-                        byUrl[url] = WebSearchResult(
-                            title = (o["title"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
-                            url = url,
-                            snippet = ""
-                        )
+        val arr = (root["results"] as? kotlinx.serialization.json.JsonArray) ?: return emptyList()
+        return arr.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val url = (o["url"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            if (url.isBlank()) return@mapNotNull null
+            WebSearchResult(
+                title = (o["title"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                url = url,
+                snippet = listOf("summary", "content", "snippet")
+                    .mapNotNull { key ->
+                        (o[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
                     }
-                }
-
-                "text" -> {
-                    val citations = (block["citations"] as? kotlinx.serialization.json.JsonArray) ?: continue
-                    for (c in citations) {
-                        val o = c.jsonObject
-                        val url = (o["url"] as? JsonPrimitive)?.contentOrNull.orEmpty()
-                        val cited = (o["cited_text"] as? JsonPrimitive)?.contentOrNull.orEmpty()
-                        if (url.isNotBlank() && cited.isNotBlank() && url !in snippets) {
-                            snippets[url] = cited
-                        }
-                    }
-                }
-            }
+                    .firstOrNull().orEmpty()
+            )
         }
-        return byUrl.values.map { it.copy(snippet = snippets[it.url].orEmpty()) }
     }
 
     suspend fun search(
         client: OkHttpClient,
         apiKey: String,
-        query: String
+        query: String,
+        /** 用户原始问题：官方用于改进 query 理解，可空。 */
+        oriQuestion: String? = null
     ): List<WebSearchResult> {
         val body = json.encodeToString(
             kotlinx.serialization.json.JsonObject.serializer(),
             kotlinx.serialization.json.buildJsonObject {
-                put("model", kotlinx.serialization.json.JsonPrimitive("deepseek-flash"))
-                put("max_tokens", kotlinx.serialization.json.JsonPrimitive(1024))
-                put(
-                    "messages",
-                    kotlinx.serialization.json.buildJsonArray {
-                        add(
-                            kotlinx.serialization.json.buildJsonObject {
-                                put("role", kotlinx.serialization.json.JsonPrimitive("user"))
-                                put(
-                                    "content",
-                                    kotlinx.serialization.json.buildJsonArray {
-                                        add(
-                                            kotlinx.serialization.json.buildJsonObject {
-                                                put("type", kotlinx.serialization.json.JsonPrimitive("text"))
-                                                put(
-                                                    "text",
-                                                    kotlinx.serialization.json.JsonPrimitive(
-                                                        "Perform a web search for: " + query.take(400)
-                                                    )
-                                                )
-                                            }
-                                        )
-                                    }
-                                )
-                            }
-                        )
-                    }
-                )
-                put(
-                    "tools",
-                    kotlinx.serialization.json.buildJsonArray {
-                        add(
-                            kotlinx.serialization.json.buildJsonObject {
-                                put("type", kotlinx.serialization.json.JsonPrimitive("web_search_20250305"))
-                                put("name", kotlinx.serialization.json.JsonPrimitive("web_search"))
-                                put("max_uses", kotlinx.serialization.json.JsonPrimitive(3))
-                            }
-                        )
-                    }
-                )
+                put("query", kotlinx.serialization.json.JsonPrimitive(query.take(128)))
+                put("count", kotlinx.serialization.json.JsonPrimitive(RESULT_COUNT))
+                put("need_content", kotlinx.serialization.json.JsonPrimitive(true))
+                if (!oriQuestion.isNullOrBlank()) {
+                    put("ori_question", kotlinx.serialization.json.JsonPrimitive(oriQuestion.take(128)))
+                }
             }
         ).toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
-            .url("https://api.deepseek.com/anthropic/v1/messages")
-            .header("x-api-key", apiKey)
+            .url(ENDPOINT)
             .header("Authorization", "Bearer $apiKey")
-            .header("anthropic-version", "2023-06-01")
             .post(body)
             .build()
         val response = client.newCall(request).execute()
@@ -247,6 +213,16 @@ object DeepSeekSearch {
         }
     }
 }
+
+/**
+ * 搜索 Key 挑选（**纯函数，可单测**）。
+ *
+ * 显式配的 Key 永远优先；没配才退回复用对话模型的 Key。
+ * 两个都空返回 null——调用方据此提示「去设置页配 Key」，
+ * 而不是拿空串去打一次注定 401 的请求。
+ */
+fun pickSearchKey(explicitKey: String?, fallbackKey: String?): String? =
+    explicitKey?.takeIf { it.isNotBlank() } ?: fallbackKey?.takeIf { it.isNotBlank() }
 
 /** 建搜索专用的 OkHttpClient：比对话更长的超时（服务端搜索要真爬网页）。 */
 fun searchHttpClient(): OkHttpClient = OkHttpClient.Builder()

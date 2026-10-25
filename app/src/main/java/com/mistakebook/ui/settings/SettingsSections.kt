@@ -1465,6 +1465,18 @@ internal fun SearchProviderSection(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // DeepSeek 出口也配独立 Key：与 Tavily 对等的可配置形态。
+            // 留空时执行层自动回退到已配置的 DeepSeek 模型 Key（pickSearchKey），
+            // 所以这里是「增强配置」而非「必填」——用别家大模型对话时
+            // 单独填一把，搜索服务照常走 DeepSeek 官方 Search API。
+            if (snapshot.chatSearchProvider == ChatSearchProvider.DEEPSEEK) {
+                Spacer(Modifier.height(10.dp))
+                PasswordField(
+                    label = stringResource(R.string.settings_search_deepseek_key),
+                    value = snapshot.deepseekSearchApiKey,
+                    onValueChange = viewModel::setDeepseekSearchApiKey
+                )
+            }
             if (snapshot.chatSearchProvider == ChatSearchProvider.TAVILY) {
                 Spacer(Modifier.height(10.dp))
                 PasswordField(

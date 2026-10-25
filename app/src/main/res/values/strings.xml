@@ -254,9 +254,10 @@
     <string name="settings_search_desc">开启后，模型在需要最新信息或事实依据时会自主调用搜索工具（用不用、什么时候用由模型决定）。API 配置如下。</string>
     <string name="settings_search_enabled">启用联网搜索</string>
     <string name="settings_search_provider">搜索出口</string>
+    <string name="settings_search_deepseek_key">DeepSeek API Key（sk-…）</string>
     <string name="settings_search_tavily_key">Tavily API Key（tvly-…）</string>
-    <string name="settings_search_tavily_hint">在 tavily.com 免费注册获取，每月 1000 次免费额度。选 DeepSeek 出口时无需填写（复用 DeepSeek 渠道 Key）。</string>
-    <string name="settings_search_deepseek_hint">复用设置里 DeepSeek 渠道的 API Key 做服务端搜索；当前供应商不是 DeepSeek 或失败时，自动改用 Tavily。</string>
+    <string name="settings_search_tavily_hint">在 tavily.com 免费注册获取，每月 1000 次免费额度。选 DeepSeek 出口时无需填写。</string>
+    <string name="settings_search_deepseek_hint">调用 DeepSeek 官方搜索服务（api.deepseek.com/v1/tools/search），与对话用哪个模型无关：用别家大模型对话时，填一把 DeepSeek Key 即可获得搜索能力。留空则自动复用已配置的 DeepSeek 模型 Key；两者都没有时自动改用 Tavily。</string>
 
     <string name="settings_active_profile">当前使用</string>
     <string name="settings_add_profile">新增配置</string>

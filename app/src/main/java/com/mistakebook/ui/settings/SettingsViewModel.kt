@@ -258,11 +258,16 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         store.setChatSearchEnabled(value)
     }
 
-    /** 切换搜索出口（DeepSeek 官方搜索 / Tavily）。 */
+    /** 切换搜索出口（DeepSeek 官方 Search API / Tavily）。 */
     fun setChatSearchProvider(provider: com.mistakebook.data.chat.ChatSearchProvider) =
         viewModelScope.launch {
             store.setChatSearchProvider(provider)
         }
+
+    /** 保存 DeepSeek 搜索服务专用 Key（留空 = 复用 DeepSeek 模型 Key）。 */
+    fun setDeepseekSearchApiKey(key: String) = viewModelScope.launch {
+        store.setDeepseekSearchApiKey(key)
+    }
 
     /** 保存 Tavily API Key（去首尾空白）。 */
     fun setTavilyApiKey(key: String) = viewModelScope.launch {

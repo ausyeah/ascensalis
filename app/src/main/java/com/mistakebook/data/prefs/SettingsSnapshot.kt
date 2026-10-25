@@ -76,10 +76,20 @@ data class SettingsSnapshot(
      */
     val chatSearchEnabled: Boolean = true,
 
-    /** 搜索出口：DeepSeek 官方服务端搜索（默认）或 Tavily。 */
+    /** 搜索出口：DeepSeek 官方 Search API（默认）或 Tavily。 */
     val chatSearchProvider: ChatSearchProvider = ChatSearchProvider.DEEPSEEK,
 
-    /** Tavily API Key（选 Tavily 时必填；DeepSeek 复用其渠道 Key）。 */
+    /**
+     * DeepSeek 搜索服务的专用 API Key（选 DeepSeek 出口时可配）。
+     *
+     * 留空则自动复用已配置的 DeepSeek 模型 Key——对话模型就是
+     * DeepSeek 官方时零额外配置。用别家大模型对话时，在这里单独
+     * 配一把 DeepSeek Key，搜索服务照常可用（Key 用于官方
+     * api.deepseek.com，与对话走的中转站相互独立）。
+     */
+    val deepseekSearchApiKey: String = "",
+
+    /** Tavily API Key（选 Tavily 时必填；DeepSeek 出口无需此项）。 */
     val tavilyApiKey: String = "",
 
     // ===== 番茄钟（T2 到点闭环） =====

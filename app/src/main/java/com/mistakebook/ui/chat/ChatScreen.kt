@@ -1671,7 +1671,7 @@ private fun ModelPickerSheet(
                 Text(
                     when (searchProvider) {
                         ChatSearchProvider.DEEPSEEK ->
-                            "复用 DeepSeek 渠道的 API Key 做服务端搜索；当前供应商不是 DeepSeek 或失败时，自动改用 Tavily。"
+                            "调用 DeepSeek 官方搜索服务，与对话模型无关：用别家大模型时也能获得搜索能力。API Key 在「设置 → 联网搜索」配置，留空则复用 DeepSeek 模型 Key。"
 
                         ChatSearchProvider.TAVILY ->
                             "使用 Tavily 独立搜索服务，API Key 请在「设置 → 识别与大模型 → 联网搜索」里配置。"
