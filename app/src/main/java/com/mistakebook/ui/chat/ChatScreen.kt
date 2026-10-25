@@ -647,20 +647,29 @@ private fun ContextStatusRow(
             }
         }
         if (compressing) {
-            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(8.dp))
-        }
-        TextButton(onClick = onCompress, enabled = !compressing) {
-            Icon(
-                Icons.Default.Compress,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = stringResource(R.string.chat_compress),
-                style = MaterialTheme.typography.labelMedium
-            )
+            // 进行中状态直接长在按钮上（用户反馈：角落里 16dp 小圈根本看不见，
+            // 「不知道是正在压缩还是没反应」）。按钮换成「压缩中…」并禁用防连点。
+            TextButton(onClick = onCompress, enabled = false) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.chat_compressing),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+        } else {
+            TextButton(onClick = onCompress) {
+                Icon(
+                    Icons.Default.Compress,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = stringResource(R.string.chat_compress),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
         }
     }
 }

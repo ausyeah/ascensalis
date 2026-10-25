@@ -497,6 +497,7 @@
     <string name="chat_summary_bubble_title">上文摘要</string>
     <string name="chat_last_prompt_tokens">上次请求 ≈ %1$d tokens</string>
     <string name="chat_compress">压缩</string>
+    <string name="chat_compressing">压缩中…</string>
     <string name="chat_ocr_retry">重试</string>
     <string name="chat_truncated_title">回答超长被截断</string>
     <string name="chat_truncated_body">回答达到了长度上限。可以让它「简短一点」，或换一个上下文更长的模型。</string>

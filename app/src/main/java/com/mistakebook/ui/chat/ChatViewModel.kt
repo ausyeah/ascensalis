@@ -932,8 +932,17 @@ class ChatViewModel(
     /**
      * 手动/自动压缩上下文：把旧轮次滚成一份摘要。
      *
-     * 失败静默——压缩只是增强，失败不该打断用户。
-     * 进行中连点直接返回，避免生成多份互相覆盖的摘要。
+     * ## 每个结局都有反馈（用户反馈「点了没反应」后加的）
+     *
+     * 早期版本把 compress 的四个早退（模型未配置/历史太短/无可压内容/空响应）
+     * 和异常**全部静默吞掉**，用户点完按钮界面纹丝不动，不知道是成功、
+     * 在压缩还是压根没做事。现在：
+     * - 成功 → snackbar「已生成上文摘要…」+ 状态条出现「上文摘要生效中」；
+     * - 没配模型 / 历史太短 → snackbar 说明原因；
+     * - 失败 → snackbar「压缩失败：<原因>」。
+     *
+     * 进行中连点直接返回，避免生成多份互相覆盖的摘要；
+     * 进行中按钮本身会变成「压缩中…」并禁用。
      */
     fun compressContext() {
         val sessionId = _state.value.sessionId
@@ -942,19 +951,26 @@ class ChatViewModel(
             _state.value = _state.value.copy(compressing = true)
             try {
                 val profile = settingsStore.settings.first().activeProfile
-                val summary = if (profile != null) {
-                    compressor.compress(sessionId, profile)
-                } else {
-                    null
+                if (profile == null || !profile.isConfigured()) {
+                    _state.value = _state.value.copy(compressing = false)
+                    _events.trySend(ChatEvent.Info("未配置大模型，无法压缩上下文"))
+                    return@launch
                 }
+                val summary = compressor.compress(sessionId, profile)
                 _state.value = _state.value.copy(
                     compressing = false,
                     summaryActive = summary != null || _state.value.summaryActive
                 )
+                if (summary != null) {
+                    _events.trySend(ChatEvent.Info("已生成上文摘要，更早的对话已压缩进去"))
+                } else {
+                    _events.trySend(ChatEvent.Info("历史还很短，暂时没有可压缩的内容"))
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (t: Throwable) {
                 _state.value = _state.value.copy(compressing = false)
+                _events.trySend(ChatEvent.Error("压缩失败：${t.message ?: t.javaClass.simpleName}"))
             }
         }
     }
