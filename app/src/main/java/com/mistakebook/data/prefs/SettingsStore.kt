@@ -14,6 +14,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.mistakebook.BuildConfig
+import com.mistakebook.data.chat.ChatSearchProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -113,6 +114,9 @@ class SettingsStore(context: Context) {
             wordbookDailyGoal = (prefs[KEY_WORDBOOK_DAILY_GOAL] ?: DEFAULT_WORDBOOK_DAILY_GOAL)
                 .coerceIn(MIN_WORDBOOK_DAILY_GOAL, MAX_WORDBOOK_DAILY_GOAL),
             wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true,
+            chatSearchEnabled = prefs[KEY_CHAT_SEARCH_ENABLED] ?: true,
+            chatSearchProvider = ChatSearchProvider.fromKey(prefs[KEY_CHAT_SEARCH_PROVIDER]),
+            tavilyApiKey = prefs[KEY_TAVILY_API_KEY].orEmpty(),
             pomodoroAutoRecord = prefs[KEY_POMODORO_AUTO_RECORD] ?: true,
             pomodoroBreakLoop = prefs[KEY_POMODORO_BREAK_LOOP] ?: false,
             pomodoroBreakMinutes = prefs[KEY_POMODORO_BREAK_MINUTES] ?: 10,
@@ -411,6 +415,18 @@ class SettingsStore(context: Context) {
         editString(KEY_NETWORK_MODE, value)
     }
 
+    /** 开关会话联网搜索。写入即生效，下一轮对话带上。 */
+    suspend fun setChatSearchEnabled(value: Boolean) =
+        editBoolean(KEY_CHAT_SEARCH_ENABLED, value)
+
+    /** 切换搜索出口（DeepSeek / Tavily）。 */
+    suspend fun setChatSearchProvider(provider: ChatSearchProvider) =
+        editString(KEY_CHAT_SEARCH_PROVIDER, provider.name.lowercase())
+
+    /** 保存 Tavily API Key（去掉首尾空白）。 */
+    suspend fun setTavilyApiKey(key: String) =
+        editString(KEY_TAVILY_API_KEY, key.trim())
+
     /** 设置对话思考强度。写入即生效，下一次请求带上。 */
     suspend fun setReasoningEffort(effort: ReasoningEffort) {
         editString(KEY_REASONING_EFFORT, effort.key ?: "off")
@@ -469,6 +485,9 @@ class SettingsStore(context: Context) {
         val KEY_POMODORO_AUTO_RECORD = booleanPreferencesKey("pomodoro_auto_record")
         val KEY_POMODORO_BREAK_LOOP = booleanPreferencesKey("pomodoro_break_loop")
         val KEY_POMODORO_BREAK_MINUTES = intPreferencesKey("pomodoro_break_minutes")
+        val KEY_CHAT_SEARCH_ENABLED = booleanPreferencesKey("chat_search_enabled")
+        val KEY_CHAT_SEARCH_PROVIDER = stringPreferencesKey("chat_search_provider")
+        val KEY_TAVILY_API_KEY = stringPreferencesKey("tavily_api_key")
 
         const val DEFAULT_WORDBOOK_DAILY_GOAL = 20
         const val MIN_WORDBOOK_DAILY_GOAL = 5

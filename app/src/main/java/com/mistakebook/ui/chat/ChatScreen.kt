@@ -83,6 +83,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -111,6 +112,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import com.mistakebook.R
 import com.mistakebook.data.chat.ChatContextAssembler
+import com.mistakebook.data.chat.ChatSearchProvider
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.di.AppContainer
@@ -508,9 +510,15 @@ fun ChatScreen(
             activeProviderId = state.activeProviderId,
             currentEffort = state.reasoningEffort,
             enabled = !state.isStreaming,
+            searchEnabled = state.chatSearchEnabled,
+            searchProvider = state.chatSearchProvider,
+            tavilyKey = state.tavilyApiKey,
             onSelect = viewModel::selectModel,
             onSelectProvider = viewModel::selectProvider,
             onEffortChange = viewModel::setReasoningEffort,
+            onSearchEnabledChange = viewModel::setChatSearchEnabled,
+            onSearchProviderChange = viewModel::setChatSearchProvider,
+            onTavilyKeyChange = viewModel::setTavilyApiKey,
             onDismiss = { showModelSheet = false }
         )
     }
@@ -575,6 +583,9 @@ private fun MessageList(
                     message = item.message,
                     images = bubbleImages[item.message.id].orEmpty(),
                     files = bubbleFiles[item.message.id].orEmpty(),
+                    stage = state.generationStage.takeIf {
+                        item.message.id == state.streamingMessageId && state.isStreaming
+                    },
                     truncated = truncatedMessageId == item.message.id,
                     mathRenderer = mathRenderer,
                     onCopy = onCopy,
@@ -683,6 +694,8 @@ private fun MessageBubble(
     images: List<String>,
     /** 非图片附件（PDF/文档等）。点击交给系统打开，本应用不做阅读器。 */
     files: List<BubbleFile>,
+    /** 首个 token 之前的阶段提示（如「正在联网搜索…」），仅流式中传。 */
+    stage: String?,
     truncated: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer,
     onCopy: (String) -> Unit,
@@ -798,6 +811,22 @@ private fun MessageBubble(
                 // 就会先显示源码、拼完再跳成公式。等配对符到齐再整段渲染滑入。
                 val displayAnswer = remember(answer, isStreaming) {
                     if (isStreaming) trimIncompleteTrailingFormula(answer) else answer
+                }
+                // 阶段提示：联网搜索要几秒到十几秒，没这行就是又一例「点了没反应」。
+                if (isStreaming && stage != null && answer.isBlank() && thinking.isBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stage,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
                 }
                 if (thinking.isNotBlank()) {
                     ThinkingBlock(
@@ -1430,9 +1459,15 @@ private fun ModelPickerSheet(
     activeProviderId: String?,
     currentEffort: ReasoningEffort,
     enabled: Boolean,
+    searchEnabled: Boolean,
+    searchProvider: ChatSearchProvider,
+    tavilyKey: String,
     onSelect: (String) -> Unit,
     onSelectProvider: (String) -> Unit,
     onEffortChange: (ReasoningEffort) -> Unit,
+    onSearchEnabledChange: (Boolean) -> Unit,
+    onSearchProviderChange: (ChatSearchProvider) -> Unit,
+    onTavilyKeyChange: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var page by remember { mutableStateOf(0) } // 0 模型列表 / 1 思考强度
@@ -1582,6 +1617,72 @@ private fun ModelPickerSheet(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                }
+            }
+
+            // ---- 联网搜索（v0.0.41）：开关默认开，出口二选一 ----
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSearchEnabledChange(!searchEnabled) }
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("联网搜索", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "回答前先检索最新网页信息（DeepSeek / Tavily）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = searchEnabled, onCheckedChange = onSearchEnabledChange)
+            }
+            if (searchEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = searchProvider == ChatSearchProvider.DEEPSEEK,
+                        onClick = { onSearchProviderChange(ChatSearchProvider.DEEPSEEK) },
+                        label = { Text("DeepSeek") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = searchProvider == ChatSearchProvider.TAVILY,
+                        onClick = { onSearchProviderChange(ChatSearchProvider.TAVILY) },
+                        label = { Text("Tavily") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                when (searchProvider) {
+                    ChatSearchProvider.DEEPSEEK -> Text(
+                        "使用 DeepSeek 渠道的 API Key 做服务端搜索；当前供应商不是 DeepSeek 或失败时，自动改用 Tavily。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+
+                    ChatSearchProvider.TAVILY -> Column(
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = tavilyKey,
+                            onValueChange = onTavilyKeyChange,
+                            singleLine = true,
+                            label = { Text("Tavily API Key（tvly-…）") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            "在 tavily.com 免费注册获取，每月 1000 次免费额度。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
