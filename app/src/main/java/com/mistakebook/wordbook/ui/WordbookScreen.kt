@@ -1494,35 +1494,39 @@ private fun WrongBookView(
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // 四级子标签。四个 chip 加角标在窄屏上会超出屏幕宽度，
-        // 整行可横向滚动——生词本、熟词本的角标让用户不点进去
-        // 就知道各库有多少词。
+        // 四级子标签。数量角标（用户反馈）会随记词进度变化宽度，把整行
+        // chip 挤得左右挪位——已去掉；四个 chip **等宽均分**整行且去掉
+        // 横向滚动，位置在任何状态下都纹丝不动。「曾错毕业本」改名
+        // 「曾错本」（用户口径）。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
                 .padding(bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             FilterChip(
                 selected = state.wrongSubTab == WrongSubTab.WRONG_BOOK,
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.WRONG_BOOK) },
-                label = { Text("错词本 (${state.wrongBookCount})") }
+                modifier = Modifier.weight(1f),
+                label = { Text("错词本", maxLines = 1) }
             )
             FilterChip(
                 selected = state.wrongSubTab == WrongSubTab.EVER_WRONG,
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.EVER_WRONG) },
-                label = { Text("曾错毕业本") }
+                modifier = Modifier.weight(1f),
+                label = { Text("曾错本", maxLines = 1) }
             )
             FilterChip(
                 selected = state.wrongSubTab == WrongSubTab.MASTERED,
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.MASTERED) },
-                label = { Text("熟词本 (${state.masteredCount})") }
+                modifier = Modifier.weight(1f),
+                label = { Text("熟词本", maxLines = 1) }
             )
             FilterChip(
                 selected = state.wrongSubTab == WrongSubTab.FAVORITE,
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.FAVORITE) },
-                label = { Text("生词本 (${state.favoriteCount})") }
+                modifier = Modifier.weight(1f),
+                label = { Text("生词本", maxLines = 1) }
             )
         }
 
