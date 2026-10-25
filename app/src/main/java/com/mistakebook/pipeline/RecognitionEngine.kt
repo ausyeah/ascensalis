@@ -390,8 +390,32 @@ class RecognitionEngine(
                 raw = raw.data
             )
 
-            is com.mistakebook.net.ApiResult.Failure -> throw PipelineException(raw.error)
+            is com.mistakebook.net.ApiResult.Failure -> throw PipelineException(
+                raw.error.copy(serverMessage = visionFailureMessage(raw.error, profile.model))
+            )
         }
+    }
+
+    /**
+     * 带图调用失败时的用户可读原因。
+     *
+     * 多出的一句排查建议是针对一个具体陷阱：[LlmProfile.supportsVision]
+     * 默认 **true**（存量配置兼容：升级不能把「能看图」悄悄改成不能）。
+     * 于是「这个模型到底识不识图」在多数情况下其实是**猜的**——
+     * 模型不识图时，带图的请求要么被忽略图片、要么直接 400，
+     * 表现就是「识别失败」，用户无从判断是配置问题还是网络问题。
+     * 把这条最可能的原因写进错误里，省得对着笼统的失败发呆。
+     */
+    private fun visionFailureMessage(
+        error: com.mistakebook.net.ApiError,
+        model: String
+    ): String {
+        val base = error.serverMessage.ifBlank { "大模型识别失败" }
+        val suspicious = error.kind == com.mistakebook.net.ApiErrorKind.BAD_RESPONSE ||
+            error.kind == com.mistakebook.net.ApiErrorKind.AUTH
+        if (!suspicious) return base
+        return "$base。若反复失败，可能是「$model」实际不支持识图：" +
+            "请到设置里关掉该模型的识图开关，或把识别方式改回「仅 MinerU」。"
     }
 
     private suspend fun refineWithLlm(

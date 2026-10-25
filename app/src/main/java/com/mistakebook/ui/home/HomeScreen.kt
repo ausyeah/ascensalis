@@ -878,7 +878,10 @@ private fun QuestionCard(
                 contentDescription = stringResource(R.string.edit_original_image),
                 // 列表小图保持固定方块 + 居中裁剪，行列整齐
                 modifier = Modifier.size(72.dp),
-                keepAspect = false
+                keepAspect = false,
+                // PDF 文本路线的题没有位图（photoPath 是 .md），
+                // 兜底成文字封面，列表里不至于是一整列空白格。
+                fallbackText = question.stem
             )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {

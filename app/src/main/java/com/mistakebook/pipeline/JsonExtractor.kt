@@ -171,18 +171,13 @@ object JsonExtractor {
      * 这些情况结构其实是对的，直接判失败太浪费，擦一下就能救回来。
      * 只做「确定不改变语义」的修补，不做猜测性补全。
      */
-    private fun repairJson(text: String): String {
-        var out = stripFence(text)
-        val start = out.indexOf('{')
-        val end = out.lastIndexOf('}')
-        if (start >= 0 && end > start) out = out.substring(start, end + 1)
-        // 对象/数组的最后一个元素后面常多一个逗号
-        out = out.replace(Regex("""\s*,\s*([}\]])"""), "$1")
-        // 中文语境下模型偶尔用全角引号
-        out = out.replace('\u201C', '"').replace('\u201D', '"')
-        out = out.replace('\u2018', '"').replace('\u2019', '"')
-        return out
-    }
+    /**
+     * 委托 [JsonRepair]：那里集中了全部修复步骤并可单测。
+     *
+     * 相对旧实现多救回两类高频失败：字符串里的裸换行（模型写多行题干
+     * 直接回车）和**输出被截断**（末尾缺闭合引号/括号）。
+     */
+    private fun repairJson(text: String): String = JsonRepair.repair(text)
 
     private fun stripFence(text: String): String {
         val withoutHead = text.removePrefix("```json").removePrefix("```JSON").removePrefix("```")
