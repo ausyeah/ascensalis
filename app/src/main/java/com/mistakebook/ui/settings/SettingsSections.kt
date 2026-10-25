@@ -1480,6 +1480,44 @@ internal fun ReviewReminderSection(
 }
 
 @Composable
+internal fun PomodoroSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    SettingsGroup(title = "番茄钟") {
+        SwitchRow(
+            label = "到点自动记录",
+            checked = state.snapshot.pomodoroAutoRecord,
+            onChange = viewModel::setPomodoroAutoRecord
+        )
+        SwitchRow(
+            label = "休息循环",
+            checked = state.snapshot.pomodoroBreakLoop,
+            onChange = viewModel::setPomodoroBreakLoop
+        )
+        if (state.snapshot.pomodoroBreakLoop) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "休息时长",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                listOf(5, 10).forEach { minutes ->
+                    FilterChip(
+                        selected = state.snapshot.pomodoroBreakMinutes == minutes,
+                        onClick = { viewModel.setPomodoroBreakMinutes(minutes) },
+                        label = { Text("$minutes 分钟") }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun DataManageSection(
     container: com.mistakebook.di.AppContainer,
     viewModel: SettingsViewModel,

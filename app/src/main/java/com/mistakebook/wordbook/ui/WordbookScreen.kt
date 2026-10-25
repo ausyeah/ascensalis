@@ -360,7 +360,7 @@ private fun WordbookTabBar(
 // =========================================================================
 
 @Composable
-private fun StudyView(
+internal fun StudyView(
     state: WordbookUiState,
     viewModel: WordbookViewModel
 ) {
@@ -1637,7 +1637,7 @@ private fun LibraryView(
 // =========================================================================
 
 @Composable
-private fun StatsView(
+internal fun StatsView(
     state: WordbookUiState,
     viewModel: WordbookViewModel
 ) {

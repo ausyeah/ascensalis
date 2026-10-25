@@ -125,9 +125,10 @@ class PomodoroViewModel(
     private val _tick = MutableStateFlow(0L)
 
     init {
-        // 首次进入给一条「自由专注」，避免空页面逼用户先建任务才能计时
+        // 预置「自由专注」（T3）：按 name 幂等保证存在——首次进入给一条，
+        // 用户删光所有任务后再进来也还能免任务快速计时
         viewModelScope.launch {
-            if (dao.activeTaskCount() == 0) {
+            if (dao.findTasksByName(PomodoroTask.DEFAULT_NAME).isEmpty()) {
                 dao.insertTask(
                     PomodoroTask(name = PomodoroTask.DEFAULT_NAME, sortOrder = 0)
                 )
@@ -270,16 +271,31 @@ class PomodoroViewModel(
     // ------------------------------------------------------------ 计时控制
 
     fun start() {
-        val taskId = _ui.value.selectedTaskId
-            ?: run {
-                message.value = "先选一个任务"
-                return
-            }
-        val mode = _ui.value.mode
-        timer.start(mode, taskId, _ui.value.targetMs)
-        val name = _ui.value.tasks.firstOrNull { it.id == taskId }?.name.orEmpty()
-        PomodoroService.start(getApplication(), name)
-        syncTimerUi()
+        viewModelScope.launch {
+            val taskId = _ui.value.selectedTaskId ?: resolveFreeFocusTaskId()
+                ?: run {
+                    message.value = "先选一个任务"
+                    return@launch
+                }
+            val mode = _ui.value.mode
+            timer.start(mode, taskId, _ui.value.targetMs)
+            val name = _ui.value.tasks.firstOrNull { it.id == taskId }?.name.orEmpty()
+            PomodoroService.start(getApplication(), name)
+            syncTimerUi()
+        }
+    }
+
+    /**
+     * 解析「自由专注」预置任务（T3 免任务快速计时）。
+     *
+     * 按 name 幂等查找，不存在就补种——用户可能把唯一任务删光，
+     * 此时想快速计一个番茄不该被「先选一个任务」拦住。
+     * 只在未归档任务里找：归档任务的时长会从 taskTotals 的统计里消失
+     * （JOIN 条件 archived = 0），挂上去等于白记。
+     */
+    private suspend fun resolveFreeFocusTaskId(): Long? {
+        dao.findTasksByName(PomodoroTask.DEFAULT_NAME).firstOrNull()?.let { return it.id }
+        return dao.insertTask(PomodoroTask(name = PomodoroTask.DEFAULT_NAME, sortOrder = 0))
     }
 
     fun pause() {
@@ -441,6 +457,11 @@ class PomodoroViewModel(
 
     fun deleteTask(id: Long) {
         viewModelScope.launch {
+            // 「自由专注」是免任务快速计时的兜底（T3），删了它这套就失效
+            if (dao.findTaskById(id)?.name == PomodoroTask.DEFAULT_NAME) {
+                message.value = "预置任务不可删除"
+                return@launch
+            }
             dao.deleteTask(id)
             if (selectedTaskId.value == id) selectedTaskId.value = null
             if (timer.state.value.taskId == id) {
@@ -656,11 +677,15 @@ class PomodoroViewModel(
      * 用户补的是「我干了多久」，不是「我又完成了几个番茄」。
      */
     fun submitManualEntry() {
-        val s = _ui.value
-        val taskId = s.manualTaskId ?: run {
-            message.value = "先选一个任务"
-            return
+        viewModelScope.launch {
+            // 未选任务同样落到「自由专注」（T3），不再拒绝
+            val taskId = _ui.value.manualTaskId ?: resolveFreeFocusTaskId() ?: return@launch
+            submitManualEntry(taskId)
         }
+    }
+
+    private suspend fun submitManualEntry(taskId: Long) {
+        val s = _ui.value
         val minutes = s.manualMinutes.toDoubleOrNull() ?: 0.0
         if (minutes <= 0.0) {
             message.value = "时长填一个大于 0 的分钟数"

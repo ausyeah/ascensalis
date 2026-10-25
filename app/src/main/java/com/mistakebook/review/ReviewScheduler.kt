@@ -31,7 +31,9 @@ class ReviewWorker(
 
     override suspend fun doWork(): Result {
         val container = MistakeBookApp.from(appContext).container
-        val due = container.questionRepository.dueQuestions(LocalDate.now(), limit = 99)
+        // limit 从 99 提到 100：数量 ≥ 100 时通知标题只显示「99+」，
+        // 精确的大数字只会制造焦虑（T1 改动 5）。
+        val due = container.questionRepository.dueQuestions(LocalDate.now(), limit = 100)
         if (due.isEmpty()) return Result.success()
         postNotification(due.size)
         return Result.success()
@@ -55,9 +57,14 @@ class ReviewWorker(
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val title = if (count >= 100) {
+            appContext.getString(R.string.review_notification_title_99)
+        } else {
+            appContext.getString(R.string.review_notification_title, count)
+        }
         val notification = NotificationCompat.Builder(appContext, MistakeBookApp.CHANNEL_REVIEW)
             .setSmallIcon(R.drawable.ic_stat_review)
-            .setContentTitle(appContext.getString(R.string.review_notification_title, count))
+            .setContentTitle(title)
             .setContentText(appContext.getString(R.string.review_notification_channel))
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)

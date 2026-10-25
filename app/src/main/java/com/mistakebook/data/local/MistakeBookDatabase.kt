@@ -17,6 +17,7 @@ import com.mistakebook.data.local.entities.QuestionTagCrossRef
 import com.mistakebook.data.local.entities.ReviewLog
 import com.mistakebook.data.local.entities.Subject
 import com.mistakebook.data.local.entities.Tag
+import com.mistakebook.data.local.entities.WeeklyReport
 
 @Database(
     entities = [
@@ -31,9 +32,10 @@ import com.mistakebook.data.local.entities.Tag
         ChatMessage::class,
         ChatAttachment::class,
         PomodoroTask::class,
-        PomodoroSession::class
+        PomodoroSession::class,
+        WeeklyReport::class
     ],
-    version = 4,
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -54,6 +56,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     abstract fun pomodoroDao(): PomodoroDao
+
+    abstract fun weeklyReportDao(): WeeklyReportDao
 
     companion object {
         const val DB_NAME = "mistake_book.db"
@@ -255,6 +259,45 @@ abstract class MistakeBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 4 → 5：questions 加 relatedQuestionId 列（F1 举一反三变式题）。
+         *
+         * 变式题记录它由哪道题生成，详情页据此展示「来源题」关联。
+         * 纯加列、可空、无默认值约束：老数据该列全为 NULL，一行 SQL 完成。
+         */
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `questions` ADD COLUMN `relatedQuestionId` INTEGER")
+            }
+        }
+
+        /**
+         * 5 → 6：新增周报表（F2 AI 错因诊断周报）。
+         *
+         * 建表 SQL 与 [WeeklyReport] 实体逐字对应（含唯一索引名），
+         * 规则与 MIGRATION_2_3 的注释一致：错一个字符 schema 校验就失败。
+         */
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `weekly_reports` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `weekStartEpochDay` INTEGER NOT NULL,
+                        `weekEndEpochDay` INTEGER NOT NULL,
+                        `markdown` TEXT NOT NULL,
+                        `statsJson` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_weekly_reports_weekStartEpochDay` " +
+                        "ON `weekly_reports` (`weekStartEpochDay`)"
+                )
+            }
+        }
+
         fun build(context: Context): MistakeBookDatabase =
             Room.databaseBuilder(context, MistakeBookDatabase::class.java, DB_NAME)
                 // 两个都**必须**注册：漏一个，Room 就找不到那条升级路径，
@@ -267,7 +310,7 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                 //
                 // 加新版本时记得两处同步：改上面的 `version`，并在此追加 MIGRATION_n_n+1。
                 // 「定义了但忘了注册」是 Room 最常见也最致命的疏漏。
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
     }
 }

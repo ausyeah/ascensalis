@@ -189,7 +189,12 @@ class BackupManager(
         // `chats` 也在列：聊天附件存在 chatDir(sessionId) 下，
         // 漏了它备份就不完整——而数据库里那几条消息还在，
         // 恢复后附件全成死链，界面上显示不出来的文件。
-        listOf("crops", "questions", "imports", "mineru", "chats").forEach { dirName ->
+        //
+        // `mineru` 不在列（T5）：它是识别的临时产物，且识别终态会被
+        // RecognitionEngine 分层回收；DB 里已有 task.markdown 缓存，
+        // 把它打进备份只会让 zip 体积随识别次数线性膨胀。恢复旧备份时
+        // zip 里若含 mineru 文件也无害（整目录解压覆盖），无需兼容代码。
+        listOf("crops", "questions", "imports", "chats").forEach { dirName ->
             File(filesRoot, dirName).walkTopDown()
                 .filter { it.isFile }
                 .forEach { file ->

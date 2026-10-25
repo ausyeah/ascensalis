@@ -168,6 +168,11 @@ fun SettingsScreen(
                 onPickTimeClick = { showTimePicker = true }
             )
 
+            PomodoroSection(
+                state = state,
+                viewModel = viewModel
+            )
+
             // ---- 识别与大模型（配置）----
             SettingsSectionHeader("识别与大模型")
 

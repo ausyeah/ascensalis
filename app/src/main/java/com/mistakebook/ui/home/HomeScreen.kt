@@ -27,8 +27,12 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.BarChart
 import kotlin.math.roundToInt
 import com.mistakebook.ui.theme.DeleteReveal
 import androidx.compose.material.icons.Icons
@@ -44,6 +48,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -83,6 +88,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -138,7 +144,9 @@ fun HomeScreen(
     onOpenNotebooks: () -> Unit = {},
     onOpenQuestion: (Long) -> Unit,
     /** AI 对话：进历史会话列表（规格锁定只放顶栏，不加底部按钮）。 */
-    onOpenChatList: () -> Unit = {}
+    onOpenChatList: () -> Unit = {},
+    /** 今日有到期题时横幅点击 → 进独立复习页（T1）。 */
+    onStartReview: () -> Unit = {}
 ) {
     val viewModel: HomeViewModel = containerViewModel(container) { HomeViewModel(it) }
     val state by viewModel.uiState.collectAsState()
@@ -228,6 +236,12 @@ fun HomeScreen(
     var showKeyGate by remember { mutableStateOf(false) }
     var mineruMissing by remember { mutableStateOf(false) }
     var llmMissing by remember { mutableStateOf(false) }
+    // AI 学习周报（F2）：错题本搜索栏右侧的入口弹层
+    var showWeeklyReport by remember { mutableStateOf(false) }
+    // 思维导图（F4）：同上，轻量弹层入口
+    var showMindmap by remember { mutableStateOf(false) }
+    // 错题统计（F5）：分布图表弹层
+    var showStats by remember { mutableStateOf(false) }
 
     // 相册入口直接拉起系统选择器：原先中间还夹一个「从相册选择」页，
     // 整页只有一个按钮，等于多点一次屏幕才能到真正的选择器，已删除。
@@ -348,7 +362,37 @@ fun HomeScreen(
                         modifier = Modifier.size(22.dp)
                     )
                 }
+                // AI 学习周报：诊断 + 建议，与打印/对话并列的轻量入口
+                IconButton(onClick = { showWeeklyReport = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Insights,
+                        contentDescription = stringResource(R.string.weekly_report_title),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                // 思维导图（F4）：知识体系 + 薄弱分支标红
+                IconButton(onClick = { showMindmap = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.AccountTree,
+                        contentDescription = stringResource(R.string.mindmap_title),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                // 错题统计（F5）：错因/难度/学科/知识点分布
+                IconButton(onClick = { showStats = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.BarChart,
+                        contentDescription = stringResource(R.string.stats_title),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
+
+            // 考前倒计时（F3）：搜索栏与筛选行之间的常驻卡片，未设日期时是设置入口
+            ExamCountdownCard(container = container)
 
             FilterRow(
                 state = state,
@@ -387,6 +431,40 @@ fun HomeScreen(
                     // 注意这里不能用 remember：LazyColumn 的 content 是
                     // LazyListScope，不是 @Composable 上下文。
                     val todayEpochDay = java.time.LocalDate.now().toEpochDay()
+
+                    // T1 复习横幅：今天有到期题才出现（N=0 不显示，不做弹窗）。
+                    // 样式与列表卡片同族，点击进独立复习页。
+                    if (state.dueCount > 0) {
+                        item(key = "review-banner", contentType = "banner") {
+                            Surface(
+                                onClick = onStartReview,
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .animateItem()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.review_banner_due, state.dueCount),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     items(
                         items = displayQuestions,
@@ -526,6 +604,27 @@ fun HomeScreen(
             onOpenSettings = onOpenSettings,
             onManualEntry = onAddManual,
             onDismiss = { showKeyGate = false }
+        )
+    }
+
+    if (showWeeklyReport) {
+        WeeklyReportDialog(
+            container = container,
+            onDismiss = { showWeeklyReport = false }
+        )
+    }
+
+    if (showMindmap) {
+        MindmapDialog(
+            container = container,
+            onDismiss = { showMindmap = false }
+        )
+    }
+
+    if (showStats) {
+        QuestionStatsDialog(
+            container = container,
+            onDismiss = { showStats = false }
         )
     }
 }

@@ -112,7 +112,12 @@ class SettingsStore(context: Context) {
             reminderMinute = prefs[KEY_REMINDER_MINUTE] ?: 0,
             wordbookDailyGoal = (prefs[KEY_WORDBOOK_DAILY_GOAL] ?: DEFAULT_WORDBOOK_DAILY_GOAL)
                 .coerceIn(MIN_WORDBOOK_DAILY_GOAL, MAX_WORDBOOK_DAILY_GOAL),
-            wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true
+            wordbookReminderEnabled = prefs[KEY_WORDBOOK_REMINDER] ?: true,
+            pomodoroAutoRecord = prefs[KEY_POMODORO_AUTO_RECORD] ?: true,
+            pomodoroBreakLoop = prefs[KEY_POMODORO_BREAK_LOOP] ?: false,
+            pomodoroBreakMinutes = prefs[KEY_POMODORO_BREAK_MINUTES] ?: 10,
+            // DataStore 没有"可空 long"，-1 是"未设置"哨兵
+            examDateEpochDay = (prefs[KEY_EXAM_DATE] ?: -1L).takeIf { it > 0 }
         )
     }
 
@@ -279,6 +284,26 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ===== 手动录入草稿（T4，临时状态，存 DataStore 不进 Room）=====
+
+    /**
+     * 手动录入的自动暂存单槽：存一份 DraftBundle JSON（单题）。
+     *
+     * 与聊天草稿同思路：用户打了一半的字不该因为进程被杀而全丢。
+     * 空串 = 清槽（已保存 / 用户主动丢弃）。
+     */
+    suspend fun getManualDraftJson(): String {
+        val key = stringPreferencesKey("manual_draft_json")
+        return appContext.settingsDataStore.data.first()[key].orEmpty()
+    }
+
+    suspend fun setManualDraftJson(value: String?) {
+        val key = stringPreferencesKey("manual_draft_json")
+        appContext.settingsDataStore.edit { prefs ->
+            if (value.isNullOrBlank()) prefs.remove(key) else prefs[key] = value
+        }
+    }
+
     // ===== 裁剪会话（临时编辑状态，存 DataStore 不进 Room）=====
 
     suspend fun getCropSession(imagePath: String): CropSessionRecord? {
@@ -341,6 +366,29 @@ class SettingsStore(context: Context) {
     /** 开关「单词书每日目标」提醒。关闭后到点不再发通知。 */
     suspend fun setWordbookReminderEnabled(value: Boolean) =
         editBoolean(KEY_WORDBOOK_REMINDER, value)
+
+    // ===== 考试日期（F3 考前排期） =====
+
+    /** 设置考试日期（epochDay）。传 null 清除。 */
+    suspend fun setExamDate(epochDay: Long?) {
+        appContext.settingsDataStore.edit { prefs ->
+            if (epochDay == null) prefs.remove(KEY_EXAM_DATE)
+            else prefs[KEY_EXAM_DATE] = epochDay
+        }
+    }
+    // ===== 番茄钟（T2 到点闭环） =====
+
+    /** 开关「到点自动记录」。 */
+    suspend fun setPomodoroAutoRecord(value: Boolean) =
+        editBoolean(KEY_POMODORO_AUTO_RECORD, value)
+
+    /** 开关「休息循环」。 */
+    suspend fun setPomodoroBreakLoop(value: Boolean) =
+        editBoolean(KEY_POMODORO_BREAK_LOOP, value)
+
+    /** 设置休息时长（分钟），只允许 5 / 10。 */
+    suspend fun setPomodoroBreakMinutes(value: Int) =
+        editInt(KEY_POMODORO_BREAK_MINUTES, if (value == 5) 5 else 10)
 
     // ===== 外观与主题 =====
 
@@ -415,6 +463,12 @@ class SettingsStore(context: Context) {
         // 单词书每日目标与提醒
         val KEY_WORDBOOK_DAILY_GOAL = intPreferencesKey("wordbook_daily_goal")
         val KEY_WORDBOOK_REMINDER = booleanPreferencesKey("wordbook_reminder_enabled")
+        val KEY_EXAM_DATE = longPreferencesKey("exam_date_epoch_day")
+
+        // 番茄钟（T2）
+        val KEY_POMODORO_AUTO_RECORD = booleanPreferencesKey("pomodoro_auto_record")
+        val KEY_POMODORO_BREAK_LOOP = booleanPreferencesKey("pomodoro_break_loop")
+        val KEY_POMODORO_BREAK_MINUTES = intPreferencesKey("pomodoro_break_minutes")
 
         const val DEFAULT_WORDBOOK_DAILY_GOAL = 20
         const val MIN_WORDBOOK_DAILY_GOAL = 5

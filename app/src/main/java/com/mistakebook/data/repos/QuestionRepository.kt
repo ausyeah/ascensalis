@@ -41,7 +41,7 @@ class QuestionRepository(
             subjectFilter = filter.subjectId ?: 0L,
             notebookFilter = filter.notebookId ?: 0L,
             reasonName = filter.reason?.name.orEmpty(),
-            keyword = filter.keyword.trim(),
+            keyword = escapeLike(filter.keyword.trim()),
             limit = pageSize,
             offset = page.coerceAtLeast(0) * pageSize
         )
@@ -52,7 +52,7 @@ class QuestionRepository(
             subjectFilter = filter.subjectId ?: 0L,
             notebookFilter = filter.notebookId ?: 0L,
             reasonName = filter.reason?.name.orEmpty(),
-            keyword = filter.keyword.trim()
+            keyword = escapeLike(filter.keyword.trim())
         )
 
     fun observeTotalCount(): Flow<Int> = questionDao.observeTotalCount()
@@ -106,6 +106,22 @@ class QuestionRepository(
         )
         val id = questionDao.insert(question)
         syncTags(id, draft.knowledgePoints)
+        return id
+    }
+
+    /**
+     * 保存一道 AI 变式题（F1 举一反三），并与来源题关联。
+     *
+     * 复用 [save] 的全部入库规则（学科解析、标签同步、复习排期初值）；
+     * 这里只补变式特有的两件事：错题本归属继承来源题、回填 relatedQuestionId。
+     * 变式题没有原图——调用方传 imagePath 空串（与手动录入同一守卫约定）。
+     */
+    suspend fun saveVariant(origin: Question, draft: QuestionDraft, now: Long): Long {
+        val id = save(draft.copy(notebookId = draft.notebookId ?: origin.notebookId), now)
+        // 关联在 save() 产物上补一笔：save 不感知变式语义，职责保持单一
+        questionDao.findById(id)?.let { saved ->
+            questionDao.update(saved.copy(relatedQuestionId = origin.id))
+        }
         return id
     }
 
@@ -205,6 +221,19 @@ class QuestionRepository(
     suspend fun hardDelete(ids: List<Long>) = questionDao.hardDelete(ids)
 
     /**
+     * 应用考前排期（F3）：批量把到期题的下一复习日写到规划好的日子。
+     *
+     * 逐条 UPDATE 而不是事务整体替换：中途失败已写入的部分依然成立
+     * （每条独立有效），比"全成或全败"更符合排期的语义。
+     */
+    suspend fun applyExamSchedule(schedule: Map<Long, Long>) {
+        val now = System.currentTimeMillis()
+        schedule.forEach { (id, epochDay) ->
+            questionDao.updateNextReviewAt(id, epochDay, now)
+        }
+    }
+
+    /**
      * 设置「是否会了」。
      * 会了 → MASTERED，nextReviewAt 清空（不再进待复习队列与每日提醒）；
      * 不会 → ACTIVE，nextReviewAt 设为今天，次日提醒会重新算上。
@@ -230,6 +259,50 @@ class QuestionRepository(
         )
     }
 
+    /**
+     * 复习结果原子落库（T1 复习闭环）。
+     *
+     * 一次事务完成两件事：
+     * 1. 插入 [ReviewLog]（stageIndex 记**当前**轮次，即评分前的轮次）；
+     * 2. 推进 question：reviewStage / nextReviewAt / status。
+     *
+     * 与 setMastered() 的约定对齐：达到 MAX_STAGE 时 nextReviewAt = null
+     * （不再进队列、不再进每日提醒）。
+     *
+     * 返回是否落库成功。题不存在或 `deletedAt != null`（复习中途被删）
+     * 时静默跳过返回 false——调用方照常切下一题即可，不要报错打断复习流。
+     */
+    suspend fun applyReviewResult(
+        questionId: Long,
+        result: ReviewResult,
+        now: Long = System.currentTimeMillis(),
+        today: LocalDate = LocalDate.now()
+    ): Boolean {
+        val question = questionDao.findById(questionId) ?: return false
+        if (question.deletedAt != null) return false
+        val newStage = ReviewRules.nextStage(question.reviewStage, result)
+        val updated = question.copy(
+            reviewStage = newStage,
+            nextReviewAt = if (newStage >= ReviewRules.MAX_STAGE) {
+                null
+            } else {
+                ReviewRules.nextReviewDay(question.reviewStage, result, today).toEpochDay()
+            },
+            status = ReviewRules.statusFor(newStage, question.status),
+            updatedAt = now
+        )
+        questionDao.applyReviewResult(
+            log = ReviewLog(
+                questionId = questionId,
+                reviewedAt = now,
+                stageIndex = question.reviewStage,
+                result = result
+            ),
+            updated = updated
+        )
+        return true
+    }
+
     private suspend fun resolveSubjectId(draft: QuestionDraft): Long? {
         val id = draft.subjectId
         if (id != null && subjectDao.findById(id) != null) return id
@@ -249,3 +322,13 @@ class QuestionRepository(
         const val PAGE_SIZE = 30
     }
 }
+
+/**
+ * LIKE 关键词转义（T9）：配合 QuestionDao 各查询里的 `ESCAPE '\'`。
+ *
+ * 不转义的话 `%`/`_` 会被当通配符——搜「100%」命中一切含「100」的题，
+ * 搜「a_b」把「a+b」也带出来。反斜杠必须**先**转，否则它会破坏
+ * 后两步刚写进去的转义序列（`\%` 里的 `\` 又被翻倍一次）。
+ */
+internal fun escapeLike(s: String): String =
+    s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

@@ -78,7 +78,23 @@
 </tr>
 </table>
 
-> 背单词与番茄钟模块的截图随后补上（开发机上没有可用的安卓设备，真机截图一到就更新）。
+### 背单词：考法随机出题，答错自动回收
+
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/wordbook-study.png" width="320" alt="背单词刷题"><br><sub><b>刷题</b> · 四选一 / 卡片 / 释义 / 拼写轮着来</sub></td>
+<td align="center"><img src="docs/screenshots/wordbook-stats.png" width="320" alt="背单词统计"><br><sub><b>统计</b> · 打卡热力图 / 连续天数 / 每日目标</sub></td>
+</tr>
+</table>
+
+### 番茄钟：专注计时 + 数据一目了然
+
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/pomodoro-timer.png" width="320" alt="番茄钟计时"><br><sub><b>计时</b> · 按学科任务记每次专注</sub></td>
+<td align="center"><img src="docs/screenshots/pomodoro-stats.png" width="320" alt="番茄钟统计"><br><sub><b>统计</b> · 今日 / 近 7 天 / 近 30 天趋势</sub></td>
+</tr>
+</table>
 
 ---
 

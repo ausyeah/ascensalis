@@ -228,6 +228,20 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         store.setReminderTime(hour, minute)
     }
 
+    // ===== 番茄钟（T2 到点闭环） =====
+
+    fun setPomodoroAutoRecord(value: Boolean) = viewModelScope.launch {
+        store.setPomodoroAutoRecord(value)
+    }
+
+    fun setPomodoroBreakLoop(value: Boolean) = viewModelScope.launch {
+        store.setPomodoroBreakLoop(value)
+    }
+
+    fun setPomodoroBreakMinutes(value: Int) = viewModelScope.launch {
+        store.setPomodoroBreakMinutes(value)
+    }
+
     fun setThemeMode(mode: ThemeMode) = viewModelScope.launch {
         store.setThemeMode(mode)
     }

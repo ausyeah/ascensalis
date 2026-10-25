@@ -48,47 +48,29 @@ object LatexSanitizer {
     /**
      * 处理 KaTeX 不认识的命令。
      *
-     * 大模型有时会输出中文资料里的自定义宏（`\bm`、`\degree`、`\cellcolor`）。
+     * 大模型有时会输出中文资料里的自定义宏（`\cellcolor`、`\ding`）。
      * 这些在 KaTeX 里没有定义，撞上就整条公式失败。
      *
-     * ## 两种处理方式，区别很重要
-     * - **装饰性命令**（`\bm`、`\textbf`）：降级为正体文本（去掉反斜杠），
-     *   只是排版变朴素，含义不变。
-     * - **语义性命令**（`\bar`、`\hat`、`\vec`、`\tilde`、`\overline`、`\dot`…）：
-     *   **直接删除**。这些命令是「在上一符号上加标记」，
-     *   降级成字母 `bar` 会把 `\bar{x}` 变成 `barx`——
-     *   **含义被改掉了**，比显示源码危险得多。
+     * 降级为正体文本（去掉反斜杠）：只是排版变朴素，含义不变。
      *
-     * 判据：命令是否改变符号的**数学含义**。改变的一律删，不改变的一律降级。
+     * ## 重音命令为什么不删了（2026-10 行为变更）
+     *
+     * 旧版把 `\bar` `\hat` `\vec` 这类重音命令**直接删除**，理由是
+     * 「降级成字母会改掉数学含义」。但用仓库内实际打包的 katex.min.js
+     * 逐条实测（LatexSanitizerTest 注释里记录了方法）：**这些命令 KaTeX
+     * 全部原生支持**，行内/块级都渲染正常。删掉它们等于把能渲染的公式
+     * 主动改坏——`\vec{v}` 显示成 `v`，向量箭头凭空消失。
+     *
+     * 现在它们进入 [KNOWN_COMMANDS] 原样保留；真正的未知命令仍降级为文本。
      */
     fun dropUnknownCommands(input: String): String {
         var out = input.replace(COMMAND_REGEX) { match ->
             val name = match.groupValues[1]
-            when {
-                name in KNOWN_COMMANDS -> match.value
-                // 语义性：删掉，保留上一符号本身
-                name in SEMANTIC_COMMANDS -> ""
-                // 其余自定义宏：降级为正体文本
-                else -> name
-            }
+            if (name in KNOWN_COMMANDS) match.value else name
         }
         // 删除后可能留下连续空格，压一下；也顺手清掉行尾空白
         return out.replace(MULTI_SPACE, " ").trim()
     }
-
-    /**
-     * 会改变数学含义、因此**必须删除而非降级**的命令。
-     *
-     * 这些都是「在上一符号上加标记」，把反斜杠命令当成字母串排出来
-     * 会让公式变成另一个意思，例如：
-     * - `\bar{x}` -> `barx`（本来是「x 的共轭/平均值」）
-     * - `\hat{y}` -> `haty`
-     * - `\vec{v}` -> `vecv`
-     */
-    private val SEMANTIC_COMMANDS = setOf(
-        "bar", "hat", "vec", "tilde", "overline", "underline",
-        "dot", "ddot", "widehat", "widetilde", "overline", "underbar"
-    )
 
     private val MULTI_SPACE = Regex("\\s{2,}")
 
@@ -104,10 +86,51 @@ object LatexSanitizer {
         return input.replace("$", "")
     }
 
+    /**
+     * 渲染前救援：把**必然让 KaTeX 报错**的写法改成等价可渲染形式。
+     *
+     * 与 [dropUnknownCommands] 的区别：那边处理「命令不认识」，
+     * 这里处理「结构本身非法」。全部规则都是**确定性改写，不改变数学含义**：
+     *
+     * 1. `\label{…}` / `\nonumber`：交叉引用元数据，数学含义为零，KaTeX 不支持 → 删除。
+     * 2. `\ce{X}`：化学式（mhchem 扩展），本包 KaTeX 未带 → 降级为 `\text{X}`。
+     * 3. `\begin{multline}` → `\begin{gathered}`、`\begin{flalign}` → `\begin{aligned}`：
+     *    KaTeX 没有这两个环境，但行语义相同（逐行排 / 按 & 对齐）。
+     * 4. 环境外裸 `&`：`a &= b` 不带任何 `\begin{…}` 包裹时，KaTeX 直接整条报错
+     *    （真机聊天里最高频的红色源码来源）。`&` 在环境外没有数学含义，删掉即可。
+     *
+     * 以上每条失败模式都用仓库内 katex.min.js 实测过（见 LatexSanitizerTest 注释）。
+     */
+    fun rescueUnsupported(input: String): String {
+        var out = LABEL_REGEX.replace(input, "")
+        out = out.replace(CE_REGEX) { "\\text{${it.groupValues[1]}}" }
+        out = ENV_FLALIGN.replace(out) { m -> m.value.replace("flalign", "aligned") }
+        out = ENV_MULTLINE.replace(out) { m -> m.value.replace("multline", "gathered") }
+        // 只在**完全没有环境**时才动 &：环境里的 & 是对齐语义，必须保留。
+        // 环境改名发生在前面，改完的名字同样含 \begin{，判断不受影响。
+        if (!out.contains("\\begin{")) {
+            out = out.replace("&", "")
+        }
+        return out
+    }
+
+    /** `\label{…}`（花括号可缺省）与无参数的 `\nonumber` / `\notag`（编号开关，聊天里无意义）。 */
+    private val LABEL_REGEX = Regex("""\\(?:label|nonumber|notag)\s*(?:\[[^\]]*\])?(?:\{[^{}]*\})?""")
+
+    /** 化学式 `\ce{…}`（mhchem 扩展未打包）。只嵌套一层花括号，够用。 */
+    private val CE_REGEX = Regex("""\\ce\s*\{([^{}]*)\}""")
+
+    /** KaTeX 没有的环境，改写成行语义相同的已支持环境。begin 与 end 都要改，带 `*` 变体。 */
+    private val ENV_FLALIGN = Regex("""\\(?:begin|end)\{flalign\*?""")
+    private val ENV_MULTLINE = Regex("""\\(?:begin|end)\{multline\*?""")
+
     /** 完整清洗流水线。 */
     fun clean(input: String): String {
         if (input.isBlank()) return input
         var out = stripStrayDollar(input)
+        // 救援必须发生在命令降级之前：\label \ce 若先走降级，
+        // 反斜杠被剥掉后就再也认不出来了。
+        out = rescueUnsupported(out)
         out = dropUnknownCommands(out)
         out = balanceDelimiters(out)
         out = balanceBraces(out)
@@ -121,26 +144,36 @@ object LatexSanitizer {
         "iota", "kappa", "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau",
         "upsilon", "phi", "chi", "psi", "omega",
         "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi", "Omega",
+        // 常用变体（模型爱写，KaTeX 都支持）
+        "varepsilon", "varphi", "vartheta", "varsigma",
         // 运算符与关系
         "pm", "mp", "times", "div", "cdot", "cdots", "ldots", "dots", "vdots", "ddots",
         "leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "cong", "equiv",
         "propto", "ll", "gg", "subset", "subseteq", "supset", "supseteq", "in", "ni", "notin",
         "cup", "cap", "emptyset", "varnothing", "forall", "exists", "nexists", "neg", "lnot",
-        "land", "lor", "wedge", "vee", "oplus", "otimes", "perp", "parallel",
+        "land", "lor", "wedge", "vee", "oplus", "otimes", "odot", "perp", "parallel",
         "leftarrow", "rightarrow", "leftrightarrow", "Leftarrow", "Rightarrow", "Leftrightarrow",
-        "to", "gets", "mapsto", "infty", "partial", "nabla", "sum", "prod", "int", "oint",
+        "longrightarrow", "longleftrightarrow", "Longrightarrow", "Longleftrightarrow",
+        "to", "gets", "mapsto", "infty", "partial", "nabla", "sum", "prod", "int", "iint", "iiint", "oint",
         "sqrt", "frac", "dfrac", "tfrac", "binom", "dbinom", "choose",
+        // 初等几何与推理符号（中文教学场景高频，KaTeX 支持）
+        "angle", "triangle", "circ", "degree", "because", "therefore",
+        "mid", "nmid", "lfloor", "rfloor", "lceil", "rceil", "langle", "rangle",
+        "pmod", "bmod", "boxed", "frown", "prime", "hbar",
         // 上下标与结构
         "left", "right", "big", "Big", "bigg", "Bigg",
         "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr", "Biggl", "Biggr",
-        "displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle",
+        "displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle", "limits",
         "quad", "qquad", "enspace", "thinspace", "medspace", "thickspace",
-        "begin", "end", "text", "textbf", "textit", "mathrm", "mathbf", "mathit", "mathcal", "mathbb", "mathfrak", "mathscr",
-        // 注意：bar / hat / vec / tilde / overline / underline / dot 这类**语义性**命令
-        // 故意不在白名单里 —— 它们改变数学含义，被"降级"会改掉公式本意，
-        // 所以由 SEMANTIC_COMMANDS 分支直接删除。详见 dropUnknownCommands。
-        // 同一个命令不能同时出现在两个集合里：白名单优先级更高，会让删除分支失效。
-        "substack", "stackrel", "binom",
+        "begin", "end", "text", "textbf", "textit", "mathrm", "mathbf", "mathit",
+        "mathcal", "mathbb", "mathfrak", "mathscr", "mathsf", "mathtt",
+        "boldsymbol", "operatorname", "bm",
+        // 重音/标记命令：实测 KaTeX 全部支持，原样保留（旧版删除是误伤，见 dropUnknownCommands 注释）
+        "bar", "hat", "vec", "tilde", "dot", "ddot", "widehat", "widetilde",
+        "overline", "underline", "underbar",
+        "overrightarrow", "overleftarrow", "overset", "underset",
+        "xrightarrow", "xleftarrow",
+        "substack", "stackrel",
         // 三角函数与常见函数名
         "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan",
         "sinh", "cosh", "tanh", "log", "ln", "lg", "exp", "lim", "max", "min", "sup", "inf", "arg", "det", "gcd", "deg",

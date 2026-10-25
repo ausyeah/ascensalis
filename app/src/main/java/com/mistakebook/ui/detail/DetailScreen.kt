@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +30,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -87,11 +89,14 @@ fun DetailScreen(
     onReRecognize: (Long) -> Unit = {},
     /** 重新识别（先裁切再识别）：确认后带原图路径进裁剪页。 */
     onReRecognizeWithCrop: (String) -> Unit = {},
-    onOpenChat: (Long) -> Unit = {}
+    onOpenChat: (Long) -> Unit = {},
+    /** 变式题存为错题后带新题 id 回调（跳新题详情）。 */
+    onVariantSaved: (Long) -> Unit = {}
 ) {
     val viewModel: DetailViewModel =
         containerViewModel(container) { DetailViewModel(it, questionId) }
     val state by viewModel.uiState.collectAsState()
+    val variantState by viewModel.variantState.collectAsState()
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showFullImage by remember { mutableStateOf(false) }
     // 点开的具体图片：null 表示原始照片，非空为某张附图
@@ -123,6 +128,13 @@ fun DetailScreen(
                             Icon(
                                 Icons.Default.AutoAwesome,
                                 contentDescription = stringResource(R.string.chat_title_question)
+                            )
+                        }
+                        // 举一反三：基于本题出一道同知识点的变式题，可存为新错题
+                        IconButton(onClick = { viewModel.openVariant() }) {
+                            Icon(
+                                Icons.Default.Shuffle,
+                                contentDescription = stringResource(R.string.detail_variant_generate)
                             )
                         }
                         IconButton(onClick = { showReRecognizeDialog = true }) {
@@ -380,6 +392,122 @@ fun DetailScreen(
                 }
             }
         )
+    }
+
+    // 变式题弹层：生成中 / 结果预览 / 失败三种形态由 VariantState 单一驱动
+    if (variantState.visible && question != null) {
+        when {
+            variantState.generating -> AlertDialog(
+                onDismissRequest = { /* 生成中没有取消路径，忽略误触 */ },
+                title = { Text(stringResource(R.string.detail_variant_title)) },
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.detail_variant_generating))
+                    }
+                },
+                confirmButton = {}
+            )
+
+            variantState.draft != null -> {
+                val draft = variantState.draft
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissVariant() },
+                    title = { Text(stringResource(R.string.detail_variant_title)) },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 420.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                text = draft!!.title,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            if (draft.title.isNotBlank()) Spacer(Modifier.height(8.dp))
+                            RichText(
+                                text = draft.stem,
+                                mathRenderer = container.mathRenderer,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            draft.options.forEach { option ->
+                                RichText(
+                                    text = "${option.label}. ${option.text}",
+                                    mathRenderer = container.mathRenderer,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
+                            }
+                            if (draft.answer.isNotBlank()) {
+                                Spacer(Modifier.height(8.dp))
+                                SectionLabel(stringResource(R.string.edit_answer))
+                                RichText(
+                                    text = draft.answer,
+                                    mathRenderer = container.mathRenderer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            if (draft.analysis.isNotBlank()) {
+                                Spacer(Modifier.height(8.dp))
+                                SectionLabel(stringResource(R.string.edit_analysis))
+                                RichText(
+                                    text = draft.analysis,
+                                    mathRenderer = container.mathRenderer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            if (draft.knowledge_points.isNotEmpty()) {
+                                Spacer(Modifier.height(8.dp))
+                                InfoRow(
+                                    label = stringResource(R.string.detail_knowledge_points),
+                                    value = draft.knowledge_points.joinToString("、")
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            viewModel.saveVariant { newId ->
+                                onVariantSaved(newId)
+                            }
+                        }) { Text(stringResource(R.string.detail_variant_save)) }
+                    },
+                    dismissButton = {
+                        Row {
+                            TextButton(onClick = { viewModel.generateVariant() }) {
+                                Text(stringResource(R.string.detail_variant_regenerate))
+                            }
+                            TextButton(onClick = { viewModel.dismissVariant() }) {
+                                Text(stringResource(R.string.action_cancel))
+                            }
+                        }
+                    }
+                )
+            }
+
+            else -> AlertDialog(
+                onDismissRequest = { viewModel.dismissVariant() },
+                title = { Text(stringResource(R.string.detail_variant_failed)) },
+                text = { Text(variantState.error.orEmpty()) },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.generateVariant() }) {
+                        Text(stringResource(R.string.detail_variant_regenerate))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissVariant() }) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                }
+            )
+        }
     }
 }
 

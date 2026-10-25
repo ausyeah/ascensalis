@@ -28,7 +28,8 @@ class RecognitionEngine(
     private val taskRepository: CaptureTaskRepository,
     private val mineruClient: MineruClient,
     private val llmClient: LlmClient,
-    private val settingsStore: SettingsStore
+    private val settingsStore: SettingsStore,
+    private val files: com.mistakebook.data.AppFiles
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val queue = Channel<Long>(Channel.UNLIMITED)
@@ -55,9 +56,17 @@ class RecognitionEngine(
     fun submit(taskId: Long) = submit(listOf(taskId))
 
     fun cancel(taskId: Long) {
+        // jobs 的取消照常执行（幂等）：把还在跑的协程停掉总没错。
+        // 但**落库要挑状态**（T6）：任务恰好已经 DONE（或早就 FAILED）时，
+        // 无条件的 fail() 会把已完成覆写成「已取消」——用户盯着编辑页
+        // 里的题忽然发现任务显示失败，进度页还回不去了。
         jobs.remove(taskId)?.cancel(CancellationException("已取消"))
         scope.launch {
-            taskRepository.fail(taskId, CANCELLED_MESSAGE, System.currentTimeMillis())
+            val task = taskRepository.findById(taskId) ?: return@launch
+            when (task.status) {
+                TaskStatus.DONE, TaskStatus.FAILED -> return@launch
+                else -> taskRepository.fail(taskId, CANCELLED_MESSAGE, System.currentTimeMillis())
+            }
         }
     }
 
@@ -125,6 +134,33 @@ class RecognitionEngine(
             throw cancel
         } catch (error: Throwable) {
             failTask(taskId, error)
+        } finally {
+            // 任务必然到达终态（DONE / FAILED / 已取消）：
+            // MinerU 临时目录在这里分层回收（T5），备份瘦身靠它。
+            cleanupMineruTemp(taskId)
+        }
+    }
+
+    /**
+     * MinerU 临时目录分层回收（T5）。
+     *
+     * `files/mineru/{taskId}/` 识别完永不回收的话，备份体积随识别次数
+     * 线性膨胀。规则分两层：
+     * - **result.zip 总是删**：体积大头，且 DB 里已有 task.markdown 缓存，
+     *   zip 对重试毫无价值（重试走 markdown 缓存跳过 MinerU）；
+     * - **整目录删除仅当 markdown 已无残留的相对图片引用**（搜不到
+     *   `](images/` 子串）：downloadAndExtract 只把**复制成功**的图片
+     *   路径改写成绝对路径，复制失败的仍指向 mineru/ 内相对路径，
+     *   整目录删掉会让这些引用变死链。markdown 干净才删整目录，
+     *   否则只删 zip。
+     */
+    private suspend fun cleanupMineruTemp(taskId: Long) {
+        val dir = files.mineruDir(taskId)
+        if (!dir.exists()) return
+        runCatching { java.io.File(dir, "result.zip").delete() }
+        val markdown = taskRepository.findById(taskId)?.markdown.orEmpty()
+        if (!markdown.contains("](images/")) {
+            dir.deleteRecursively()
         }
     }
 

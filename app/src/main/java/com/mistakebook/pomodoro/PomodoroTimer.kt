@@ -230,13 +230,12 @@ class PomodoroTimer(context: Context) {
             status == RunStatus.RUNNING -> RunStatus.RUNNING
             else -> RunStatus.PAUSED
         }
-        val effectiveBase = if (rebooted) base else base
         return State(
             status = effectiveStatus,
             mode = mode,
             taskId = taskId,
             targetMs = target,
-            baseElapsedMs = effectiveBase,
+            baseElapsedMs = base,
             startRealtimeMs = if (rebooted) now else startRt,
             startedWallMs = startWall,
             interruptedByReboot = rebooted

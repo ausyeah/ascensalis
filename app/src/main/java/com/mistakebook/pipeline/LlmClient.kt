@@ -71,12 +71,43 @@ class LlmClient(private val api: LlmApi) {
 
         for ((index, step) in ladder.withIndex()) {
             val system = if (step.reminder) systemPrompt + JSON_ONLY_REMINDER else systemPrompt
-            when (val result = sendOnce(profile, system, userPrompt, imagePart, step.jsonMode, maxTokens)) {
+            val initial = sendOnce(profile, system, userPrompt, imagePart, step.jsonMode, maxTokens)
+
+            // T8：部分服务商的输出上限只有 8k，请求带的 16384 会每级阶梯都
+            // 400 才失败，报错还是服务端英文原文。命中「HTTP 400 且错误体
+            // 提到 max_tokens / maximum context length」时，以 maxTokens/2
+            // （下限 2048）在**同一阶梯步**重试一次——不消耗阶梯次数、
+            // 不额外退避（这不是瞬时错误，退避救不了）。
+            var downgradeExhausted = false
+            val result: ApiResult<String> = if (
+                initial is ApiResult.Failure &&
+                initial.error.serverMessage != TRUNCATED_MESSAGE &&
+                isMaxTokensLimitError(initial.error) &&
+                maxTokens > MIN_MAX_TOKENS
+            ) {
+                val halved = (maxTokens / 2).coerceAtLeast(MIN_MAX_TOKENS)
+                when (val retry = sendOnce(profile, system, userPrompt, imagePart, step.jsonMode, halved)) {
+                    is ApiResult.Success -> retry
+                    is ApiResult.Failure -> {
+                        downgradeExhausted = true
+                        ApiResult.Failure(
+                            initial.error.copy(serverMessage = maxTokensDowngradeMessage(maxTokens))
+                        )
+                    }
+                }
+            } else {
+                initial
+            }
+
+            when (result) {
                 is ApiResult.Success -> return@withContext result
                 is ApiResult.Failure -> {
                     if (result.error.serverMessage == TRUNCATED_MESSAGE) {
                         return@withContext result
                     }
+                    // 降档也救不回来：上限是模型属性，换 json_mode 救不了，
+                    // 继续阶梯只会原样再 400——直接把中文结论交给用户
+                    if (downgradeExhausted) return@withContext result
                     lastFailure = result
                     if (shouldTryNextLlmVariant(result.error) && index < ladder.lastIndex) continue
                     if (!shouldRetryLlmCall(result.error.kind)) return@withContext result
@@ -137,7 +168,14 @@ class LlmClient(private val api: LlmApi) {
             val error = HttpFactory.httpError(response.code(), body)
             return ApiResult.Failure(
                 if (response.code() == 400) {
-                    error.copy(kind = ApiErrorKind.BAD_RESPONSE, serverMessage = error.serverMessage)
+                    // body 片段带进 detail：extractServerMessage 只认几种 JSON 形状，
+                    // 有的服务商的「max_tokens is too large」落在别的字段里，
+                    // 不带原文的话降档判定（isMaxTokensLimitError）就瞎了
+                    error.copy(
+                        kind = ApiErrorKind.BAD_RESPONSE,
+                        serverMessage = error.serverMessage,
+                        detail = "${error.detail} | body=${body.take(400)}"
+                    )
                 } else {
                     error
                 }
@@ -288,3 +326,25 @@ internal fun shouldRetryLlmCall(kind: ApiErrorKind): Boolean = when (kind) {
     ApiErrorKind.CANCELLED -> false
     else -> true
 }
+
+/** 降档下限：再低很多模型连一段解析都装不下，降了也没意义。 */
+internal const val MIN_MAX_TOKENS = 2048
+
+/**
+ * 是否「输出上限超限」型 400（T8）。
+ *
+ * 必须是 HTTP 400（detail 以 "HTTP 400" 开头，body 片段已由 sendOnce 带入），
+ * 且错误文本提到 max_tokens 或 maximum context length（忽略大小写）——
+ * 两种常见服务端原文都覆盖。其他 400（如 prompt 超限、参数非法）不降档：
+ * 那些降了也一样 400。
+ */
+internal fun isMaxTokensLimitError(error: ApiError): Boolean {
+    if (!error.detail.startsWith("HTTP 400")) return false
+    val haystack = "${error.serverMessage}\n${error.detail}".lowercase()
+    return haystack.contains("max_tokens") || haystack.contains("maximum context length")
+}
+
+/** 降档后仍失败的中文报错（T8）：N 是原始请求的 max_tokens。 */
+internal fun maxTokensDowngradeMessage(originalMaxTokens: Int): String =
+    "当前模型的输出上限较低（约 $originalMaxTokens tokens），已自动降档仍失败，" +
+        "请换用输出上限更高的模型或减少一次整理的题目数"
