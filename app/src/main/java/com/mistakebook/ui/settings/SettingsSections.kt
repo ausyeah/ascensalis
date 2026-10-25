@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
@@ -1076,6 +1077,44 @@ internal fun LlmProfilesSection(
             Spacer(Modifier.height(8.dp))
             FirstRunHint(R.string.settings_hint_llm_key)
         }
+
+        // 识图模型：从上面这些接入里指定一套**专门用来看图**的。
+        //
+        // 主模型不识图（DeepSeek-chat、Qwen-plus 这类）时，对话里的图片
+        // 就靠它来读；它还能回答「图里画了什么」这类理解型问题，
+        // 这是 OCR（MinerU）做不到的。指定后对话里会多出一个识图工具，
+        // 由模型自己决定什么时候看图。
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = stringResource(R.string.settings_vision_profile),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = state.snapshot.visionProfileId == null,
+                onClick = { viewModel.setVisionProfileId(null) },
+                label = { Text(stringResource(R.string.settings_vision_profile_none)) }
+            )
+            state.snapshot.llmProfiles.forEach { profile ->
+                FilterChip(
+                    selected = state.snapshot.visionProfileId == profile.id,
+                    onClick = { viewModel.setVisionProfileId(profile.id) },
+                    label = { Text(profile.displayName()) }
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = stringResource(R.string.settings_vision_profile_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

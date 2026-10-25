@@ -87,18 +87,6 @@ class DetailViewModel(
     private val _auxImage = MutableStateFlow(AuxImageState())
     val auxImage: StateFlow<AuxImageState> = _auxImage.asStateFlow()
 
-    init {
-        // 进详情页先回填缓存：这道题出过辅助图就直接显示，不用再点一次按钮。
-        viewModelScope.launch {
-            val question = uiState.mapNotNull { it.question }.first()
-            val profile = container.settingsStore.snapshotNow().activeImageProfile ?: return@launch
-            val key = container.imageDiskCache.keyFor(auxSeed(question), profile.model)
-            container.imageDiskCache.peek(key)?.let { file ->
-                _auxImage.value = AuxImageState(path = file.absolutePath)
-            }
-        }
-    }
-
     /**
      * 生图缓存种子：题目 id + 题干 hash。
      *
@@ -165,6 +153,29 @@ class DetailViewModel(
             } ?: false
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailUiState())
+
+    /**
+     * 进详情页先回填辅助图缓存：这道题出过图就直接显示，不用再点一次按钮。
+     *
+     * **位置必须在 [uiState] 声明之后**。Kotlin 的 init 块按**出现顺序**
+     * 执行，写在 uiState 前面的话，块里访问到的 uiState 还是未赋值的
+     * 空引用——构造 ViewModel 就 NPE，表现是「点开任何错题立刻闪退」。
+     * 这类崩溃不会在编译期报错，只能靠声明顺序规避。
+     */
+    init {
+        viewModelScope.launch {
+            runCatching {
+                val question = uiState.mapNotNull { it.question }.first()
+                val profile = container.settingsStore.snapshotNow().activeImageProfile
+                    ?: return@runCatching
+                val key = container.imageDiskCache.keyFor(auxSeed(question), profile.model)
+                container.imageDiskCache.peek(key)?.let { file ->
+                    _auxImage.value = AuxImageState(path = file.absolutePath)
+                }
+                // 兜底：这张图既然要显示了，就不能被 LRU 淘汰掉（见 auxImage 注释）
+            }.onFailure { /* 回填失败不影响看题 */ }
+        }
+    }
 
     /** 改错题本归属，立即落库。传 null 表示移出分类（回到「未归类」）。 */
     fun setNotebook(notebookId: Long?) {

@@ -361,6 +361,14 @@ class ChatRepository(
          */
         supportsVision: Boolean = true,
         /**
+         * 是否已经配了专门的**识图模型**（对话里会有 describe_image 工具）。
+         *
+         * 为真时不再把 MinerU 的识别原文预塞进上下文——图由模型按需调
+         * 识图工具去看。预塞的问题：不管这张图看不看都烧一次识别，
+         * 而且整段识别原文会进上下文（也容易被界面展示出来），很生硬。
+         */
+        visionToolAvailable: Boolean = false,
+        /**
          * 手写过程批改指令（T13）。非空时拼在题目上下文之后——**与题目上下文
          * 同一条 system 消息**，模型读起来是「这道题 + 按这个方式批」。
          *
@@ -387,7 +395,7 @@ class ChatRepository(
                 it.content.startsWith(ChatContextAssembler.SUMMARY_PREFIX)
         }
         val history = raw.filterNot { it.id == summaryMessage?.id }
-            .map { it.toOutgoing(supportsVision) }
+            .map { it.toOutgoing(supportsVision, visionToolAvailable) }
         return ChatContextAssembler.assemble(
             systemPrompt = ChatPrompts.SYSTEM,
             questionContext = systemContext,
@@ -397,7 +405,10 @@ class ChatRepository(
         )
     }
 
-    private suspend fun ChatMessage.toOutgoing(supportsVision: Boolean): OutgoingMessage {
+    private suspend fun ChatMessage.toOutgoing(
+        supportsVision: Boolean,
+        visionToolAvailable: Boolean = false
+    ): OutgoingMessage {
         val attachments = attachmentIds().mapNotNull { chatDao.findAttachment(it) }
         val usable = attachments.filter { it.status == AttachmentStatus.READY }
         val imageAttachments = usable.filter { it.kind == AttachmentKind.IMAGE }
@@ -418,7 +429,8 @@ class ChatRepository(
             // 识别失败的图也会带一条失败说明进来（见 [ChatOcrText.failureNote]）：
             // 模型由此知道「这里有一张图但没读出来」，能如实让用户补充文字，
             // 而不是忽略这张图继续答。
-            if (!supportsVision) {
+            // 识图工具可用时不预塞 OCR 原文：模型想看会自己调 describe_image。
+            if (!supportsVision && !visionToolAvailable) {
                 val imageTexts = imageAttachments
                     .mapNotNull { it.textExcerpt.takeIf { excerpt -> excerpt.isNotBlank() } }
                 if (imageTexts.isNotEmpty()) {

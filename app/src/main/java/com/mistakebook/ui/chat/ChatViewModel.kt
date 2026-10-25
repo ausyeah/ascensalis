@@ -918,6 +918,7 @@ class ChatViewModel(
             sessionId = sessionId,
             questionId = questionId,
             supportsVision = effectiveProfile.supportsVision,
+            visionToolAvailable = settingsStore.snapshotNow().visionConfigured,
             // 批改指令与题目上下文拼进同一条 system 消息（ChatRepository）；
             // 不开批改时传空串——普通对话的上下文与 v0.0.33 逐字一致
             gradingInstruction = if (grading) ChatPrompts.GRADING_INSTRUCTION else ""

@@ -56,6 +56,21 @@ data class SettingsSnapshot(
     /** 生图渠道（多套，可切换）。key 走 EncryptedSharedPreferences，同 [llmProfiles]。 */
     val imageProfiles: List<ImageProfile> = emptyList(),
     val activeImageProfileId: String? = null,
+
+    /**
+     * 专门的**识图模型**：指向 [llmProfiles] 里某一套配置的 id。
+     *
+     * ## 为什么单独要一个
+     *
+     * 用户接的主模型常常不识图（DeepSeek-chat、Qwen-plus），而识图能力
+     * 又是刚需（拍题、看截图）。以前的唯一出路是 MinerU——它是第三方
+     * 付费服务，且只能出 OCR 文字，问「这张图里画了什么」答不上来。
+     *
+     * 单独配一套识图模型后：对话里的图片可以由它来读，主模型不识图
+     * 也不影响；它还能回答「图里有什么」这类**理解型**问题，
+     * 这是 OCR 做不到的。留空表示不指定（走原来的 MinerU / 原图直传）。
+     */
+    val visionProfileId: String? = null,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
 
     /**
@@ -180,6 +195,18 @@ data class SettingsSnapshot(
 
     /** 生图渠道是否可用。所有生图入口统一按这个门禁决定「提示去设置」还是真调 API。 */
     val imageConfigured: Boolean get() = activeImageProfile?.isConfigured() == true
+
+    /**
+     * 指定的识图模型配置。
+     *
+     * 指到一套**已被删除**的配置时返回 null（而不是崩或返回第一套）——
+     * 删了配置就等于没指定，回到默认路径。
+     */
+    val visionProfile: LlmProfile?
+        get() = visionProfileId?.let { id -> llmProfiles.firstOrNull { it.id == id } }
+
+    /** 识图模型是否可用（指定了且配置完整）。 */
+    val visionConfigured: Boolean get() = visionProfile?.isConfigured() == true
 
     companion object {
         const val MINERU_MODEL_VLM = "vlm"

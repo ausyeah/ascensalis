@@ -23,6 +23,8 @@ import com.mistakebook.net.llm.ChatRequest
 import com.mistakebook.net.llm.ChatStreamEvent
 import com.mistakebook.net.llm.ImageUrl
 import com.mistakebook.net.llm.SearchTools
+import com.mistakebook.net.llm.MediaTools
+import java.io.File
 import com.mistakebook.net.llm.ToolLoopPolicy
 import com.mistakebook.net.llm.ToolRoundState
 import kotlinx.coroutines.CancellationException
@@ -167,7 +169,8 @@ class ChatGenerationService : Service() {
         val context = repository.buildContext(
             sessionId = sessionId,
             questionId = questionId,
-            supportsVision = profile.supportsVision
+            supportsVision = profile.supportsVision,
+            visionToolAvailable = container.settingsStore.snapshotNow().visionConfigured
         )
         val assistantId = repository.insertStreamingAssistantMessage(sessionId, profile.model)
 
@@ -186,6 +189,19 @@ class ChatGenerationService : Service() {
         val settings = container.settingsStore.settings.first()
         val searchEnabled = settings.chatSearchEnabled
         val effort = settings.reasoningEffort
+
+        // 媒体工具按配置给：没配识图模型就不给 describe_image（给了也执行不了），
+        // 没配生图渠道就不给 generate_image。
+        val mediaTools = MediaTools.all(
+            visionConfigured = settings.visionConfigured,
+            imageConfigured = settings.imageConfigured
+        )
+
+        // 本次会话最近一张用户发的图（识图工具的输入）。
+        val sessionImageFile = latestImageFile(container, context.messages, sessionId)
+
+        // 生图工具产出的图片路径：循环结束后以 Markdown 接到回答末尾。
+        val generatedImages = mutableListOf<String>()
 
         // tool loop 的消息链走 **DTO 层**：中途要追加 assistant(tool_calls)
         // 与 role=tool 两种本地域模型（OutgoingMessage）表达不了的消息。
@@ -227,6 +243,23 @@ class ChatGenerationService : Service() {
             )
         }
 
+        /**
+         * 工具执行期间的进度提示。
+         *
+         * **必须带着已生成的内容**（同搜索的教训）：界面是整体替换语义，
+         * 发空 content 会把正在流的回答清空，看着像「断了」。
+         */
+        fun publishStage(content: String, stage: String) {
+            ChatGenerationBus.publish(
+                ChatGenerationBus.Snapshot(
+                    assistantId = assistantId,
+                    content = content,
+                    sessionId = sessionId,
+                    stage = stage
+                )
+            )
+        }
+
         suspend fun publishPreview() {
             // 预览节流：每个 delta 都发一次 StateFlow 会让界面每个 token 重组一次。
             // 与原实现同口径（PREVIEW_THROTTLE_MS）。
@@ -256,7 +289,10 @@ class ChatGenerationService : Service() {
                     max_tokens = ChatCompletionStream.MAX_TOKENS,
                     responseFormat = null,
                     stream = true,
-                    tools = if (searchEnabled) SearchTools.all() else null
+                    tools = buildList {
+                        if (searchEnabled) addAll(SearchTools.all())
+                        addAll(mediaTools)
+                    }.takeIf { it.isNotEmpty() }
                 )
                 // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）。
                 // 用**替换**语义：正常路径一次流只发一个 ToolCalls 事件
@@ -367,16 +403,38 @@ class ChatGenerationService : Service() {
                             stage = "正在联网搜索…"
                         )
                     )
-                    val query = SearchTools.parseSearchQuery(call.arguments)
-                    val result = if (query == null) {
-                        "搜索未执行：参数缺少 query 字段，请修正后重试。"
-                    } else {
-                        executeWebSearch(
-                            container, settings, profile, query,
-                            oriQuestion = lastUserQuestion
+                    val result = when (call.name) {
+                        SearchTools.WEB_SEARCH -> {
+                            val query = SearchTools.parseSearchQuery(call.arguments)
+                            if (query == null) {
+                                "搜索未执行：参数缺少 query 字段，请修正后重试。"
+                            } else {
+                                executeWebSearch(
+                                    container, settings, profile, query,
+                                    oriQuestion = lastUserQuestion
+                                )
+                            }
+                        }
+
+                        MediaTools.DESCRIBE_IMAGE -> executeDescribeImage(
+                            container = container,
+                            settings = settings,
+                            question = MediaTools.argument(call.arguments, "question"),
+                            imageFile = sessionImageFile,
+                            stage = { stage -> publishStage(currentText, stage) }
                         )
+
+                        MediaTools.GENERATE_IMAGE -> executeGenerateImage(
+                            container = container,
+                            settings = settings,
+                            prompt = MediaTools.argument(call.arguments, "prompt"),
+                            generated = generatedImages,
+                            stage = { stage -> publishStage(currentText, stage) }
+                        )
+
+                        else -> "未识别的工具「${call.name}」，请改用你确定存在的工具。"
                     }
-                    // 搜完了：内容照旧带上，撤掉 stage。空 content 的快照一律不再发。
+                    // 工具跑完了：内容照旧带上，撤掉 stage。空 content 的快照一律不再发。
                     ChatGenerationBus.publish(
                         ChatGenerationBus.Snapshot(
                             assistantId = assistantId,
@@ -392,6 +450,17 @@ class ChatGenerationService : Service() {
                     )
                 }
                 toolRound++
+            }
+
+            // 生图工具产出的图：以 Markdown 图片接到回答末尾。
+            // 不接的话模型说「图已生成」，用户却什么都看不到。
+            if (generatedImages.isNotEmpty()) {
+                rounds.onDelta(
+                    buildString {
+                        generatedImages.forEach { path -> append("\n\n![]($path)") }
+                    }
+                )
+                publishPreview()
             }
         } catch (cancelled: CancellationException) {
             // 用户按了停止 / 服务被销毁：不是失败，保留已收到的内容。
@@ -534,6 +603,114 @@ class ChatGenerationService : Service() {
      * 出口优先级同旧版：用户选了 DeepSeek 就先试官方搜索（复用其渠道
      * Key），渠道不在或失败则退 Tavily；直接选 Tavily 就只用 Tavily。
      */
+    /**
+     * 本次会话最近一张用户发的图：消息里存的是 base64 data URL，
+     * 识图接口要的是本地文件，这里解码落一份临时文件。
+     *
+     * 落在会话的 OCR 目录下：随会话一起清理，不会在磁盘上留垃圾。
+     */
+    private fun latestImageFile(
+        container: com.mistakebook.di.AppContainer,
+        messages: List<com.mistakebook.data.chat.OutgoingMessage>,
+        sessionId: Long
+    ): File? {
+        val dataUrl = messages.asReversed()
+            .firstOrNull { it.images.isNotEmpty() }
+            ?.images?.firstOrNull()
+            ?: return null
+        val base64 = dataUrl.substringAfter("base64,", "").takeIf { it.isNotBlank() } ?: return null
+        return runCatching {
+            val dir = container.files.chatOcrDir(sessionId).apply { mkdirs() }
+            File(dir, "vision_input.png").apply {
+                writeBytes(java.util.Base64.getDecoder().decode(base64))
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * 执行 `describe_image`：让**专门的识图模型**读图，把读到的内容回给主模型。
+     *
+     * 结果只进上下文（role=tool），不直接糊在界面上——这正是用户要的
+     * 「作为一种工具存在，而不是在下面显示识别细节」。
+     */
+    private suspend fun executeDescribeImage(
+        container: com.mistakebook.di.AppContainer,
+        settings: com.mistakebook.data.prefs.SettingsSnapshot,
+        question: String?,
+        imageFile: File?,
+        stage: (String) -> Unit
+    ): String {
+        val vision = settings.visionProfile
+            ?: return "识图工具不可用：尚未在设置里指定识图模型（设置 → 大模型 → 识图模型）。"
+        if (!vision.isConfigured()) {
+            return "识图工具不可用：指定的识图模型配置不完整（地址 / Key / 模型名）。"
+        }
+        if (imageFile == null) {
+            return "本次对话没有可读取的图片：用户没有发图，或图片附件已失效。"
+        }
+        stage("识图模型正在看图…")
+        val reply = container.llmClient.plainTextWithImage(
+            profile = vision,
+            systemPrompt = "你是一个识图助手。按用户的要求准确读取图片内容：" +
+                "文字、公式、表格、图形结构如实转录；" +
+                "看不清的地方直说看不清，不要编造。直接给结果，不要解释你怎么看的。",
+            userPrompt = question ?: "请完整描述这张图的内容。",
+            imageFile = imageFile,
+            longEdgePx = settings.imageLongEdgePx
+        )
+        return when (reply) {
+            is com.mistakebook.net.ApiResult.Success ->
+                reply.data.trim().ifBlank { "识图模型没有返回内容。" }
+
+            is com.mistakebook.net.ApiResult.Failure ->
+                "识图失败：${reply.error.serverMessage.ifBlank { "请检查识图模型配置" }}"
+        }
+    }
+
+    /**
+     * 执行 `generate_image`：按模型给的英文 prompt 出一张示意图。
+     *
+     * 图落盘后记进 [generated]，循环结束会以 Markdown 接到回答末尾，
+     * 用户在气泡里直接看到。
+     */
+    private suspend fun executeGenerateImage(
+        container: com.mistakebook.di.AppContainer,
+        settings: com.mistakebook.data.prefs.SettingsSnapshot,
+        prompt: String?,
+        generated: MutableList<String>,
+        stage: (String) -> Unit
+    ): String {
+        if (prompt == null) return "生图未执行：参数缺少 prompt 字段，请给出英文描述后重试。"
+        if (!settings.imageConfigured) {
+            return "生图工具不可用：尚未在设置 → 生图设置里配置渠道。"
+        }
+        stage("正在生成示意图…")
+        val result = container.sceneImageGenerator.generate(
+            cacheKeySeed = "chat:$prompt",
+            systemPrompt = "",
+            userPrompt = prompt,
+            // 模型已经给了现成 prompt，不再让它自己改写一遍
+            imagePrompt = prompt
+        )
+        return when (result) {
+            is com.mistakebook.pipeline.SceneImageResult.Generated -> {
+                generated += result.file.absolutePath
+                "示意图已生成并显示给用户。请继续你的讲解，不要重复描述图片内容。"
+            }
+
+            is com.mistakebook.pipeline.SceneImageResult.Cached -> {
+                generated += result.file.absolutePath
+                "示意图已生成并显示给用户（命中缓存）。请继续你的讲解。"
+            }
+
+            is com.mistakebook.pipeline.SceneImageResult.NotConfigured ->
+                "生图工具不可用：尚未在设置 → 生图设置里配置渠道。"
+
+            is com.mistakebook.pipeline.SceneImageResult.Failed ->
+                "生图失败：${result.message}"
+        }
+    }
+
     private suspend fun executeWebSearch(
         container: com.mistakebook.di.AppContainer,
         settings: com.mistakebook.data.prefs.SettingsSnapshot,

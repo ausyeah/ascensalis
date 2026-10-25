@@ -99,6 +99,7 @@ class SettingsStore(context: Context) {
             activeProfileId = activeId,
             imageProfiles = imageProfiles,
             activeImageProfileId = activeImageId,
+            visionProfileId = prefs[KEY_VISION_PROFILE],
             themeMode = ThemeMode.fromKey(prefs[KEY_THEME_MODE]),
             networkMode = NetworkMode.fromKey(prefs[KEY_NETWORK_MODE]),
             reasoningEffort = ReasoningEffort.fromKey(prefs[KEY_REASONING_EFFORT]),
@@ -280,6 +281,18 @@ class SettingsStore(context: Context) {
         saveImageProfiles(remaining)
         if (prefs[KEY_ACTIVE_IMAGE_PROFILE] == id) {
             setActiveImageProfileId(remaining.firstOrNull()?.id)
+        }
+    }
+
+    /**
+     * 指定专门的识图模型（传 null 表示不指定）。
+     *
+     * 只存 id，不存整套配置：模型配置本身在 [loadProfiles] 里维护，
+     * 这里存副本就会有两份真相（改了 Key 这边不知道）。
+     */
+    suspend fun setVisionProfileId(id: String?) {
+        appContext.settingsDataStore.edit { prefs ->
+            if (id == null) prefs.remove(KEY_VISION_PROFILE) else prefs[KEY_VISION_PROFILE] = id
         }
     }
 
@@ -570,6 +583,7 @@ class SettingsStore(context: Context) {
         const val MAX_WORDBOOK_DAILY_GOAL = 500
         val KEY_ACTIVE_PROFILE = stringPreferencesKey("active_llm_profile")
         val KEY_ACTIVE_IMAGE_PROFILE = stringPreferencesKey("active_image_profile")
+        val KEY_VISION_PROFILE = stringPreferencesKey("vision_profile_id")
         val KEY_HOME_QUESTION_ORDER = stringPreferencesKey("home_question_order")
     }
 }

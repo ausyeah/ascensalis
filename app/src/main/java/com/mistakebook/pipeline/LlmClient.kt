@@ -240,6 +240,32 @@ class LlmClient(private val api: LlmApi) {
     }
 
     /**
+     * 带一张图的纯文本调用：**识图模型读图**。
+     *
+     * 与 [refineJson] 的区别同 [plainText]：不走 JSON 模式、不重试、不阶梯。
+     * 识图是要模型「看图说话」，返回一段描述；JSON 模式只会把它套进
+     * 一个壳里，还得再剥一层。
+     *
+     * @param imageFile 本地图片；为空或不存在时按纯文本调用处理（不报错）。
+     */
+    suspend fun plainTextWithImage(
+        profile: LlmProfile,
+        systemPrompt: String,
+        userPrompt: String,
+        imageFile: File?,
+        longEdgePx: Int = 1280,
+        maxTokens: Int = DEFAULT_PLAIN_MAX_TOKENS
+    ): ApiResult<String> = withContext(Dispatchers.IO) {
+        if (!profile.isConfigured()) return@withContext fail(ApiErrorKind.NO_KEY)
+        val imagePart = if (imageFile != null && imageFile.exists()) {
+            encodeImage(imageFile, longEdgePx)
+        } else {
+            null
+        }
+        sendOnce(profile, systemPrompt, userPrompt, imagePart, useJsonMode = false, maxTokens = maxTokens)
+    }
+
+    /**
      * 拉取某个配置下的可用模型列表。
      *
      * [keyOverride] 用来**指定用哪一把 key 去探**：一个配置下有多把 key

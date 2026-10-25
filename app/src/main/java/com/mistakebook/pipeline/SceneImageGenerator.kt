@@ -41,7 +41,14 @@ class SceneImageGenerator(
         systemPrompt: String,
         userPrompt: String,
         width: Int = DEFAULT_WIDTH,
-        height: Int = DEFAULT_HEIGHT
+        height: Int = DEFAULT_HEIGHT,
+        /**
+         * 直接指定生图 prompt，**跳过「让 LLM 先写一段描述」那一步**。
+         *
+         * 对话里的 generate_image 工具就是这种情况：模型已经在参数里
+         * 给了现成的英文 prompt，再让它自己改写一遍纯属浪费一轮调用。
+         */
+        imagePrompt: String? = null
     ): SceneImageResult {
         val settings = settingsStore.snapshotNow()
         val imageProfile = settings.activeImageProfile
@@ -52,9 +59,21 @@ class SceneImageGenerator(
         val key = imageDiskCache.keyFor(cacheKeySeed, imageProfile.model)
         imageDiskCache.get(key)?.let { return SceneImageResult.Cached(it) }
 
-        // 第一步：对话模型出英文场景 prompt。
+        // 第一步：对话模型出英文场景 prompt（调用方直接给了就跳过）。
         val llmProfile = settings.activeProfile
             ?: return SceneImageResult.Failed("尚未配置大模型，无法生成图片描述")
+        if (imagePrompt != null) {
+            val image = imageGenClient.generate(imageProfile, imagePrompt, width, height)
+            return when (image) {
+                is com.mistakebook.net.ApiResult.Success -> SceneImageResult.Generated(
+                    imageDiskCache.put(key, image.data, pinned = true),
+                    imagePrompt
+                )
+                is com.mistakebook.net.ApiResult.Failure -> SceneImageResult.Failed(
+                    image.error.serverMessage.ifBlank { "生图失败，请检查生图配置" }
+                )
+            }
+        }
         val promptReply = llmClient.plainText(
             profile = llmProfile,
             systemPrompt = systemPrompt,
@@ -75,7 +94,9 @@ class SceneImageGenerator(
         val image = imageGenClient.generate(imageProfile, imagePrompt, width, height)
         return when (image) {
             is com.mistakebook.net.ApiResult.Success -> {
-                val file = imageDiskCache.put(key, image.data)
+                // pinned：这是用户点按钮生成的内容，不是临时缓存。
+                // 不 pin 的话背到第 201 个词时第一个词的图就被 LRU 删了。
+                val file = imageDiskCache.put(key, image.data, pinned = true)
                 SceneImageResult.Generated(file, imagePrompt)
             }
             is com.mistakebook.net.ApiResult.Failure ->

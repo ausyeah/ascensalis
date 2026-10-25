@@ -281,6 +281,9 @@
     <string name="settings_image_profile_template_hint">占位符：{prompt} 提示词、{width} 宽、{height} 高。写在引号内，如 {"model":"xxx","prompt":"{prompt}","n":1,"size":"{width}x{height}"}。留空走内置默认格式。</string>
     <string name="settings_image_profile_delete">删除该渠道</string>
     <string name="settings_hint_image_key">尚未配置生图渠道。配好地址、Key 与模型名后，单词卡与详情页的图片功能即可使用。</string>
+    <string name="settings_vision_profile">识图模型</string>
+    <string name="settings_vision_profile_none">不指定</string>
+    <string name="settings_vision_profile_hint">指定一套专门用来看图的模型。指定后，对话里会多出一个「看图」工具：主模型看不到图片时由它来读，也能回答「图里画了什么」这类问题。不指定时沿用原来的 MinerU 识别。</string>
     <string name="settings_save">保存</string>
 
     <string name="settings_active_profile">当前使用</string>

@@ -97,6 +97,45 @@ class ImageDiskCacheTest {
     }
 
     @Test
+    fun `pinned 的图片不被淘汰`() {
+        val c = cache(max = 2)
+        val pinned = c.keyFor("keep", "m")
+        c.put(pinned, byteArrayOf(1), pinned = true)
+        Thread.sleep(15)
+        // 再写三张临时图，远超上限
+        repeat(3) { i ->
+            c.put(c.keyFor("tmp$i", "m"), byteArrayOf(i.toByte()))
+            Thread.sleep(15)
+        }
+        // 固定住的那张还在——用户主动生成的图不能因为缓存满了就消失
+        assertTrue(c.get(pinned) != null)
+        // 临时图只留上限 2 张，外加那张 pin 的 = 3 个文件
+        assertEquals(3, c.count())
+    }
+
+    @Test
+    fun `pin 可以把已有图片固定住`() {
+        val c = cache(max = 1)
+        val key = c.keyFor("w", "m")
+        c.put(key, byteArrayOf(1))
+        Thread.sleep(15)
+        c.pin(key)
+        Thread.sleep(15)
+        c.put(c.keyFor("other", "m"), byteArrayOf(2))
+        assertTrue(c.get(key) != null)
+    }
+
+    @Test
+    fun `pin 后仍然能按原 key 命中`() {
+        val c = cache(max = 5)
+        val key = c.keyFor("w", "m")
+        c.put(key, byteArrayOf(9), pinned = true)
+        val file = c.get(key)!!
+        assertTrue(file.readBytes().contentEquals(byteArrayOf(9)))
+        assertTrue(file.name.startsWith(ImageDiskCache.PIN_PREFIX))
+    }
+
+    @Test
     fun `clear 清空`() {
         val c = cache()
         c.put(c.keyFor("a", "m"), byteArrayOf(1))
