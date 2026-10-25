@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.data.prefs.LlmKeyEntry
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.chat.ChatSearchProvider
 import com.mistakebook.data.prefs.NetworkMode
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.ThemeMode
@@ -1400,6 +1401,79 @@ internal fun ReasoningEffortSection(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+/**
+ * 联网搜索分区（v0.0.43）。
+ *
+ * v0.0.43 起 API 配置从「模型面板」挪到这里：会话里只留「选择 + 开启」，
+ * Key 这类「配一次就再也不碰」的东西统一进设置页。搜索本身已改为
+ * function calling（模型自主决策），本分区只决定**给它挂哪个出口**。
+ */
+@Composable
+internal fun SearchProviderSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    val snapshot = state.snapshot
+    SettingsGroup(title = stringResource(R.string.settings_search_title)) {
+        Text(
+            text = stringResource(R.string.settings_search_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        SwitchRow(
+            label = stringResource(R.string.settings_search_enabled),
+            checked = snapshot.chatSearchEnabled,
+            onChange = viewModel::setChatSearchEnabled
+        )
+        if (snapshot.chatSearchEnabled) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = stringResource(R.string.settings_search_provider),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = snapshot.chatSearchProvider == ChatSearchProvider.DEEPSEEK,
+                    onClick = { viewModel.setChatSearchProvider(ChatSearchProvider.DEEPSEEK) },
+                    label = { Text("DeepSeek") },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = snapshot.chatSearchProvider == ChatSearchProvider.TAVILY,
+                    onClick = { viewModel.setChatSearchProvider(ChatSearchProvider.TAVILY) },
+                    label = { Text("Tavily") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (snapshot.chatSearchProvider == ChatSearchProvider.DEEPSEEK) {
+                    stringResource(R.string.settings_search_deepseek_hint)
+                } else {
+                    stringResource(R.string.settings_search_tavily_hint)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (snapshot.chatSearchProvider == ChatSearchProvider.TAVILY) {
+                Spacer(Modifier.height(10.dp))
+                PasswordField(
+                    label = stringResource(R.string.settings_search_tavily_key),
+                    value = snapshot.tavilyApiKey,
+                    onValueChange = viewModel::setTavilyApiKey
+                )
+            }
+        }
     }
 }
 

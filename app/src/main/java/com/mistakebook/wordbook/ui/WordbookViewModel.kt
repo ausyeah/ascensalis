@@ -26,6 +26,8 @@ import java.util.Calendar
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
 
+// debounce 是 FlowPreview 的预览 API，稳定版已在多渠道验证（见下方错词本监听注释）。
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class WordbookViewModel(private val container: AppContainer) : ViewModel() {
 
     /** 顶部摘要四个计数的合并载体（combine 四路 Flow 的产物）。 */

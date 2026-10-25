@@ -413,6 +413,9 @@ private fun ChatRowContent(
     onClick: () -> Unit
 ) {
     val untitled = stringResource(R.string.chat_untitled)
+    // 时间标签里的 DateTimeFormatter 提到顶层缓存（原每次重组都编译一遍），
+    // kindOf 是廉价纯计算，直接调用即可——remember 的计算 lambda 不可组合，
+    // 包住 stringResource 会直接编译失败。
     val time = timeLabel(item.session.updatedAt)
 
     Surface(color = MaterialTheme.colorScheme.surface) {
@@ -523,8 +526,15 @@ private fun timeLabel(updatedAt: Long): String {
             val date = Instant.ofEpochMilli(updatedAt).atZone(zone).toLocalDate()
             // 同年只显示月日，跨年才带年份——省掉噪音
             val sameYear = date.year == Instant.ofEpochMilli(now).atZone(zone).year
-            val pattern = if (sameYear) "M月d日" else "yyyy年M月d日"
-            date.format(DateTimeFormatter.ofPattern(pattern))
+            // pattern 编译结果缓存：行重组（滚动、其他行状态变化）会反复走到
+            // 这里，每次 ofPattern 都要重新解析一遍模式串。
+            date.format(if (sameYear) DATE_FMT_SAME_YEAR else DATE_FMT_WITH_YEAR)
         }
     }
 }
+
+/** 同年日期格式：「8月15日」。 */
+private val DATE_FMT_SAME_YEAR: DateTimeFormatter = DateTimeFormatter.ofPattern("M月d日")
+
+/** 跨年日期格式：「2024年8月15日」。 */
+private val DATE_FMT_WITH_YEAR: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy年M月d日")

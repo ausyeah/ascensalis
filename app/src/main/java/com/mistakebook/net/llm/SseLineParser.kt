@@ -26,7 +26,16 @@ sealed interface SseEvent {
         val completionTokens: Int = 0,
 
         /** 命中提示词缓存的输入 token。中转站大多不给，为 0。 */
-        val cachedTokens: Int = 0
+        val cachedTokens: Int = 0,
+
+        /**
+         * 工具调用增量（v0.0.43）。
+         *
+         * 与 [text]/[thinking] 不同，tool_calls **不能按帧直接用**：
+         * 一次调用的参数被拆成多个分片，要按 index 累积
+         * （见 [com.mistakebook.net.llm.accumulateToolCall]）。
+         */
+        val toolCalls: List<StreamToolCallDelta> = emptyList()
     ) : SseEvent
 
     /** `data: [DONE]` —— 服务端正常收尾。 */
@@ -95,7 +104,8 @@ class SseLineParser(private val json: Json = Json { ignoreUnknownKeys = true }) 
             finishReason = choice?.finishReason,
             promptTokens = usage?.promptTokens ?: 0,
             completionTokens = usage?.completionTokens ?: 0,
-            cachedTokens = usage?.promptCacheHitTokens ?: 0
+            cachedTokens = usage?.promptCacheHitTokens ?: 0,
+            toolCalls = choice?.delta?.toolCalls.orEmpty()
         )
     }
 

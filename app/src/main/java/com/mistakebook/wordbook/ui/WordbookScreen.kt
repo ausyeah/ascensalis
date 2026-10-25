@@ -42,10 +42,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -608,7 +608,7 @@ internal fun StudyView(
                                             modifier = Modifier.size(36.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.VolumeUp,
+                                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                                 contentDescription = "朗读单词",
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(18.dp)
@@ -709,7 +709,7 @@ internal fun StudyView(
                                             modifier = Modifier.size(36.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.VolumeUp,
+                                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                                 contentDescription = "朗读单词",
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(18.dp)
@@ -814,7 +814,7 @@ internal fun StudyView(
                                 modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.VolumeUp,
+                                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                     contentDescription = "朗读单词",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(17.dp)
@@ -1078,7 +1078,7 @@ private fun SpellAnswerArea(
             isError = state.spellSubmitted && !state.spellCorrect,
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.None,
-                autoCorrect = false,
+                autoCorrectEnabled = false,
                 imeAction = ImeAction.Done,
                 keyboardType = KeyboardType.Text
             ),
@@ -1089,7 +1089,7 @@ private fun SpellAnswerArea(
                         onClick = viewModel::submitSpell,
                         enabled = state.spellInput.isNotBlank()
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = "提交答案")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "提交答案")
                     }
                 }
             },
@@ -2216,7 +2216,7 @@ private fun WordItemCard(
             // 不用进详情页（本项目不做单词详情页）。
             IconButton(onClick = onSpeak, modifier = Modifier.size(40.dp)) {
                 Icon(
-                    imageVector = Icons.Default.VolumeUp,
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                     contentDescription = "朗读单词",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)

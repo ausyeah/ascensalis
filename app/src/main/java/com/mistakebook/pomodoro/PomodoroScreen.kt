@@ -1190,9 +1190,9 @@ private fun TaskRow(
             MaterialTheme.colorScheme.surface
         },
         border = if (selected) {
-            ButtonDefaults.outlinedButtonBorder
+            ButtonDefaults.outlinedButtonBorder(enabled = true)
         } else {
-            ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outlineVariant))
+            ButtonDefaults.outlinedButtonBorder(enabled = true).copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outlineVariant))
         },
         modifier = Modifier
             .fillMaxWidth()
@@ -2091,7 +2091,7 @@ private fun StatsCard(title: String, content: @Composable () -> Unit) {
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
-        border = ButtonDefaults.outlinedButtonBorder.copy(
+        border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(
             brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline)
         ),
         modifier = Modifier.fillMaxWidth()

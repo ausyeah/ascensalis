@@ -22,6 +22,7 @@ import com.mistakebook.net.llm.ChatContentPart
 import com.mistakebook.net.llm.ChatRequest
 import com.mistakebook.net.llm.ChatStreamEvent
 import com.mistakebook.net.llm.ImageUrl
+import com.mistakebook.net.llm.SearchTools
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -174,47 +175,19 @@ class ChatGenerationService : Service() {
             ChatGenerationBus.Snapshot(assistantId = assistantId, content = "", sessionId = sessionId)
         )
 
-        // ---- 联网搜索（v0.0.41）：开关开着就在请求前检索并注入 ----
-        // 放在助手消息插入**之后**：气泡先出现并显示 stage 提示，
-        // 搜索的几秒到十几秒不是「没反应」。
+        // ---- 联网搜索（v0.0.43）：改为 function calling，模型自主决策 ----
+        //
+        // 旧机制（v0.0.41）是「请求前盲目搜一次再注入」：该搜不该搜的都搜，
+        // query 还是客户端拿最后一条提问硬当的。现在把搜索包成 web_search
+        // 工具交给模型自己决定（DeepSeek tool_calls / Tavily 同款用法），
+        // 执行与结果回传见下面的 tool loop。
         val settings = container.settingsStore.settings.first()
-        val lastUserQuery = context.messages.lastOrNull { it.role == ChatRole.USER }?.text.orEmpty()
-        val searchBlock = if (settings.chatSearchEnabled && lastUserQuery.isNotBlank()) {
-            ChatGenerationBus.publish(
-                ChatGenerationBus.Snapshot(
-                    assistantId = assistantId, content = "", sessionId = sessionId,
-                    stage = "正在联网搜索…"
-                )
-            )
-            val block = runWebSearch(container, settings, profile, lastUserQuery)
-            ChatGenerationBus.publish(
-                ChatGenerationBus.Snapshot(assistantId = assistantId, content = "", sessionId = sessionId)
-            )
-            block
-        } else {
-            null
-        }
-        val llmMessages = if (searchBlock != null) {
-            // 搜索结果以一条 user 消息插在提问**之前**：模型先看到资料再看问题。
-            val msgs = context.messages.toMutableList()
-            val lastUserIdx = msgs.indexOfLast { it.role == ChatRole.USER }
-            msgs.add(
-                if (lastUserIdx >= 0) lastUserIdx else msgs.size,
-                OutgoingMessage(id = -1L, role = ChatRole.USER, text = searchBlock)
-            )
-            msgs
-        } else {
-            context.messages
-        }
+        val searchEnabled = settings.chatSearchEnabled
+        val effort = settings.reasoningEffort
 
-        val request = ChatRequest(
-            model = profile.model,
-            messages = llmMessages.map { it.toLlm() },
-            temperature = ChatCompletionStream.TEMPERATURE,
-            max_tokens = ChatCompletionStream.MAX_TOKENS,
-            responseFormat = null,
-            stream = true
-        )
+        // tool loop 的消息链走 **DTO 层**：中途要追加 assistant(tool_calls)
+        // 与 role=tool 两种本地域模型（OutgoingMessage）表达不了的消息。
+        val llmMessages = context.messages.map { it.toLlm() }.toMutableList()
 
         val buffer = StringBuilder()
         val thinking = StringBuilder()
@@ -261,48 +234,122 @@ class ChatGenerationService : Service() {
         }
 
         try {
-            container.chatCompletionStream.complete(
-                profile,
-                request,
-                container.settingsStore.settings.first().reasoningEffort
-            ).collect { event ->
-                when (event) {
-                    is ChatStreamEvent.Thinking -> {
-                        if (event.text.isNotEmpty()) {
-                            thinking.append(event.text)
-                            fullThinking.append(event.text)
-                            publishPreview()
-                            if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
+            // ---- tool loop：模型要工具 → 客户端执行 → 回传 → 续请求 ----
+            //
+            // 上限 [SearchTools.MAX_TOOL_ROUNDS]：模型偶尔会「再搜一次确认」，
+            // 不设上限的话一次提问能烧掉十几次搜索配额。
+            var toolRound = 0
+            while (true) {
+                val request = ChatRequest(
+                    model = profile.model,
+                    messages = llmMessages.toList(),
+                    temperature = ChatCompletionStream.TEMPERATURE,
+                    max_tokens = ChatCompletionStream.MAX_TOKENS,
+                    responseFormat = null,
+                    stream = true,
+                    tools = if (searchEnabled) SearchTools.all() else null
+                )
+                // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）
+                val pendingCalls = mutableListOf<com.mistakebook.net.llm.AccumulatedToolCall>()
+
+                container.chatCompletionStream.complete(profile, request, effort)
+                    .collect { event ->
+                        when (event) {
+                            is ChatStreamEvent.Thinking -> {
+                                if (event.text.isNotEmpty()) {
+                                    thinking.append(event.text)
+                                    fullThinking.append(event.text)
+                                    publishPreview()
+                                    if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
+                                }
+                            }
+
+                            is ChatStreamEvent.Delta -> {
+                                buffer.append(event.text)
+                                fullAnswer.append(event.text)
+                                publishPreview()
+                                if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
+                            }
+
+                            is ChatStreamEvent.ToolCalls -> pendingCalls += event.calls
+
+                            is ChatStreamEvent.Done -> {
+                                promptTokens = event.promptTokens
+                                completionTokens = event.completionTokens
+                                container.usageStatsStore.recordLlm(
+                                    promptTokens = event.promptTokens,
+                                    completionTokens = event.completionTokens,
+                                    cachedTokens = event.cachedTokens
+                                )
+                                wasTruncated = event.finishReason == FINISH_REASON_LENGTH
+                            }
+
+                            is ChatStreamEvent.Failed -> {
+                                status = if (event.error.kind == ApiErrorKind.CANCELLED) {
+                                    MessageStatus.CANCELED
+                                } else {
+                                    MessageStatus.FAILED
+                                }
+                                errorText = event.error.serverMessage.takeIf { it.isNotBlank() }
+                            }
                         }
                     }
 
-                    is ChatStreamEvent.Delta -> {
-                        buffer.append(event.text)
-                        fullAnswer.append(event.text)
-                        publishPreview()
-                        if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
-                    }
+                // 失败 / 取消 / 模型没要工具 / 轮数用尽：结束循环，走收尾
+                if (status != MessageStatus.DONE) break
+                if (pendingCalls.isEmpty()) break
+                if (toolRound >= SearchTools.MAX_TOOL_ROUNDS) break
 
-                    is ChatStreamEvent.Done -> {
-                        promptTokens = event.promptTokens
-                        completionTokens = event.completionTokens
-                        container.usageStatsStore.recordLlm(
-                            promptTokens = event.promptTokens,
-                            completionTokens = event.completionTokens,
-                            cachedTokens = event.cachedTokens
+                // ---- 回传 assistant 消息（模型侧的原样回声）----
+                //
+                // DeepSeek 思考模式带 tools 时，**后续每个请求都必须完整回传
+                // reasoning_content**，否则 API 400（官方文档硬性要求）。
+                // 其他渠道不认识这个字段，按 baseUrl 条件发送。
+                llmMessages += com.mistakebook.net.llm.ChatMessage(
+                    role = "assistant",
+                    content = JsonPrimitive(fullAnswer.toString()),
+                    toolCalls = pendingCalls.map { call ->
+                        com.mistakebook.net.llm.ToolCall(
+                            id = call.id,
+                            function = com.mistakebook.net.llm.ToolCallFunction(
+                                name = call.name,
+                                arguments = call.arguments
+                            )
                         )
-                        wasTruncated = event.finishReason == FINISH_REASON_LENGTH
-                    }
+                    },
+                    reasoningContent = fullThinking.toString()
+                        .takeIf { it.isNotBlank() && profile.baseUrl.contains("deepseek", ignoreCase = true) }
+                )
+                // 中间轮的正文与思考不属于最终答案：清空，下一轮重新累积
+                fullAnswer.setLength(0)
+                fullThinking.setLength(0)
 
-                    is ChatStreamEvent.Failed -> {
-                        status = if (event.error.kind == ApiErrorKind.CANCELLED) {
-                            MessageStatus.CANCELED
-                        } else {
-                            MessageStatus.FAILED
-                        }
-                        errorText = event.error.serverMessage.takeIf { it.isNotBlank() }
+                // ---- 客户端执行工具，结果以 role=tool 消息回传 ----
+                pendingCalls.forEach { call ->
+                    // 气泡先显示 stage：搜索这几秒不是「没反应」
+                    ChatGenerationBus.publish(
+                        ChatGenerationBus.Snapshot(
+                            assistantId = assistantId, content = "", sessionId = sessionId,
+                            stage = "正在联网搜索…"
+                        )
+                    )
+                    val query = SearchTools.parseSearchQuery(call.arguments)
+                    val result = if (query == null) {
+                        "搜索未执行：参数缺少 query 字段，请修正后重试。"
+                    } else {
+                        executeWebSearch(container, settings, profile, query)
                     }
+                    ChatGenerationBus.publish(
+                        ChatGenerationBus.Snapshot(assistantId = assistantId, content = "", sessionId = sessionId)
+                    )
+                    llmMessages += com.mistakebook.net.llm.ChatMessage(
+                        role = "tool",
+                        content = JsonPrimitive(result),
+                        toolCallId = call.id,
+                        name = call.name
+                    )
                 }
+                toolRound++
             }
         } catch (cancelled: CancellationException) {
             // 用户按了停止 / 服务被销毁：不是失败，保留已收到的内容。
@@ -427,22 +474,24 @@ class ChatGenerationService : Service() {
         )
     }
 
-    // ------------------------------------------------------------ 转换
+    // ------------------------------------------------------------ 联网搜索（v0.0.43 工具执行侧）
 
     /**
-     * 执行联网搜索，返回注入上下文的文本块；任何失败返回 null（尽力而为）。
+     * 执行一次 web_search 工具，返回给模型的文本结果。
      *
-     * 出口优先级：用户选了 DeepSeek 就先试 DeepSeek 官方搜索
-     * （复用其渠道 Key），渠道不在或失败则退 Tavily；直接选 Tavily
-     * 就只用 Tavily。搜索是增强，不是依赖——失败静默跳过，
-     * 没有联网结果的普通回答远好过整轮报错。
+     * **永远不返回 null**：搜索结果要以 role=tool 消息回传，空内容会让
+     * 模型困惑。无 Key / 无结果 / 网络失败各自给一句人话，让模型基于
+     * 自身知识回答并说明未能联网——搜索是增强，不是依赖。
+     *
+     * 出口优先级同旧版：用户选了 DeepSeek 就先试官方搜索（复用其渠道
+     * Key），渠道不在或失败则退 Tavily；直接选 Tavily 就只用 Tavily。
      */
-    private suspend fun runWebSearch(
+    private suspend fun executeWebSearch(
         container: com.mistakebook.di.AppContainer,
         settings: com.mistakebook.data.prefs.SettingsSnapshot,
         profile: com.mistakebook.data.prefs.LlmProfile,
         query: String
-    ): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    ): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {
             kotlinx.coroutines.withTimeoutOrNull(60_000L) {
                 val deepSeekKey = profile.apiKey.takeIf {
@@ -459,6 +508,10 @@ class ChatGenerationService : Service() {
                     com.mistakebook.data.chat.ChatSearchProvider.TAVILY ->
                         tavilyKey?.let { listOf(1 to it) } ?: emptyList()
                 }
+                if (attempts.isEmpty()) {
+                    return@withTimeoutOrNull "搜索未执行：未配置可用的搜索渠道" +
+                        "（DeepSeek 渠道 Key 或 Tavily API Key，见设置页）。"
+                }
                 for ((which, key) in attempts) {
                     val results = runCatching {
                         if (which == 0) {
@@ -471,9 +524,9 @@ class ChatGenerationService : Service() {
                         return@withTimeoutOrNull com.mistakebook.data.chat.WebSearchFormatter.format(query, results)
                     }
                 }
-                null
+                "未找到相关网页结果。请基于自身知识回答，并说明未能联网核实。"
             }
-        }.getOrNull()
+        }.getOrNull() ?: "联网搜索失败（网络异常或超时）。请基于自身知识回答。"
     }
 
     private fun OutgoingMessage.toLlm() = com.mistakebook.net.llm.ChatMessage(

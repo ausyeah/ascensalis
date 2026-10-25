@@ -1,6 +1,7 @@
 package com.mistakebook.ui.common
 
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.background
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -56,8 +58,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.collection.LruCache
 import com.mistakebook.R
 import com.mistakebook.math.MathRenderer
+import com.mistakebook.math.MathWrap
 import com.mistakebook.markdown.MarkdownParser
 
 /**
@@ -100,11 +104,22 @@ fun RichText(
      */
     streaming: Boolean = false
 ) {
-    val blocks = remember(text) { MarkdownParser.parse(text) }
+    // 走缓存：item 滑出视口销毁后滑回来不再重解（列表滑动卡顿的主因之一）。
+    val blocks = remember(text) { MarkdownParser.parseCached(text) }
     val density = LocalDensity.current
     val targetFontPx = with(density) { style.fontSize.toPx() }
 
-    val mathKeys = remember(blocks) { collectMathKeys(blocks) }
+    // 块级公式的**换行预算**（字符数）：按屏幕宽与目标字号估算，
+    // 与下面 collectMathKeys / 渲染处共用同一参数，保证缓存键一致。
+    // 超长公式主动拆成多行各自渲染，而不是整条等比压小（用户反馈「渲染出来很小」）。
+    val screenWidthPx = with(density) {
+        LocalConfiguration.current.screenWidthDp.dp.toPx()
+    }
+    val maxMathChars = remember(screenWidthPx, targetFontPx) {
+        estimateMaxMathChars(screenWidthPx, targetFontPx)
+    }
+
+    val mathKeys = remember(blocks, maxMathChars) { collectMathKeys(blocks, maxMathChars) }
     val requests = remember(mathKeys) {
         mathKeys.map { key ->
             val display = key.startsWith("d:")
@@ -236,20 +251,25 @@ fun RichText(
                 )
 
                 is MarkdownParser.Block.Math -> if (block.complete) {
-                    val key = "d:${block.latex}"
-                    MathImage(
-                        latex = block.latex,
-                        rendered = mathCache[key],
-                        // 渲染中（键还没进缓存）只留占位，**不闪源码**；
-                        // 渲染失败（缓存里是 null）才回退源码——用户反馈
-                        // 「渲染后再显示」：先看到版式稳定的位置，公式到位即换。
-                        pending = !mathCache.containsKey(key),
-                        targetFontPx = targetFontPx,
-                        display = true,
-                        centered = true,
-                        color = color,
-                        showSourceFallback = !streaming
-                    )
+                    // 超长公式主动换行：每个短片段单独一张公式图、单独一行，
+                    // 都能按目标字号完整渲染。collectMathKeys 用同一函数同一
+                    // maxMathChars 生成键，两边必然一致。
+                    MathWrap.splitForDisplay(block.latex, maxMathChars).forEach { segment ->
+                        val key = "d:$segment"
+                        MathImage(
+                            latex = segment,
+                            rendered = mathCache[key],
+                            // 渲染中（键还没进缓存）只留占位，**不闪源码**；
+                            // 渲染失败（缓存里是 null）才回退源码——用户反馈
+                            // 「渲染后再显示」：先看到版式稳定的位置，公式到位即换。
+                            pending = !mathCache.containsKey(key),
+                            targetFontPx = targetFontPx,
+                            display = true,
+                            centered = true,
+                            color = color,
+                            showSourceFallback = !streaming
+                        )
+                    }
                 } else if (streaming) {
                     // 未闭合的 `$$`：流式中先隐藏，配对符到齐后自然变成完整块渲染。
                     // 静态文本仍显示源码（原行为，见 [RichText] 的 streaming 说明）。
@@ -270,11 +290,16 @@ fun RichText(
     }
 }
 
-private fun collectMathKeys(blocks: List<MarkdownParser.Block>): List<String> {
+private fun collectMathKeys(blocks: List<MarkdownParser.Block>, maxMathChars: Int): List<String> {
     val keys = linkedSetOf<String>()
     blocks.forEach { block ->
         when (block) {
-            is MarkdownParser.Block.Math -> if (block.complete) keys += "d:${block.latex}"
+            // 块级公式按与渲染处**完全相同**的拆行函数生成键：
+            // 拆行后的每个片段一把独立键。参数不同就会键不一致——
+            // 渲染处拿着收集处没请求过的键查缓存，公式永远停在占位态。
+            is MarkdownParser.Block.Math -> if (block.complete) {
+                MathWrap.splitForDisplay(block.latex, maxMathChars).forEach { keys += "d:$it" }
+            }
             is MarkdownParser.Block.Paragraph -> keys += segmentMathKeys(block.text)
             is MarkdownParser.Block.ListItem -> keys += segmentMathKeys(block.text)
             is MarkdownParser.Block.Quote -> keys += segmentMathKeys(block.text)
@@ -283,6 +308,32 @@ private fun collectMathKeys(blocks: List<MarkdownParser.Block>): List<String> {
     }
     return keys.toList()
 }
+
+/**
+ * 估算块级公式的换行预算：一行最多多少个字符还不会被 [MathLayout.fit] 压小。
+ *
+ * ## 推导
+ *
+ * KaTeX 数学字体的平均字符宽约 0.5 em（斜体字母略宽、数字略窄，取中）。
+ * 屏幕可用宽度打 84 折——RichText 的调用方（气泡、卡片）各有左右边距，
+ * 这里是保守估计，宁可早拆也不要拆晚了被 fit 收缩。
+ *
+ * `availPx / (0.5 * fontPx)` 即「按正文字号一行能塞多少个数学字符」。
+ * 夹在 [MIN, MAX] 之间：太紧会把正常长度的公式也拆碎，太松则长公式仍会被压小。
+ *
+ * 纯函数、可单测；两个单位都是像素，不涉及 density 换算。
+ */
+private fun estimateMaxMathChars(screenWidthPx: Float, targetFontPx: Float): Int {
+    if (screenWidthPx <= 0f || targetFontPx <= 0f) return 60
+    val chars = (screenWidthPx * AVAILABLE_WIDTH_RATIO) / (CHAR_WIDTH_EM * targetFontPx)
+    return chars.roundToInt().coerceIn(24, 90)
+}
+
+/** 屏幕可用宽度占整屏的比例（扣除气泡/卡片边距的保守估计）。 */
+private const val AVAILABLE_WIDTH_RATIO = 0.84f
+
+/** KaTeX 数学字体平均字符宽度（相对字号）。 */
+private const val CHAR_WIDTH_EM = 0.5f
 
 /** 与 InlineRow 保持一致：逐个行内公式单独作为 key；`\[..\]` 走 display 前缀。 */
 private fun segmentMathKeys(text: String): List<String> =
@@ -704,7 +755,8 @@ private fun InlineText(
     /** 渲染未就绪时是否回退显示 latex 源码。流式时为 false，只留占位。 */
     showSourceFallback: Boolean = true
 ) {
-    val spans = remember(text) { parseInline(text) }
+    // 与 MarkdownParser.parseCached 同理：滑出视口再滑回不重解析。
+    val spans = remember(text) { parseInlineCached(text) }
     InlineRow(
         spans = spans,
         mathCache = mathCache,
@@ -942,6 +994,24 @@ fun parseInline(input: String): List<InlineSpan> {
  * 原实现在循环体内 `Regex("...").find(rest)`，每遇一个 `!` 就重新编译一次正则。
  */
 private val imageSpan = Regex("!\\[([^\\]]*)\\]\\(([^)]+)\\)")
+
+/**
+ * 行内解析缓存。
+ *
+ * 与 [MarkdownParser.parseCached] 同一动机：LazyColumn 滚动时新可见 item
+ * 在主线程跑 [parseInline]（逐字符扫描 + 分支判断），滑出去再滑回来重跑。
+ * 解析纯函数、结果只读，整个列表缓存安全。
+ */
+private val inlineParseCache = LruCache<String, List<InlineSpan>>(INLINE_CACHE_ENTRIES)
+
+private fun parseInlineCached(input: String): List<InlineSpan> {
+    inlineParseCache[input]?.let { return it }
+    val parsed = parseInline(input)
+    inlineParseCache.put(input, parsed)
+    return parsed
+}
+
+private const val INLINE_CACHE_ENTRIES = 128
 
 /**
  * 公式批量渲染的最大尝试次数。

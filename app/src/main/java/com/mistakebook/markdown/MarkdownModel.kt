@@ -1,5 +1,7 @@
 package com.mistakebook.markdown
 
+import androidx.collection.LruCache
+
 /**
  * 轻量 Markdown / MinerU 输出解析：标题、段落、列表、引用、分割线、代码块、
  * HTML 表格与 Markdown 管道表格、图片、行内与独立公式。
@@ -37,6 +39,35 @@ object MarkdownParser {
         }
         return blocks
     }
+
+    /**
+     * 带缓存的 [parse]。
+     *
+     * ## 解决什么
+     *
+     * LazyColumn 滚动时，新进入视口的 item 会在主线程跑整段解析
+     * （逐行正则 + 块结构），离屏 item 被销毁后滑回来还要再解一遍——
+     * 用户看到的现象就是「对话之间滑动时列表抽风、一闪一闪、滑不下去」。
+     *
+     * 解析是**纯函数**（同输入同输出、无副作用），结果 Block 也只读，
+     * 所以缓存整个列表是安全的。流式期间每条新文本 miss 一次、付一次解析，
+     * 历史消息滑出再滑回则直接命中，主线程不再反复被解析堵住。
+     *
+     * 上限 [PARSE_CACHE_ENTRIES] 条：一个会话页可见 + 邻近的消息远小于此，
+     * 流式增长由 LRU 自然淘汰最早的半成品。
+     */
+    fun parseCached(input: String): List<Block> {
+        if (input.isBlank()) return emptyList()
+        parseCache[input]?.let { return it }
+        val parsed = parse(input)
+        parseCache.put(input, parsed)
+        return parsed
+    }
+
+    /** 解析缓存条数。见 [parseCached]。 */
+    private const val PARSE_CACHE_ENTRIES = 128
+
+    private val parseCache = LruCache<String, List<Block>>(PARSE_CACHE_ENTRIES)
 
     private fun splitByTables(input: String): List<String> {
         val result = mutableListOf<String>()

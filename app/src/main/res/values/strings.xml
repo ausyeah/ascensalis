@@ -249,6 +249,15 @@
     <string name="settings_reasoning_max">最高</string>
     <string name="settings_reasoning_hint">各服务端字段名不统一（reasoning_effort / thinking / reasoning），不被识别时会自动换字段重试，通常无感；关闭则完全由服务端默认决定。</string>
 
+    <!-- 联网搜索（v0.0.43） -->
+    <string name="settings_search_title">联网搜索</string>
+    <string name="settings_search_desc">开启后，模型在需要最新信息或事实依据时会自主调用搜索工具（用不用、什么时候用由模型决定）。API 配置如下。</string>
+    <string name="settings_search_enabled">启用联网搜索</string>
+    <string name="settings_search_provider">搜索出口</string>
+    <string name="settings_search_tavily_key">Tavily API Key（tvly-…）</string>
+    <string name="settings_search_tavily_hint">在 tavily.com 免费注册获取，每月 1000 次免费额度。选 DeepSeek 出口时无需填写（复用 DeepSeek 渠道 Key）。</string>
+    <string name="settings_search_deepseek_hint">复用设置里 DeepSeek 渠道的 API Key 做服务端搜索；当前供应商不是 DeepSeek 或失败时，自动改用 Tavily。</string>
+
     <string name="settings_active_profile">当前使用</string>
     <string name="settings_add_profile">新增配置</string>
     <string name="settings_edit_profile">编辑配置</string>

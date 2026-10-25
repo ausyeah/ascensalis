@@ -90,6 +90,9 @@ data class PomodoroUiState(
         get() = if (sessionCount <= 0) 0f else totalCompleted.toFloat() / sessionCount
 }
 
+// combine 的 vararg 产物是 Array<Any?>，逐位 cast 是这一模式自带的代价，
+// 类型安全由 combine 参数顺序保证（10 条 Flow 与下面 10 个 values[i] 一一对应）。
+@Suppress("UNCHECKED_CAST")
 class PomodoroViewModel(
     app: Application,
     private val dao: PomodoroDao,
@@ -156,7 +159,6 @@ class PomodoroViewModel(
                 message,
                 stats
             ) { values ->
-                @Suppress("UNCHECKED_CAST")
                 val snapshot = values[10] as PomodoroStats.Snapshot
                 PomodoroUiState(
                     tasks = values[0] as List<PomodoroTask>,

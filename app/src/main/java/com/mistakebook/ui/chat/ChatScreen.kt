@@ -101,7 +101,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalClipboardManager
+import android.content.ClipData
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
@@ -211,7 +211,6 @@ fun ChatScreen(
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val clipboard = LocalClipboardManager.current
 
     val copiedText = stringResource(R.string.chat_copied)
     val title = stringResource(
@@ -427,7 +426,13 @@ fun ChatScreen(
                         bubbleFiles = state.bubbleFiles,
                         truncatedMessageId = state.truncatedMessageId,
                         onCopy = { text ->
-                            clipboard.setText(AnnotatedString(text))
+                            // 直接走 Android 原生剪贴板：Compose 的 clipboard API
+                            // 一分为二（旧 ClipboardManager.setText 非 suspend 已弃用、
+                            // 新 Clipboard.setClipEntry 要 ClipData），原生 API 在
+                            // minSdk 26 上稳定且零弃用警告，行为与原来一致。
+                            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("copied", text))
                             viewModel.notifyCopied()
                         },
                         onRetry = viewModel::retry,
@@ -512,13 +517,11 @@ fun ChatScreen(
             enabled = !state.isStreaming,
             searchEnabled = state.chatSearchEnabled,
             searchProvider = state.chatSearchProvider,
-            tavilyKey = state.tavilyApiKey,
             onSelect = viewModel::selectModel,
             onSelectProvider = viewModel::selectProvider,
             onEffortChange = viewModel::setReasoningEffort,
             onSearchEnabledChange = viewModel::setChatSearchEnabled,
             onSearchProviderChange = viewModel::setChatSearchProvider,
-            onTavilyKeyChange = viewModel::setTavilyApiKey,
             onDismiss = { showModelSheet = false }
         )
     }
@@ -551,7 +554,9 @@ private fun MessageList(
             add(ChatListItem.Message(visibleMessage))
         }
     }
-    val displayItems = remember(items) { items.asReversed() }
+    // asReversed() 是 O(1) 视图，remember 它没有意义；每次重组直接取，
+    // 反而少一层「items 引用变了就重建」的无效缓存。
+    val displayItems = items.asReversed()
 
     LazyColumn(
         state = listState,
@@ -1461,13 +1466,11 @@ private fun ModelPickerSheet(
     enabled: Boolean,
     searchEnabled: Boolean,
     searchProvider: ChatSearchProvider,
-    tavilyKey: String,
     onSelect: (String) -> Unit,
     onSelectProvider: (String) -> Unit,
     onEffortChange: (ReasoningEffort) -> Unit,
     onSearchEnabledChange: (Boolean) -> Unit,
     onSearchProviderChange: (ChatSearchProvider) -> Unit,
-    onTavilyKeyChange: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var page by remember { mutableStateOf(0) } // 0 模型列表 / 1 思考强度
@@ -1621,7 +1624,12 @@ private fun ModelPickerSheet(
                 }
             }
 
-            // ---- 联网搜索（v0.0.41）：开关默认开，出口二选一 ----
+            // ---- 联网搜索（v0.0.43）：只留「选择 + 开启」 ----
+            //
+            // v0.0.43 起改走 function calling：开关只决定**要不要给模型挂
+            // web_search 工具**，用不用、什么时候用由模型自己决定——
+            // 不再是「回答前先盲目搜一次」。API Key 等具体配置已移到
+            // 设置页（SearchProviderSection），这里不再堆表单。
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Row(
                 modifier = Modifier
@@ -1633,7 +1641,7 @@ private fun ModelPickerSheet(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("联网搜索", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "回答前先检索最新网页信息（DeepSeek / Tavily）",
+                        "需要时由模型自主检索最新网页（DeepSeek / Tavily）",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1660,31 +1668,18 @@ private fun ModelPickerSheet(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                when (searchProvider) {
-                    ChatSearchProvider.DEEPSEEK -> Text(
-                        "使用 DeepSeek 渠道的 API Key 做服务端搜索；当前供应商不是 DeepSeek 或失败时，自动改用 Tavily。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 20.dp)
-                    )
+                Text(
+                    when (searchProvider) {
+                        ChatSearchProvider.DEEPSEEK ->
+                            "复用 DeepSeek 渠道的 API Key 做服务端搜索；当前供应商不是 DeepSeek 或失败时，自动改用 Tavily。"
 
-                    ChatSearchProvider.TAVILY -> Column(
-                        modifier = Modifier.padding(horizontal = 20.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = tavilyKey,
-                            onValueChange = onTavilyKeyChange,
-                            singleLine = true,
-                            label = { Text("Tavily API Key（tvly-…）") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text(
-                            "在 tavily.com 免费注册获取，每月 1000 次免费额度。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                        ChatSearchProvider.TAVILY ->
+                            "使用 Tavily 独立搜索服务，API Key 请在「设置 → 识别与大模型 → 联网搜索」里配置。"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
             }
         }
     }

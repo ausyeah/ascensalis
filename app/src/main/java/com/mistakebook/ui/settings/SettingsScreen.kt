@@ -199,6 +199,12 @@ fun SettingsScreen(
                 viewModel = viewModel
             )
 
+            // 联网搜索：开关与出口选择在模型面板，Key 等配置在这里（v0.0.43）。
+            SearchProviderSection(
+                state = state,
+                viewModel = viewModel
+            )
+
             MineruParamsSection(
                 state = state,
                 viewModel = viewModel

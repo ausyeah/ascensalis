@@ -89,7 +89,22 @@ fun rememberAutoScrollEffect(
             // animateScrollToItem 会把正往上翻历史的人一把拽回底部
             // （真机反馈「生成时不触底却也会往下滑」）。动画前按当前几何
             // 复核一次，不在底部就不滚，等用户自己回去再由 resume 触发。
-            if (coordinator.following && state.isAtBottom(tolerancePx)) {
+            //
+            // 复核不能只问「index 0 在不在底部」：新消息插入的**瞬间**它还在
+            // 视口下方、不在可见集里，按旧判据会误判「不在底部」而干脆不滚——
+            // 正是「发送新消息不自动跳到底部」的根因。反向布局下插入一条新
+            // 消息时旧末条仍锚在视口底边（gap≈0），所以只要视觉最底部的可见
+            // item 贴着底边，就说明插入前用户确实在底部，应该跟随。
+            val info = state.layoutInfo
+            val newestVisible = info.visibleItemsInfo.any { it.index == 0 }
+            val bottomMost = info.visibleItemsInfo.firstOrNull()
+            val flushAtBottom = bottomMost != null && isAtBottomOfViewport(
+                itemOffset = bottomMost.offset,
+                itemSize = bottomMost.size,
+                viewportEndOffset = info.viewportEndOffset,
+                tolerancePx = tolerancePx
+            )
+            if (coordinator.following && (newestVisible || flushAtBottom)) {
                 state.animateScrollToItem(0)
             }
         }

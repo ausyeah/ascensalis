@@ -251,6 +251,24 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         store.setReasoningEffort(effort)
     }
 
+    // ---- 联网搜索（v0.0.43）：配置从模型面板挪进设置页 ----
+
+    /** 开关联网搜索（下一次请求生效）。 */
+    fun setChatSearchEnabled(value: Boolean) = viewModelScope.launch {
+        store.setChatSearchEnabled(value)
+    }
+
+    /** 切换搜索出口（DeepSeek 官方搜索 / Tavily）。 */
+    fun setChatSearchProvider(provider: com.mistakebook.data.chat.ChatSearchProvider) =
+        viewModelScope.launch {
+            store.setChatSearchProvider(provider)
+        }
+
+    /** 保存 Tavily API Key（去首尾空白）。 */
+    fun setTavilyApiKey(key: String) = viewModelScope.launch {
+        store.setTavilyApiKey(key)
+    }
+
     fun testMineru() {
         viewModelScope.launch {
             testingMineru.value = true

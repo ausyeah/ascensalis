@@ -121,9 +121,6 @@ data class ChatUiState(
     /** 搜索出口：DeepSeek 官方搜索（默认）或 Tavily。 */
     val chatSearchProvider: ChatSearchProvider = ChatSearchProvider.DEEPSEEK,
 
-    /** Tavily API Key（选 Tavily 时在模型面板里填）。 */
-    val tavilyApiKey: String = "",
-
     /** 首个 token 之前的阶段提示（如「正在联网搜索…」），正文开始流动后为 null。 */
     val generationStage: String? = null,
 
@@ -364,7 +361,6 @@ class ChatViewModel(
                     reasoningEffort = s.reasoningEffort,
                     chatSearchEnabled = s.chatSearchEnabled,
                     chatSearchProvider = s.chatSearchProvider,
-                    tavilyApiKey = s.tavilyApiKey,
                     providerOptions = s.llmProfiles.map { p ->
                         ChatProviderOption(id = p.id, name = p.displayName())
                     },
@@ -973,11 +969,6 @@ class ChatViewModel(
     /** 切换搜索出口（DeepSeek / Tavily）。 */
     fun setChatSearchProvider(provider: ChatSearchProvider) {
         viewModelScope.launch { settingsStore.setChatSearchProvider(provider) }
-    }
-
-    /** 保存 Tavily API Key。 */
-    fun setTavilyApiKey(key: String) {
-        viewModelScope.launch { settingsStore.setTavilyApiKey(key) }
     }
 
     /**
