@@ -23,6 +23,8 @@ import com.mistakebook.net.llm.ChatRequest
 import com.mistakebook.net.llm.ChatStreamEvent
 import com.mistakebook.net.llm.ImageUrl
 import com.mistakebook.net.llm.SearchTools
+import com.mistakebook.net.llm.ToolLoopPolicy
+import com.mistakebook.net.llm.ToolRoundState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -196,8 +198,10 @@ class ChatGenerationService : Service() {
 
         val buffer = StringBuilder()
         val thinking = StringBuilder()
-        val fullAnswer = StringBuilder()
-        val fullThinking = StringBuilder()
+        // 工具循环的跨轮累积：见 [ToolRoundState]。
+        // 一次提问可能「思考→搜索→再思考→作答」多轮请求，但用户眼里
+        // 始终是**一条连续消息**——各轮内容拼接，轮界绝不清零。
+        val rounds = ToolRoundState()
         var lastWriteAt = 0L
         var lastPreviewAt = 0L
         var status = MessageStatus.DONE
@@ -219,7 +223,7 @@ class ChatGenerationService : Service() {
             lastWriteAt = System.currentTimeMillis()
             repository.updateAssistantContent(
                 assistantId,
-                joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString())
+                joinThinkingAndAnswer(rounds.answer, rounds.thinking)
             )
         }
 
@@ -232,7 +236,7 @@ class ChatGenerationService : Service() {
             ChatGenerationBus.publish(
                 ChatGenerationBus.Snapshot(
                     assistantId = assistantId,
-                    content = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString()),
+                    content = joinThinkingAndAnswer(rounds.answer, rounds.thinking),
                     sessionId = sessionId
                 )
             )
@@ -254,8 +258,13 @@ class ChatGenerationService : Service() {
                     stream = true,
                     tools = if (searchEnabled) SearchTools.all() else null
                 )
-                // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）
-                val pendingCalls = mutableListOf<com.mistakebook.net.llm.AccumulatedToolCall>()
+                // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）。
+                // 用**替换**语义：正常路径一次流只发一个 ToolCalls 事件
+                // （drainSse 已把整轮的分片累积成一个列表）；唯一的多次
+                // 场景是流中途失败后退回非流式重发——那时旧列表属于已废弃的
+                // 尝试，必须被重试结果覆盖，否则同一轮会执行两批调用。
+                var pendingCalls: List<com.mistakebook.net.llm.AccumulatedToolCall> =
+                    emptyList()
 
                 container.chatCompletionStream.complete(profile, request, effort)
                     .collect { event ->
@@ -263,7 +272,7 @@ class ChatGenerationService : Service() {
                             is ChatStreamEvent.Thinking -> {
                                 if (event.text.isNotEmpty()) {
                                     thinking.append(event.text)
-                                    fullThinking.append(event.text)
+                                    rounds.onThinking(event.text)
                                     publishPreview()
                                     if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
                                 }
@@ -271,22 +280,25 @@ class ChatGenerationService : Service() {
 
                             is ChatStreamEvent.Delta -> {
                                 buffer.append(event.text)
-                                fullAnswer.append(event.text)
+                                rounds.onDelta(event.text)
                                 publishPreview()
                                 if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
                             }
 
-                            is ChatStreamEvent.ToolCalls -> pendingCalls += event.calls
+                            is ChatStreamEvent.ToolCalls -> pendingCalls = event.calls
 
                             is ChatStreamEvent.Done -> {
-                                promptTokens = event.promptTokens
-                                completionTokens = event.completionTokens
+                                // 工具循环里每轮是一次独立 API 调用，用量要**累加**；
+                                // 早先直接覆盖，多轮搜索时只记到最后一轮。
+                                promptTokens += event.promptTokens
+                                completionTokens += event.completionTokens
                                 container.usageStatsStore.recordLlm(
                                     promptTokens = event.promptTokens,
                                     completionTokens = event.completionTokens,
                                     cachedTokens = event.cachedTokens
                                 )
-                                wasTruncated = event.finishReason == FINISH_REASON_LENGTH
+                                wasTruncated = wasTruncated ||
+                                    event.finishReason == FINISH_REASON_LENGTH
                             }
 
                             is ChatStreamEvent.Failed -> {
@@ -309,10 +321,13 @@ class ChatGenerationService : Service() {
                 //
                 // DeepSeek 思考模式带 tools 时，**后续每个请求都必须完整回传
                 // reasoning_content**，否则 API 400（官方文档硬性要求）。
-                // 其他渠道不认识这个字段，按 baseUrl 条件发送。
+                // 且官方样例里每条 assistant 消息只带**自己那一轮**的
+                // reasoning_content——所以 echo 用本轮缓冲（[ToolRoundState.roundThinking]），
+                // 跨轮累积只归 UI/DB。渠道判定见 [ToolLoopPolicy.needsReasoningEcho]：
+                // 官方端点（baseUrl）与中转站 serving deepseek 模型（model 名）都覆盖。
                 llmMessages += com.mistakebook.net.llm.ChatMessage(
                     role = "assistant",
-                    content = JsonPrimitive(fullAnswer.toString()),
+                    content = JsonPrimitive(rounds.roundAnswer),
                     toolCalls = pendingCalls.map { call ->
                         com.mistakebook.net.llm.ToolCall(
                             id = call.id,
@@ -322,19 +337,33 @@ class ChatGenerationService : Service() {
                             )
                         )
                     },
-                    reasoningContent = fullThinking.toString()
-                        .takeIf { it.isNotBlank() && profile.baseUrl.contains("deepseek", ignoreCase = true) }
+                    reasoningContent = rounds.roundThinking
+                        .takeIf {
+                            it.isNotBlank() && ToolLoopPolicy.needsReasoningEcho(
+                                profile.baseUrl,
+                                profile.model
+                            )
+                        }
                 )
-                // 中间轮的正文与思考不属于最终答案：清空，下一轮重新累积
-                fullAnswer.setLength(0)
-                fullThinking.setLength(0)
+                // 本轮已回声完毕：重置**本轮**缓冲（跨轮累积保留，见 [ToolRoundState]）。
+                // 早先在这里把 fullAnswer/fullThinking 一起清零，导致第一轮的
+                // 开场白与思考被后续 flush 整体替换掉——永久丢失。
+                rounds.beginNextRound()
 
                 // ---- 客户端执行工具，结果以 role=tool 消息回传 ----
                 pendingCalls.forEach { call ->
-                    // 气泡先显示 stage：搜索这几秒不是「没反应」
+                    // 气泡先显示 stage：搜索这几秒不是「没反应」。
+                    //
+                    // **stage 快照必须带着已生成的内容**。早先这里发 content=""，
+                    // 而界面是整体替换语义（ChatViewModel: streamingContent = snap.content）
+                    // ——正在流的回答瞬间清空、只剩一行「正在联网搜索…」，
+                    // 用户看到的就是「调用搜索之后断输出」。内容一直在，只是去搜了个索。
+                    val currentText = joinThinkingAndAnswer(rounds.answer, rounds.thinking)
                     ChatGenerationBus.publish(
                         ChatGenerationBus.Snapshot(
-                            assistantId = assistantId, content = "", sessionId = sessionId,
+                            assistantId = assistantId,
+                            content = currentText,
+                            sessionId = sessionId,
                             stage = "正在联网搜索…"
                         )
                     )
@@ -347,8 +376,13 @@ class ChatGenerationService : Service() {
                             oriQuestion = lastUserQuestion
                         )
                     }
+                    // 搜完了：内容照旧带上，撤掉 stage。空 content 的快照一律不再发。
                     ChatGenerationBus.publish(
-                        ChatGenerationBus.Snapshot(assistantId = assistantId, content = "", sessionId = sessionId)
+                        ChatGenerationBus.Snapshot(
+                            assistantId = assistantId,
+                            content = currentText,
+                            sessionId = sessionId
+                        )
                     )
                     llmMessages += com.mistakebook.net.llm.ChatMessage(
                         role = "tool",
@@ -363,6 +397,12 @@ class ChatGenerationService : Service() {
             // 用户按了停止 / 服务被销毁：不是失败，保留已收到的内容。
             status = MessageStatus.CANCELED
             throw cancelled
+        } catch (t: Throwable) {
+            // 工具循环里任何没被事件化的意外（DB 写失败、组装消息炸掉等）
+            // 都要落成 FAILED。按 DONE 静默收尾的话，用户看到的是
+            // 「生成结束了、答案却只有半截」且没有任何错误提示。
+            status = MessageStatus.FAILED
+            errorText = t.message?.takeIf { it.isNotBlank() } ?: "生成过程出现异常"
         } finally {
             // 收尾必须放 finally：取消时 CancellationException 已经抛出去了。
             withContext(NonCancellable) {
@@ -377,7 +417,7 @@ class ChatGenerationService : Service() {
                 ChatGenerationBus.publish(
                     ChatGenerationBus.Snapshot(
                         assistantId = assistantId,
-                        content = joinThinkingAndAnswer(fullAnswer.toString(), fullThinking.toString()),
+                        content = joinThinkingAndAnswer(rounds.answer, rounds.thinking),
                         finished = true,
                         promptTokens = promptTokens,
                         truncated = wasTruncated,

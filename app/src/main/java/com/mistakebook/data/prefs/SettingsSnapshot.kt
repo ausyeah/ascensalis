@@ -20,6 +20,30 @@ enum class ThemeMode {
 }
 
 /**
+ * 题目识别方式（拍照/导入错题时，「图 → 文字」这一步走哪条路）。
+ *
+ * - [MINERU]：只用 MinerU（老行为）。没配 Key 时按「请配置 Key」失败。
+ * - [LLM]：只用大模型——可识图模型直接看原图、输出结构化题目，
+ *   完全不依赖 MinerU。当前模型不支持识图时按「请换识图模型」失败。
+ * - [AUTO]（默认）：MinerU 优先；**MinerU 不可用（没配 Key / 调用失败）
+ *   时自动落到大模型**——用户诉求「mineru 不可用的时候多一条路」。
+ *   两者都不可用才失败，错误信息会把两条路都说清楚。
+ */
+enum class RecognitionMode {
+    MINERU,
+    LLM,
+    AUTO;
+
+    companion object {
+        fun fromKey(key: String?): RecognitionMode = when (key?.lowercase()) {
+            "llm" -> LLM
+            "auto" -> AUTO
+            else -> MINERU
+        }
+    }
+}
+
+/**
  * 生效中的设置快照：SettingsStore 每次发射都会重新拼一份。
  *
  * 读取优先级：用户填写的值 > buildConfig 预填（仅 debug）> 内置常量。
@@ -42,6 +66,12 @@ data class SettingsSnapshot(
     val reasoningEffort: ReasoningEffort = ReasoningEffort.HIGH,
     val attachOriginalImage: Boolean = true,
     val imageLongEdgePx: Int = 1280,
+
+    /**
+     * 题目识别方式。默认 [RecognitionMode.AUTO]：MinerU 优先、不可用自动落大模型
+     * （v0.0.44 新增，见 [RecognitionMode] 注释）。
+     */
+    val recognitionMode: RecognitionMode = RecognitionMode.AUTO,
     val printIncludeImage: Boolean = false,
     val printShowAnswer: Boolean = false,
     val printBlankRedo: Boolean = true,

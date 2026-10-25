@@ -85,6 +85,7 @@ import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.chat.ChatSearchProvider
 import com.mistakebook.data.prefs.NetworkMode
 import com.mistakebook.data.prefs.ReasoningEffort
+import com.mistakebook.data.prefs.RecognitionMode
 import com.mistakebook.data.prefs.ThemeMode
 import com.mistakebook.data.prefs.UsageSnapshot
 import com.mistakebook.data.prefs.formatCount
@@ -936,6 +937,100 @@ internal fun MineruKeySection(
 
     if (!state.snapshot.mineruConfigured) {
         FirstRunHint(R.string.settings_hint_mineru_key)
+    }
+}
+
+/**
+ * 识别方式：仅 MinerU / 大模型直连 / 自动（MinerU 优先，不可用落大模型）。
+ *
+ * 放在 MinerU 配置之后、大模型配置之前——这里是两条路的「路口」，
+ * 两条路各自的配置刚展示完，用户在这里决定拍照后走哪条。
+ */
+@Composable
+internal fun RecognitionModeSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    val snapshot = state.snapshot
+    val mode = snapshot.recognitionMode
+    val profile = state.activeProfile
+    // 大模型这条路通不通：没配任何模型，或当前模型不能识图，都算不通。
+    // AUTO 模式下 MinerU 配了 Key 仍可用，只丢大模型兜底，提示降级即可；
+    // LLM 模式下大模型是唯一去路，必须醒目警告。
+    val llmPathBlocked = profile == null || !profile.supportsVision
+    SettingsGroup(title = stringResource(R.string.settings_recognition_title)) {
+        Text(
+            text = stringResource(R.string.settings_recognition_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = mode == RecognitionMode.MINERU,
+                onClick = { viewModel.setRecognitionMode(RecognitionMode.MINERU) },
+                label = { Text(stringResource(R.string.settings_recognition_mineru)) },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = mode == RecognitionMode.LLM,
+                onClick = { viewModel.setRecognitionMode(RecognitionMode.LLM) },
+                label = { Text(stringResource(R.string.settings_recognition_llm)) },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = mode == RecognitionMode.AUTO,
+                onClick = { viewModel.setRecognitionMode(RecognitionMode.AUTO) },
+                label = { Text(stringResource(R.string.settings_recognition_auto)) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = when (mode) {
+                RecognitionMode.MINERU ->
+                    stringResource(R.string.settings_recognition_hint_mineru)
+                RecognitionMode.LLM ->
+                    stringResource(R.string.settings_recognition_hint_llm)
+                RecognitionMode.AUTO ->
+                    stringResource(R.string.settings_recognition_hint_auto)
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (mode != RecognitionMode.MINERU && llmPathBlocked) {
+            Spacer(Modifier.height(10.dp))
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (mode == RecognitionMode.LLM) {
+                            stringResource(R.string.settings_recognition_warn_llm)
+                        } else {
+                            stringResource(R.string.settings_recognition_warn_auto)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
     }
 }
 

@@ -542,22 +542,12 @@ private fun MessageList(
     onSaveToNote: ((Long) -> Unit)? = null
 ) {
     // 倒序提供数据配合 reverseLayout：最新消息固定在底边，流式气泡增长无需反复重启滚动动画。
-    val items: List<ChatListItem> = buildList {
-        if (state.omittedCount > 0) add(ChatListItem.OmittedNotice(state.omittedCount))
-        state.messages.forEach { message ->
-            val preview = state.streamingContent
-            val visibleMessage = if (message.id == state.streamingMessageId && preview != null) {
-                message.copy(content = preview)
-            } else {
-                message
-            }
-            add(ChatListItem.Message(visibleMessage))
-        }
-    }
-    // asReversed() 是 O(1) 视图，remember 它没有意义；每次重组直接取，
-    // 反而少一层「items 引用变了就重建」的无效缓存。
-    val displayItems = items.asReversed()
-
+    //
+    // 流式预览（streamingContent）在**item 作用域内**读取，不在外层：
+    // 快照每 220ms 一帧，读在外层会让整个 MessageList（连同 LazyColumn 的
+    // item provider）每帧重组一遍——长会话里这是白烧的主线程时间。
+    // 读在 item 里，只有正在生成的那条气泡重组。
+    val messages = state.messages
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -565,47 +555,42 @@ private fun MessageList(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        items(
-            items = displayItems,
-            key = { item ->
-                when (item) {
-                    is ChatListItem.OmittedNotice -> "omitted-notice"
-                    is ChatListItem.Message -> item.message.id
-                }
-            },
-            // contentType 让 Compose 按类型分池复用：不写的话滚动时
-            // 每条消息都可能拿到上一条不同类型的容器重新组合。
-            contentType = { item ->
-                when (item) {
-                    is ChatListItem.OmittedNotice -> "notice"
-                    is ChatListItem.Message -> "message"
-                }
-            }
-        ) { item ->
-            when (item) {
-                is ChatListItem.OmittedNotice -> OmittedNoticeRow(item.count)
-                is ChatListItem.Message -> MessageBubble(
-                    message = item.message,
-                    images = bubbleImages[item.message.id].orEmpty(),
-                    files = bubbleFiles[item.message.id].orEmpty(),
-                    stage = state.generationStage.takeIf {
-                        item.message.id == state.streamingMessageId && state.isStreaming
-                    },
-                    truncated = truncatedMessageId == item.message.id,
-                    mathRenderer = mathRenderer,
-                    onCopy = onCopy,
-                    onRetry = onRetry,
-                    onDelete = onDelete,
-                    onSaveToNote = onSaveToNote
-                )
+        if (state.omittedCount > 0) {
+            item(key = "omitted-notice", contentType = "notice") {
+                OmittedNoticeRow(state.omittedCount)
             }
         }
+        items(
+            items = messages.asReversed(),
+            // key 用消息 id：内容更新（流式 / 落库）时按 id 对齐，
+            // 不因为实例变化而丢掉滚动位置与已组合的 item。
+            key = { it.id },
+            // contentType 让 Compose 按类型分池复用：不写的话滚动时
+            // 每条消息都可能拿到上一条不同类型的容器重新组合。
+            contentType = { "message" }
+        ) { message ->
+            val preview = if (message.id == state.streamingMessageId) {
+                state.streamingContent
+            } else {
+                null
+            }
+            val visibleMessage = if (preview != null) message.copy(content = preview) else message
+            MessageBubble(
+                message = visibleMessage,
+                images = bubbleImages[message.id].orEmpty(),
+                files = bubbleFiles[message.id].orEmpty(),
+                stage = state.generationStage.takeIf {
+                    message.id == state.streamingMessageId && state.isStreaming
+                },
+                truncated = truncatedMessageId == message.id,
+                mathRenderer = mathRenderer,
+                onCopy = onCopy,
+                onRetry = onRetry,
+                onDelete = onDelete,
+                onSaveToNote = onSaveToNote
+            )
+        }
     }
-}
-
-private sealed interface ChatListItem {
-    data class OmittedNotice(val count: Int) : ChatListItem
-    data class Message(val message: ChatMessage) : ChatListItem
 }
 
 @Composable
@@ -818,7 +803,9 @@ private fun MessageBubble(
                     if (isStreaming) trimIncompleteTrailingFormula(answer) else answer
                 }
                 // 阶段提示：联网搜索要几秒到十几秒，没这行就是又一例「点了没反应」。
-                if (isStreaming && stage != null && answer.isBlank() && thinking.isBlank()) {
+                // 不要求内容为空——工具循环里搜索期间气泡**带着已生成的内容**，
+                // 阶段行显示在内容上方，用户知道「还在搜，但没断」。
+                if (isStreaming && stage != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(12.dp),
@@ -1133,7 +1120,11 @@ private fun ThinkingBlock(
     streaming: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer
 ) {
-    var expanded by remember { mutableStateOf(true) }
+    // 初始展开态直接取 streaming：历史消息（streaming=false）首次组合就是
+    // 收起态，不会先把整段思考渲染一遍再折叠——那笔开销在滚动到每条
+    // 带思考的历史消息时都要付一次，是「新 item 进视口就卡一下」的一员。
+    // 流式中为 true；流式结束由下面的 LaunchedEffect 收起。
+    var expanded by remember { mutableStateOf(streaming) }
     LaunchedEffect(streaming) {
         if (!streaming) {
             expanded = false

@@ -49,6 +49,55 @@ object PromptTemplates {
         -----MARKDOWN END-----
         """.trimIndent()
 
+    // ===== 大模型直连识别（v0.0.44）：不走 MinerU，模型直接看原图 =====
+
+    /**
+     * 看图直连的系统提示词。
+     *
+     * 与 [SYSTEM_PROMPT] **共用同一套规则**：只替换开头描述输入的那段
+     * （MinerU Markdown → 原图），其余硬性规则、JSON 结构原样保留——
+     * 两条识别路线的输出必须是同一个 schema，下游（JsonExtractor /
+     * 编辑页）才不需要区分题目是怎么来的。
+     *
+     * 用 replaceFirst 而不是复制一份：规则（尤其 LaTeX 书写规范）
+     * 将来只应在一处维护，复制必然漂移。
+     */
+    val VISION_SYSTEM_PROMPT: String = SYSTEM_PROMPT.replaceFirst(
+        SYSTEM_PROMPT_INPUT_DESCRIPTION,
+        VISION_INPUT_DESCRIPTION
+    )
+
+    /** [SYSTEM_PROMPT] 里描述输入来源的那段（被 [VISION_SYSTEM_PROMPT] 替换掉）。 */
+    private const val SYSTEM_PROMPT_INPUT_DESCRIPTION =
+        "你是一个题目纠错整理引擎。用户会给你一份由 MinerU 从学生错题照片中提取的 Markdown 文本，" +
+            "可能包含：OCR 错别字、数学符号错误、页眉页脚、页码、与题目无关的内容；" +
+            "公式以 \$...\$ 包裹；表格为 HTML；图片以 ![...](路径) 引用。"
+
+    /** 看图直连的输入描述：模型直接看照片，没有中间文本。 */
+    private const val VISION_INPUT_DESCRIPTION =
+        "你是一个题目识别整理引擎。用户会直接给你一张学生错题的照片，" +
+            "可能有手写作答痕迹、印刷题目、公式与表格。照片就是唯一输入，" +
+            "你需要自己读出其中的文字与公式。"
+
+    /** 看图直连：系统提示词（多题 + LaTeX 规范 + 标题解析 全套追加）。 */
+    fun visionSystemPrompt(): String = buildString {
+        append(VISION_SYSTEM_PROMPT)
+        append('\n').append(MULTI_QUESTION_APPENDIX)
+        append('\n').append(LATEX_FORMAT_APPENDIX)
+        append('\n').append(TITLE_AND_ANALYSIS_APPENDIX)
+    }
+
+    /** 看图直连：用户提示词（原图已随消息附上，这里只交代注意事项）。 */
+    fun visionUserPrompt(): String = """
+        请直接看这张题目照片，按系统指令输出整理后的 JSON。
+
+        注意：
+        1. 照片里可能并列多道题，按系统指令拆分；也可能只有一道题。
+        2. 手写作答的痕迹（红笔批改、草稿计算）不是题目内容，不要混进 stem/analysis。
+        3. 本题没有外部插图引用，image_refs 一律给空数组。
+        4. 字迹模糊、拍糊的内容不要猜，原样放进 uncertain 并说明。
+    """.trimIndent()
+
     // 追加：一份输入可能含多道题（PDF 多题 / 相册批量）时，要求输出 items 数组。
     val MULTI_QUESTION_APPENDIX: String = """
 

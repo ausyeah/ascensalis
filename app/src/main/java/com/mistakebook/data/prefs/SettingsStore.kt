@@ -101,6 +101,10 @@ class SettingsStore(context: Context) {
             // 旧版本存下的值会被自然忽略——它们不再是 SettingsSnapshot 的构造参数。
             attachOriginalImage = prefs[KEY_ATTACH_IMAGE] ?: true,
             imageLongEdgePx = prefs[KEY_IMAGE_LONG_EDGE] ?: 1280,
+            // 识别方式默认 AUTO：老用户没存过这个键，行为是「MinerU 优先、
+            // 不可用落大模型」——比从前的「没 Key 就失败」多一条活路，
+            // 配了 MinerU 的用户毫无感知。
+            recognitionMode = RecognitionMode.fromKey(prefs[KEY_RECOGNITION_MODE]),
             // 默认不带原图：打印错题本是给手写重做用的，贴照片反而挤掉作答空间。
             // 需要时可到设置页打开。
             printIncludeImage = prefs[KEY_PRINT_IMAGE] ?: false,
@@ -239,6 +243,8 @@ class SettingsStore(context: Context) {
     // 对应的 KEY_ 常量也删了——留着会让人以为还能通过 DataStore 改。
 
     suspend fun setAttachOriginalImage(value: Boolean) = editBoolean(KEY_ATTACH_IMAGE, value)
+
+    suspend fun setRecognitionMode(value: RecognitionMode) = editString(KEY_RECOGNITION_MODE, value.name.lowercase())
 
     suspend fun setImageLongEdgePx(value: Int) = editInt(KEY_IMAGE_LONG_EDGE, value)
 
@@ -471,6 +477,7 @@ class SettingsStore(context: Context) {
         val KEY_REASONING_EFFORT = stringPreferencesKey("reasoning_effort")
         val KEY_ATTACH_IMAGE = booleanPreferencesKey("attach_original_image")
         val KEY_IMAGE_LONG_EDGE = intPreferencesKey("image_long_edge")
+        val KEY_RECOGNITION_MODE = stringPreferencesKey("recognition_mode")
         val KEY_PRINT_IMAGE = booleanPreferencesKey("print_include_image")
         val KEY_PRINT_ANSWER = booleanPreferencesKey("print_show_answer")
         val KEY_ENHANCE_PHOTOS = booleanPreferencesKey("enhance_photos")

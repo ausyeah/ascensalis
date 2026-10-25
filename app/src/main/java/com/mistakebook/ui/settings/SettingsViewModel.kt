@@ -206,6 +206,10 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAttachImage(value: Boolean) = viewModelScope.launch { store.setAttachOriginalImage(value) }
 
+    /** 切换题目识别方式（MinerU / 大模型 / 自动）。 */
+    fun setRecognitionMode(value: com.mistakebook.data.prefs.RecognitionMode) =
+        viewModelScope.launch { store.setRecognitionMode(value) }
+
     fun setPrintIncludeImage(value: Boolean) = viewModelScope.launch {
         store.setPrintIncludeImage(value)
     }

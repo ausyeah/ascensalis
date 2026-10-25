@@ -184,6 +184,12 @@ fun SettingsScreen(
             // MinerU 用量紧跟 MinerU 配置：换 Key 后顺手清零对比。
             MineruUsageSection(container = container)
 
+            // 识别方式路口：仅 MinerU / 大模型直连 / 自动（MinerU 优先，不可用落大模型）。
+            RecognitionModeSection(
+                state = state,
+                viewModel = viewModel
+            )
+
             LlmProfilesSection(
                 state = state,
                 viewModel = viewModel,
