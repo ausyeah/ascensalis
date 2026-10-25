@@ -110,8 +110,17 @@
     <string name="crop_decode_missing">照片文件已丢失</string>
     <string name="crop_decode_oom">照片太大，内存不足</string>
     <string name="crop_back">返回</string>
+    <string name="crop_skip">跳过这张</string>
     <string name="crop_too_small">裁剪区域太小，请至少选 100×100</string>
     <string name="crop_hint">拖动四角手柄框选题目，排除页面噪声</string>
+
+    <!-- F6 连拍模式 -->
+    <string name="capture_batch_count">本批 %1$d 张</string>
+    <string name="capture_batch_done">完成</string>
+    <string name="capture_batch_full">一次最多 12 张，先完成这批</string>
+    <string name="capture_batch_discard_title">丢弃本批照片？</string>
+    <string name="capture_batch_discard_body">本批 %1$d 张将丢弃</string>
+    <string name="capture_batch_skip_missing">原图文件丢失，已跳过</string>
 
     <!-- 进度页 -->
     <string name="progress_title">识别进度</string>

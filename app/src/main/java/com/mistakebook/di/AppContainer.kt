@@ -355,6 +355,13 @@ class AppContainer(context: Context) {
     var cameraPurpose: CameraPurpose = CameraPurpose.QUESTION
 
     /**
+     * 连拍批次（F6）：相机页攒题、裁切页逐张接力、完成后统一提交。
+     * 放这里而不是 remember 里，是为了跨导航目标与旋横屏存活——
+     * 同 [recropping] 的容器标志惯例。详见 [CaptureBatch] 的注释。
+     */
+    val captureBatch = CaptureBatch()
+
+    /**
      * 裁切页的「聊天附件」模式（T11/T12）：与 [recropping]、
      * [reRecognizeQuestionId] 互斥。置位时裁切确认不走识别提交，
      * 产物复制进聊天附件暂存后经 [pendingChatAttachmentPath] 交回对话页。

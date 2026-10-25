@@ -9,6 +9,8 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +35,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
@@ -40,11 +44,13 @@ import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -70,6 +76,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mistakebook.R
 import com.mistakebook.di.AppContainer
+import com.mistakebook.di.CaptureBatch
 import com.mistakebook.ui.common.ApiKeyRequiredDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -87,6 +94,10 @@ private const val GALLERY_MAX_ITEMS = 20
 /**
  * 拍照页（CameraX，PRD 7.2）：全屏预览 + 3×3 网格 + 闪光灯/前后摄切换，
  * 快门在左下方是相册入口（支持多选批量导入）。
+ *
+ * F6 连拍模式：QUESTION 用途下快门拍完**留在本页**，右下角显示
+ * 「本批 N 张」与「完成」；点完成才进入逐张裁切（CropScreen 接力）。
+ * CHAT 用途保持单张直走裁切，行为与连拍上线前完全一致。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,7 +107,12 @@ fun CaptureScreen(
     onOpenSettings: () -> Unit,
     /** Key 门禁里的「改用手动录入」出口，见 [ApiKeyRequiredDialog]。 */
     onManualEntry: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    /**
+     * F6：点「完成」——NavHost 据此进入逐张裁切流；若批次已全部裁完
+     * （从裁切页返回后 paths 空、cropped 非空）则直接提交识别。
+     */
+    onStartBatchCrop: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -160,9 +176,46 @@ fun CaptureScreen(
         onDispose { executor.shutdown() }
     }
 
-    // 单选而不是多选：每张图都要走完整裁剪流程（框选 → 旋转 → 涂鸦 → 提交），
-    // 多选会让用户在同一个页面里反复进出。批量场景走「导入 PDF」。
-    val galleryLauncher = rememberLauncherForActivityResult(
+    // F6：QUESTION 用途走多选——选中的图全部进入同一连拍批次，
+    // 之后和拍照攒的批次走完全相同的逐张裁切流。
+    // CHAT 用途保持单选：对话附件一次只要一张。
+    val galleryMultiLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(CaptureBatch.MAX)
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            // CHAT 用途跳过 Key 门禁（T11）：附件与批改不强依赖 Key，
+            // 发消息时才按现有逻辑提示
+            if (container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION &&
+                !checkRecognitionKeys()
+            ) return@launch
+            importing = true
+            val files = container.imageImporter.importUris(uris)
+            importing = false
+            if (files.isEmpty()) {
+                errorText = context.getString(R.string.gallery_copy_failed, "")
+            } else {
+                var overflow = false
+                files.forEach { file ->
+                    if (!container.captureBatch.add(file.absolutePath, fromGallery = true)) {
+                        overflow = true
+                    }
+                }
+                if (overflow) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.capture_batch_full),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                // 系统选择器里已经选完了，直接开裁第一张，不用再按「完成」
+                onCropped(container.captureBatch.paths.first())
+            }
+        }
+    }
+
+    // CHAT 用途的单相册入口：一次一张，和连拍上线前行为一致。
+    val gallerySingleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -186,6 +239,36 @@ fun CaptureScreen(
         }
     }
 
+    // F6：批次存在时拦截系统返回键，弹「本批 N 张将丢弃」确认，
+    // 不让一次误触把刚拍的 5 张题悄无声息地丢掉。
+    val batchSize = container.captureBatch.size
+    val batchActive =
+        container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION &&
+            batchSize > 0
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    BackHandler(enabled = batchActive) { showDiscardDialog = true }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text(stringResource(R.string.capture_batch_discard_title)) },
+            text = { Text(stringResource(R.string.capture_batch_discard_body, batchSize)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    // clear() 会连文件一起删：未裁原图与已裁成果都属于本批，
+                    // 用户确认丢弃后不应再在缓存里留残影
+                    container.captureBatch.clear()
+                    showDiscardDialog = false
+                    onBack()
+                }) { Text(stringResource(R.string.action_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
 
     if (showKeyGate) {
         ApiKeyRequiredDialog(
@@ -324,6 +407,32 @@ fun CaptureScreen(
             }
         }
 
+        // F6：连拍批次悬浮计数 + 「完成」。只有 QUESTION 用途有批次。
+        if (batchActive) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 128.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.capture_batch_count, batchSize),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Button(
+                    onClick = onStartBatchCrop,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.capture_batch_done))
+                }
+            }
+        }
+
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -334,9 +443,15 @@ fun CaptureScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             IconButton(onClick = {
-                galleryLauncher.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                )
+                if (container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION) {
+                    galleryMultiLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                } else {
+                    gallerySingleLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }
             }) {
                 Icon(
                     imageVector = Icons.Default.PhotoLibrary,
@@ -350,39 +465,66 @@ fun CaptureScreen(
                 enabled = !capturing && hasCameraPermission && cameraBound,
                 onClick = {
                     errorText = null
-                    capturing = true
-                    scope.launch {
-                        // CHAT 用途跳过 Key 门禁（T11），见 checkRecognitionKeys 处注释
-                        if (container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION &&
-                            !checkRecognitionKeys()
-                        ) {
-                            capturing = false
-                            return@launch
-                        }
-                        // 看门狗：任何未预料的回调丢失都不能让快门永久禁用
+                    val isQuestion =
+                        container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION
+                    // F6：批次满员时快门不再拍照，toast 引导去裁切/完成。
+                    // MinerU 串行解析，12 张已接近耐心极限，更大批量走 PDF 导入。
+                    if (isQuestion && container.captureBatch.isFull()) {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.capture_batch_full),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        capturing = true
                         scope.launch {
-                            delay(15_000)
-                            if (capturing) {
+                            // CHAT 用途跳过 Key 门禁（T11），见 checkRecognitionKeys 处注释
+                            if (isQuestion && !checkRecognitionKeys()
+                            ) {
                                 capturing = false
-                                errorText = context.getString(R.string.capture_failed)
+                                return@launch
                             }
+                            // 看门狗：任何未预料的回调丢失都不能让快门永久禁用
+                            scope.launch {
+                                delay(15_000)
+                                if (capturing) {
+                                    capturing = false
+                                    errorText = context.getString(R.string.capture_failed)
+                                }
+                            }
+                            takePhoto(
+                                context = context,
+                                executor = executor,
+                                imageCapture = imageCapture,
+                                flashMode = flashMode,
+                                strength = ocrStrength ?: 2,
+                                onCaptured = { path ->
+                                    // 连拍模式拍完**不离开相机页**：capturing 必须在这里复位，
+                                    // 否则第二张按不动快门（旧流程直接导航走，页面销毁掩盖了这点）。
+                                    capturing = false
+                                    if (isQuestion) {
+                                        container.captureBatch.add(path, fromGallery = false)
+                                    } else {
+                                        onCropped(path)
+                                    }
+                                },
+                                onError = {
+                                    capturing = false
+                                    errorText = context.getString(R.string.capture_failed)
+                                }
+                            )
                         }
-                        takePhoto(
-                            context = context,
-                            executor = executor,
-                            imageCapture = imageCapture,
-                            flashMode = flashMode,
-                            strength = ocrStrength ?: 2,
-                            onCaptured = { path -> onCropped(path) },
-                            onError = {
-                                capturing = false
-                                errorText = context.getString(R.string.capture_failed)
-                            }
-                        )
                     }
                 }
             )
-            IconButton(onClick = onBack) {
+            IconButton(onClick = {
+                // F6：有未完成批次时先弹丢弃确认，别让误触丢掉刚拍的题
+                if (batchActive) {
+                    showDiscardDialog = true
+                } else {
+                    onBack()
+                }
+            }) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = stringResource(R.string.capture_cancel),
