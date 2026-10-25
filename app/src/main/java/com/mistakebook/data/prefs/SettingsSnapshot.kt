@@ -1,5 +1,7 @@
 package com.mistakebook.data.prefs
 
+import com.mistakebook.data.chat.ChatSearchProvider
+
 /**
  * 主题显示模式。
  */
@@ -65,6 +67,20 @@ data class SettingsSnapshot(
 
     /** 是否开启「单词书每日目标」本地提醒（到点未达标才通知）。 */
     val wordbookReminderEnabled: Boolean = true,
+
+    // ===== 会话联网搜索 =====
+
+    /**
+     * 会话联网搜索开关。默认**开**（用户要求：配置好了就默认打开）。
+     * 开启后每轮用户消息发出前先做一次网页检索，结果注入上下文。
+     */
+    val chatSearchEnabled: Boolean = true,
+
+    /** 搜索出口：DeepSeek 官方服务端搜索（默认）或 Tavily。 */
+    val chatSearchProvider: ChatSearchProvider = ChatSearchProvider.DEEPSEEK,
+
+    /** Tavily API Key（选 Tavily 时必填；DeepSeek 复用其渠道 Key）。 */
+    val tavilyApiKey: String = "",
 
     // ===== 番茄钟（T2 到点闭环） =====
 

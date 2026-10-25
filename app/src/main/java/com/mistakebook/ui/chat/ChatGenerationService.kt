@@ -174,9 +174,42 @@ class ChatGenerationService : Service() {
             ChatGenerationBus.Snapshot(assistantId = assistantId, content = "", sessionId = sessionId)
         )
 
+        // ---- 联网搜索（v0.0.41）：开关开着就在请求前检索并注入 ----
+        // 放在助手消息插入**之后**：气泡先出现并显示 stage 提示，
+        // 搜索的几秒到十几秒不是「没反应」。
+        val settings = container.settingsStore.settings.first()
+        val lastUserQuery = context.messages.lastOrNull { it.role == ChatRole.USER }?.text.orEmpty()
+        val searchBlock = if (settings.chatSearchEnabled && lastUserQuery.isNotBlank()) {
+            ChatGenerationBus.publish(
+                ChatGenerationBus.Snapshot(
+                    assistantId = assistantId, content = "", sessionId = sessionId,
+                    stage = "正在联网搜索…"
+                )
+            )
+            val block = runWebSearch(container, settings, profile, lastUserQuery)
+            ChatGenerationBus.publish(
+                ChatGenerationBus.Snapshot(assistantId = assistantId, content = "", sessionId = sessionId)
+            )
+            block
+        } else {
+            null
+        }
+        val llmMessages = if (searchBlock != null) {
+            // 搜索结果以一条 user 消息插在提问**之前**：模型先看到资料再看问题。
+            val msgs = context.messages.toMutableList()
+            val lastUserIdx = msgs.indexOfLast { it.role == ChatRole.USER }
+            msgs.add(
+                if (lastUserIdx >= 0) lastUserIdx else msgs.size,
+                OutgoingMessage(id = -1L, role = ChatRole.USER, text = searchBlock)
+            )
+            msgs
+        } else {
+            context.messages
+        }
+
         val request = ChatRequest(
             model = profile.model,
-            messages = context.messages.map { it.toLlm() },
+            messages = llmMessages.map { it.toLlm() },
             temperature = ChatCompletionStream.TEMPERATURE,
             max_tokens = ChatCompletionStream.MAX_TOKENS,
             responseFormat = null,
@@ -395,6 +428,53 @@ class ChatGenerationService : Service() {
     }
 
     // ------------------------------------------------------------ 转换
+
+    /**
+     * 执行联网搜索，返回注入上下文的文本块；任何失败返回 null（尽力而为）。
+     *
+     * 出口优先级：用户选了 DeepSeek 就先试 DeepSeek 官方搜索
+     * （复用其渠道 Key），渠道不在或失败则退 Tavily；直接选 Tavily
+     * 就只用 Tavily。搜索是增强，不是依赖——失败静默跳过，
+     * 没有联网结果的普通回答远好过整轮报错。
+     */
+    private suspend fun runWebSearch(
+        container: com.mistakebook.di.AppContainer,
+        settings: com.mistakebook.data.prefs.SettingsSnapshot,
+        profile: com.mistakebook.data.prefs.LlmProfile,
+        query: String
+    ): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            kotlinx.coroutines.withTimeoutOrNull(60_000L) {
+                val deepSeekKey = profile.apiKey.takeIf {
+                    it.isNotBlank() && profile.baseUrl.contains("deepseek", ignoreCase = true)
+                }
+                val tavilyKey = settings.tavilyApiKey.takeIf { it.isNotBlank() }
+                val attempts: List<Pair<Int, String>> = when (settings.chatSearchProvider) {
+                    com.mistakebook.data.chat.ChatSearchProvider.DEEPSEEK ->
+                        buildList {
+                            if (deepSeekKey != null) add(0 to deepSeekKey)
+                            if (tavilyKey != null) add(1 to tavilyKey)
+                        }
+
+                    com.mistakebook.data.chat.ChatSearchProvider.TAVILY ->
+                        tavilyKey?.let { listOf(1 to it) } ?: emptyList()
+                }
+                for ((which, key) in attempts) {
+                    val results = runCatching {
+                        if (which == 0) {
+                            com.mistakebook.data.chat.DeepSeekSearch.search(container.searchHttpClient, key, query)
+                        } else {
+                            com.mistakebook.data.chat.TavilySearch.search(container.searchHttpClient, key, query)
+                        }
+                    }.getOrDefault(emptyList())
+                    if (results.isNotEmpty()) {
+                        return@withTimeoutOrNull com.mistakebook.data.chat.WebSearchFormatter.format(query, results)
+                    }
+                }
+                null
+            }
+        }.getOrNull()
+    }
 
     private fun OutgoingMessage.toLlm() = com.mistakebook.net.llm.ChatMessage(
         role = when (role) {

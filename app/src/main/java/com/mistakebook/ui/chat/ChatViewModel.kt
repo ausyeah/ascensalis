@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.data.chat.ChatAttachmentPreparer
+import com.mistakebook.data.chat.ChatSearchProvider
 import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.chat.ChatContextCompressor
 import com.mistakebook.data.chat.ChatImageOcr
@@ -113,6 +114,18 @@ data class ChatUiState(
      * 也不该在打开会话时全部 base64 一遍。
      */
     val bubbleImages: Map<Long, List<String>> = emptyMap(),
+
+    /** 会话联网搜索开关（模型面板里可切，配置好了默认开）。 */
+    val chatSearchEnabled: Boolean = true,
+
+    /** 搜索出口：DeepSeek 官方搜索（默认）或 Tavily。 */
+    val chatSearchProvider: ChatSearchProvider = ChatSearchProvider.DEEPSEEK,
+
+    /** Tavily API Key（选 Tavily 时在模型面板里填）。 */
+    val tavilyApiKey: String = "",
+
+    /** 首个 token 之前的阶段提示（如「正在联网搜索…」），正文开始流动后为 null。 */
+    val generationStage: String? = null,
 
     /**
      * 消息 id -> 该消息里**非图片**附件（PDF/文档等）。
@@ -349,6 +362,9 @@ class ChatViewModel(
                 val profile = s.activeProfile
                 _state.value = _state.value.copy(
                     reasoningEffort = s.reasoningEffort,
+                    chatSearchEnabled = s.chatSearchEnabled,
+                    chatSearchProvider = s.chatSearchProvider,
+                    tavilyApiKey = s.tavilyApiKey,
                     providerOptions = s.llmProfiles.map { p ->
                         ChatProviderOption(id = p.id, name = p.displayName())
                     },
@@ -484,6 +500,7 @@ class ChatViewModel(
                     _state.value = current.copy(
                         isStreaming = false,
                         streamingContent = snap.content,
+                        generationStage = null,
                         truncated = snap.truncated,
                         truncatedMessageId = if (snap.truncated) snap.assistantId else null,
                         canRetry = snap.failed,
@@ -497,7 +514,8 @@ class ChatViewModel(
                     _state.value = current.copy(
                         isStreaming = true,
                         streamingMessageId = snap.assistantId,
-                        streamingContent = snap.content
+                        streamingContent = snap.content,
+                        generationStage = snap.stage
                     )
                 }
             }
@@ -945,6 +963,21 @@ class ChatViewModel(
         }
         // 停止动作靠通知上的「停止」按钮，或界面上的停止按钮（见 [stop]）。
         // 这里不再 join：界面生命周期与生成解耦，界面先走也没关系。
+    }
+
+    /** 开关会话联网搜索（模型面板）。写入即生效，下一轮对话带上。 */
+    fun setChatSearchEnabled(value: Boolean) {
+        viewModelScope.launch { settingsStore.setChatSearchEnabled(value) }
+    }
+
+    /** 切换搜索出口（DeepSeek / Tavily）。 */
+    fun setChatSearchProvider(provider: ChatSearchProvider) {
+        viewModelScope.launch { settingsStore.setChatSearchProvider(provider) }
+    }
+
+    /** 保存 Tavily API Key。 */
+    fun setTavilyApiKey(key: String) {
+        viewModelScope.launch { settingsStore.setTavilyApiKey(key) }
     }
 
     /**

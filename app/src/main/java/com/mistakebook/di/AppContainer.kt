@@ -212,6 +212,11 @@ class AppContainer(context: Context) {
 
     val mineruClient: MineruClient by lazy { MineruClient(mineruApi, files, usageStatsStore) }
 
+    /** 会话联网搜索专用客户端：比对话更长的超时（服务端搜索要真爬网页）。 */
+    val searchHttpClient: okhttp3.OkHttpClient by lazy {
+        com.mistakebook.data.chat.searchHttpClient()
+    }
+
     val llmClient: LlmClient by lazy { LlmClient(llmApi) }
 
     /**
