@@ -27,6 +27,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Insights
@@ -47,6 +48,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -86,6 +88,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -141,7 +144,9 @@ fun HomeScreen(
     onOpenNotebooks: () -> Unit = {},
     onOpenQuestion: (Long) -> Unit,
     /** AI 对话：进历史会话列表（规格锁定只放顶栏，不加底部按钮）。 */
-    onOpenChatList: () -> Unit = {}
+    onOpenChatList: () -> Unit = {},
+    /** 今日有到期题时横幅点击 → 进独立复习页（T1）。 */
+    onStartReview: () -> Unit = {}
 ) {
     val viewModel: HomeViewModel = containerViewModel(container) { HomeViewModel(it) }
     val state by viewModel.uiState.collectAsState()
@@ -426,6 +431,40 @@ fun HomeScreen(
                     // 注意这里不能用 remember：LazyColumn 的 content 是
                     // LazyListScope，不是 @Composable 上下文。
                     val todayEpochDay = java.time.LocalDate.now().toEpochDay()
+
+                    // T1 复习横幅：今天有到期题才出现（N=0 不显示，不做弹窗）。
+                    // 样式与列表卡片同族，点击进独立复习页。
+                    if (state.dueCount > 0) {
+                        item(key = "review-banner", contentType = "banner") {
+                            Surface(
+                                onClick = onStartReview,
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .animateItem()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.review_banner_due, state.dueCount),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     items(
                         items = displayQuestions,

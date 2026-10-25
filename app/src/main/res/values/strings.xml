@@ -103,6 +103,7 @@
     <string name="crop_mask_hint">用白色笔涂掉不想识别的区域（红笔批注、旁边的题、草稿）</string>
     <string name="crop_preview">预览</string>
     <string name="crop_preview_title">这张图将送去识别</string>
+    <string name="crop_preview_title_chat">这张图将作为对话附件发送</string>
     <string name="crop_preview_hint">确认裁剪范围与涂白位置无误。涂白部分不会被识别。</string>
     <string name="crop_decoding">正在加载照片…</string>
 <string name="crop_decode_failed">图片加载失败：%1$s</string>
@@ -604,4 +605,38 @@
     <string name="wordbook_remove_success">已移出错题本</string>
     <string name="wordbook_master_marked">已标记为熟词，后续不再安排练习</string>
     <string name="wordbook_master_unmarked">已取消熟词</string>
+    <!-- ===== T1 独立复习页（v0.0.34） ===== -->
+    <string name="review_screen_title">今日复习</string>
+    <string name="review_progress_format">第 %1$d / %2$d 题</string>
+    <string name="review_show_answer">显示答案</string>
+    <string name="review_answer_label">答案</string>
+    <string name="review_analysis_label">解析</string>
+    <string name="review_rate_correct">会</string>
+    <string name="review_rate_vague">模糊</string>
+    <string name="review_rate_wrong">不会</string>
+    <string name="review_rate_locked_hint">先显示答案再自评</string>
+    <string name="review_banner_due">今日待复习 %1$d 道 · 开始复习</string>
+    <string name="review_empty_title">今天没有待复习的错题 🎉</string>
+    <string name="review_go_notebook">去看看错题本</string>
+    <string name="review_finish_title">本轮复习完成：会 %1$d · 模糊 %2$d · 不会 %3$d</string>
+    <string name="review_finish_hint">答「模糊」的题明天回来，答「不会」的题明天从第 0 轮重新开始</string>
+    <string name="review_finish_done">完成</string>
+    <string name="review_finish_retry">立即重刷未掌握</string>
+    <string name="review_finish_continue">还有 %1$d 道，继续复习</string>
+    <string name="review_notification_title_99">今天有 99+ 道错题待复习</string>
+    <!-- ===== T4 编辑页草稿防丢 ===== -->
+    <string name="edit_discard_title">有未保存的修改</string>
+    <string name="edit_discard_message">有未保存的修改，确定丢弃吗？</string>
+    <string name="edit_discard_confirm">丢弃并退出</string>
+    <string name="edit_discard_cancel">继续编辑</string>
+    <string name="edit_restore_title">恢复上次未保存的草稿？</string>
+    <string name="edit_restore_message">上次手动录入的内容还没保存，可以接着上次的继续填。</string>
+    <string name="edit_restore_confirm">恢复</string>
+    <string name="edit_restore_dismiss">丢弃</string>
+    <!-- ===== T13 手写过程批改 ===== -->
+    <string name="chat_grading_toggle">批改我的解题过程</string>
+    <string name="chat_input_hint_grading">已开启批改：附上手写过程照片，发送后 AI 逐步对照</string>
+    <string name="chat_save_to_note">存入题目备注</string>
+    <string name="chat_grading_need_image">批改模式需要附上手写过程照片</string>
+    <string name="chat_saved_to_note">已存入题目备注</string>
 </resources>

@@ -7,6 +7,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
+    id("app.cash.paparazzi")
 }
 
 // debug 预填值来自根目录 local.properties（已在 .gitignore）。
@@ -81,9 +82,9 @@ android {
         applicationId = "com.mistakebook$appIdSuffix"
         minSdk = 26
         targetSdk = 35
-        // versionCode 必须单调递增：1 = v0.0.1, 2 = v0.0.2, 3 = v0.0.3, 4 = v0.0.4, 5 = v0.0.5, 6 = v0.0.6, 7 = v0.0.7, 8 = v0.0.8, 9 = v0.0.9, 10 = v0.0.10, 11 = v0.0.11, 12 = v0.0.12, 13 = v0.0.13, 14 = v0.0.14, 15 = v0.0.15, 16 = v0.0.16, 17 = v0.0.17, 18 = v0.0.18, 19 = v0.0.19, 20 = v0.0.20, 21 = v0.0.21, 22 = v0.0.22, 23 = v0.0.23, 24 = v0.0.24, 25 = v0.0.25, 26 = v0.0.26, 27 = v0.0.27, 28 = v0.0.28, 29 = v0.0.29, 30 = v0.0.30, 31 = v0.0.31, 32 = v0.0.32, 33 = v0.0.33
-        versionCode = 33
-        versionName = "0.0.33"
+        // versionCode 必须单调递增：1 = v0.0.1, 2 = v0.0.2, 3 = v0.0.3, 4 = v0.0.4, 5 = v0.0.5, 6 = v0.0.6, 7 = v0.0.7, 8 = v0.0.8, 9 = v0.0.9, 10 = v0.0.10, 11 = v0.0.11, 12 = v0.0.12, 13 = v0.0.13, 14 = v0.0.14, 15 = v0.0.15, 16 = v0.0.16, 17 = v0.0.17, 18 = v0.0.18, 19 = v0.0.19, 20 = v0.0.20, 21 = v0.0.21, 22 = v0.0.22, 23 = v0.0.23, 24 = v0.0.24, 25 = v0.0.25, 26 = v0.0.26, 27 = v0.0.27, 28 = v0.0.28, 29 = v0.0.29, 30 = v0.0.30, 31 = v0.0.31, 32 = v0.0.32, 33 = v0.0.33, 34 = v0.0.34
+        versionCode = 34
+        versionName = "0.0.34"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -241,6 +242,10 @@ dependencies {
 
     // ===== 测试 =====
     testImplementation("junit:junit:4.13.2")
+    // Paparazzi：JVM 上无设备渲染 Compose UI 出 PNG（README 截图的来源）
+    testImplementation("app.cash.paparazzi:paparazzi:1.3.5")
+    // mockk：给截图测试提供 relaxed mock 的 ViewModel（组件只把它当回调入口）
+    testImplementation("io.mockk:mockk:1.13.13")
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")

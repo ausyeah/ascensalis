@@ -361,7 +361,7 @@ private fun ManualEntryDialog(
 // =========================================================================
 
 @Composable
-private fun TimerTab(
+internal fun TimerTab(
     state: PomodoroUiState,
     viewModel: PomodoroViewModel,
     elapsedFlow: StateFlow<Long>
@@ -1445,7 +1445,7 @@ private fun SubjectChip(name: String, selected: Boolean, onClick: () -> Unit) {
  * 也看得到最近一个月的节奏。
  */
 @Composable
-private fun StatsTab(
+internal fun StatsTab(
     state: PomodoroUiState,
     onRangeChange: (StatsRange) -> Unit,
     onShiftDay: (Long) -> Unit,
@@ -2175,6 +2175,9 @@ private fun RecentRow(session: com.mistakebook.data.local.SessionWithTask) {
 private fun modeLabel(mode: String): String = when (mode) {
     "POMODORO" -> "番茄"
     "STOPWATCH" -> "正计时"
+    // 休息会话由到点自动落库（只为「最近专注」可追溯），统计口径已排除，
+    // 这里必须带标签区分——不然用户会奇怪时长怎么对不上
+    "BREAK" -> "休息"
     else -> "定时"
 }
 

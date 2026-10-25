@@ -190,7 +190,15 @@ fun CropScreen(
      * 与 [recropOnly] 互斥——后者连识别都不跑。
      */
     reRecognizeQuestionId: Long? = null,
-    onRecropped: (String) -> Unit = {}
+    onRecropped: (String) -> Unit = {},
+    /**
+     * 聊天附件模式（T12）：确认不走识别提交，产物复制进聊天附件暂存
+     * 后经 container.pendingChatAttachmentPath 交回对话页。
+     * 由 NavHost 传入（container.chatCropping 且已通过互斥校验）。
+     */
+    chatMode: Boolean = false,
+    /** 聊天附件模式确认后的退出：popBackStack 回到对话页。 */
+    onChatConfirmed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -255,6 +263,14 @@ fun CropScreen(
     var maskMode by remember { mutableStateOf(false) }
     var strokes by remember { mutableStateOf<List<MaskStroke>>(emptyList()) }
     var activeStroke by remember { mutableStateOf<List<Offset>>(emptyList()) }
+
+    // T14：双指缩放/平移。zoom 是**视图级**变换，与 [rotationQuarter]（bitmap 级）正交：
+    // 坐标链 = 屏幕 → zoom 逆变换 → 现有旋转换算（见 screenToBase/baseToScreen）。
+    // 状态提升到本 composable 持有（不随 recomposition 丢失、旋转屏幕保持缩放不变），
+    // 经 CropOverlay 的 onTransform 回写。pan 的钳制基准是**图片实际显示尺寸**，
+    // 不能用预览弹窗里 1500f/2000f 那对硬编码——那是预览自己的尺寸。
+    var zoomScale by remember { mutableStateOf(1f) }
+    var zoomPan by remember { mutableStateOf(Offset.Zero) }
 
     val sessionStore = remember(container) { CropSessionStore(container.settingsStore) }
 
@@ -380,6 +396,17 @@ fun CropScreen(
     val imageLeft = (viewport.width - imageSize.width) / 2f
     val imageTop = (viewport.height - imageSize.height) / 2f
 
+    // T14：pan 按图片显示尺寸方向性钳制。graphicsLayer 默认绕中心缩放，
+    // 缩放 s 后图片边缘最多外扩 (s-1)*尺寸/2，pan 超过这个范围就会把图片拖出视口。
+    // 旋转会交换宽高，这里每次重组都按当前朝向的 imageSize 重算——
+    // 状态里的 zoomPan 即使越界（旋转后旧 pan 不再合法）也会被钳回，渲染与坐标变换用的是钳制后的值。
+    val maxPanX = (zoomScale - 1f) * imageSize.width / 2f
+    val maxPanY = (zoomScale - 1f) * imageSize.height / 2f
+    val zoomPanClamped = Offset(
+        zoomPan.x.coerceIn(-maxPanX, maxPanX),
+        zoomPan.y.coerceIn(-maxPanY, maxPanY)
+    )
+
     /** 屏幕坐标 -> 显示朝向的归一化坐标（0..1） */
     fun toDisplayX(x: Float): Float = ((x - imageLeft) / imageSize.width).coerceIn(0f, 1f)
     fun toDisplayY(y: Float): Float = ((y - imageTop) / imageSize.height).coerceIn(0f, 1f)
@@ -387,17 +414,28 @@ fun CropScreen(
     fun toScreenY(fraction: Float): Float = imageTop + fraction * imageSize.height
 
     /** 屏幕坐标 -> **原图**归一化坐标。笔迹与裁剪框都存在这个坐标系里。 */
-    fun screenToBase(x: Float, y: Float): Offset =
-        rotateNormalized(
-            toDisplayX(x),
-            toDisplayY(y),
+    fun screenToBase(x: Float, y: Float): Offset {
+        // T14：zoom 逆变换包在最外层——屏幕坐标先减 pan、除 scale 回到视图（FIT）坐标，
+        // 再走原有旋转换算。zoom == 1f 且 pan 为 0 时本段是恒等变换，行为与改造前逐项一致。
+        val viewX = (x - zoomPanClamped.x) / zoomScale
+        val viewY = (y - zoomPanClamped.y) / zoomScale
+        return rotateNormalized(
+            toDisplayX(viewX),
+            toDisplayY(viewY),
             MASK_ROTATION_PERIOD - rotationQuarter
         )
+    }
 
     /** 原图归一化坐标 -> 屏幕坐标。绘制遮罩与裁剪框时用。 */
     fun baseToScreen(p: Offset): Offset {
         val d = rotateNormalized(p.x, p.y, rotationQuarter)
-        return Offset(toScreenX(d.x), toScreenY(d.y))
+        // T14：zoom 正变换——视图坐标乘 scale 再加 pan，与 screenToBase 严格互逆。
+        // 导出/预览走 base 坐标系（saveCrop/buildPreviewBitmap），天然不受 zoom 影响，
+        // 所以「放大状态下确认导出的结果与未放大一致」是这套设计的必然结果，不需要额外代码。
+        return Offset(
+            toScreenX(d.x) * zoomScale + zoomPanClamped.x,
+            toScreenY(d.y) * zoomScale + zoomPanClamped.y
+        )
     }
 
     
@@ -477,6 +515,10 @@ fun CropScreen(
                     rect = CropRect.Default
                     strokes = emptyList()
                     activeStroke = emptyList()
+                    // T14：重置必须连缩放一起复位，只重置裁切框的话，
+                    // 用户在 3x 下点重置会看到「框回去了但图还放着」的分裂状态
+                    zoomScale = 1f
+                    zoomPan = Offset.Zero
                     scope.launch { persistSession() }
                 },
                 onConfirm = {
@@ -497,6 +539,32 @@ fun CropScreen(
                             } else {
                                 errorText = context.getString(R.string.crop_too_small)
                             }
+                            return@launch
+                        }
+                        // 聊天附件模式（T12）：不走 RecognitionSubmitter、不查 Key。
+                        // 产物复制进暂存目录后经容器标志交回对话页。
+                        // 涂鸦遮蔽等全部能力照常可用（遮住草稿对批改很有用）。
+                        if (chatMode) {
+                            val saved = withContext(Dispatchers.IO) {
+                                saveCrop(
+                                    displayBitmap, cropRect, container, cropStrokes,
+                                    brushWidthPx, imageSize.width.toFloat()
+                                )
+                            }
+                            if (saved == null) {
+                                errorText = context.getString(R.string.crop_too_small)
+                                return@launch
+                            }
+                            sessionStore.clear(imagePath)
+                            val stagingPath = withContext(Dispatchers.IO) {
+                                val dir = container.files.chatAttachmentStagingDir().apply { mkdirs() }
+                                val target = File(dir, "chat_crop_${System.currentTimeMillis()}.jpg")
+                                saved.copyTo(target, overwrite = true)
+                                target.absolutePath
+                            }
+                            container.pendingChatAttachmentPath = stagingPath
+                            container.chatCropping = false
+                            onChatConfirmed()
                             return@launch
                         }
                         // 重新识别（先裁切再识别）：详情页入口进来。
@@ -600,8 +668,10 @@ fun CropScreen(
                     activeHandle = pickHandle(
                         offset = offset,
                         rect = rect.rotatedQuarters(rotationQuarter),
-                        toScreenX = ::toScreenX,
-                        toScreenY = ::toScreenY,
+                        // 手柄在屏幕上的实际位置也要经 zoom 正变换（baseToScreen 同款），
+                        // 否则放大后热区还停在未放大的旧位置，点不中。slop 本身仍是屏幕 32dp，保持可点性。
+                        toScreenX = { f -> toScreenX(f) * zoomScale + zoomPanClamped.x },
+                        toScreenY = { f -> toScreenY(f) * zoomScale + zoomPanClamped.y },
                         slop = touchSlop
                     )
                 },
@@ -613,8 +683,10 @@ fun CropScreen(
                     activeHandle = Handle.NONE
                 },
                 onHandleDrag = { dragAmount ->
-                    val dx = dragAmount.x / imageSize.width
-                    val dy = dragAmount.y / imageSize.height
+                    // T14：放大时同样的手指位移对应更小的归一化位移，除掉 zoomScale 后
+                    // 手柄移动才和指尖跟手；未放大时除 1f 与原来逐字一致。
+                    val dx = dragAmount.x / zoomScale / imageSize.width
+                    val dy = dragAmount.y / zoomScale / imageSize.height
                     val displayRect = draggedRect(
                         rect.rotatedQuarters(rotationQuarter),
                         activeHandle,
@@ -628,7 +700,24 @@ fun CropScreen(
                 imageSize = imageSize,
                 baseToScreen = ::baseToScreen,
                 screenToBase = ::screenToBase,
-                brushWidthPx = brushWidthPx
+                brushWidthPx = brushWidthPx,
+                zoomScale = zoomScale,
+                zoomPan = zoomPanClamped,
+                onTransform = { zoomFactor, panDelta ->
+                    // zoomFactor 是相对上一帧的比值，乘出来再钳制在 1f..5f
+                    zoomScale = (zoomScale * zoomFactor).coerceIn(1f, 5f)
+                    // pan 增量是屏幕像素；每次按最新 scale 重新钳制在图片范围内
+                    val maxX = (zoomScale - 1f) * imageSize.width / 2f
+                    val maxY = (zoomScale - 1f) * imageSize.height / 2f
+                    zoomPan = Offset(
+                        (zoomPan.x + panDelta.x).coerceIn(-maxX, maxX),
+                        (zoomPan.y + panDelta.y).coerceIn(-maxY, maxY)
+                    )
+                },
+                onZoomReset = {
+                    zoomScale = 1f
+                    zoomPan = Offset.Zero
+                }
             )
 
             if (showKeyGate) {
@@ -689,7 +778,14 @@ fun CropScreen(
                         .transformable(state = transformableState)
                 )
                 TopAppBar(
-                    title = { Text(stringResource(R.string.crop_preview_title), color = Color.White) },
+                    title = {
+                        Text(
+                            stringResource(
+                                if (chatMode) R.string.crop_preview_title_chat else R.string.crop_preview_title
+                            ),
+                            color = Color.White
+                        )
+                    },
                     navigationIcon = {
                         IconButton(onClick = { previewBitmap = null }) {
                             Icon(androidx.compose.material.icons.Icons.Filled.Close, contentDescription = "Close", tint = Color.White)

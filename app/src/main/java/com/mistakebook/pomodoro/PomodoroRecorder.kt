@@ -2,7 +2,6 @@ package com.mistakebook.pomodoro
 
 import com.mistakebook.data.local.PomodoroDao
 import com.mistakebook.data.local.entities.PomodoroSession
-import java.time.LocalDate
 
 /**
  * 「结束一次专注并落库」的共享实现。
@@ -20,6 +19,16 @@ import java.time.LocalDate
  */
 object PomodoroRecorder {
 
+    /**
+     * 会话归属日：按**开始**时刻算（T7）。
+     *
+     * 之前取 `LocalDate.now()`（结束时刻）：23:30 开始、00:15 结束的番茄
+     * 被记入新的一天，而 startedAt 还是前一天——统计口径自己打架。
+     * 带默认参数的 zone 是为了能单测（测试传固定时区，系统时区不可控）。
+     */
+    internal fun sessionDay(startedWallMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+        java.time.Instant.ofEpochMilli(startedWallMs).atZone(zone).toLocalDate().toString()
+
     /** 落库结果：null = 没有可结束的会话；否则是要展示给用户的消息。 */
     suspend fun stopAndRecord(timer: PomodoroTimer, dao: PomodoroDao): String? {
         val harvest = timer.harvest() ?: return null
@@ -30,7 +39,7 @@ object PomodoroRecorder {
             PomodoroSession(
                 taskId = harvest.taskId,
                 mode = harvest.mode.name,
-                day = LocalDate.now().toString(),
+                day = sessionDay(harvest.startedWallMs),
                 startedAt = harvest.startedWallMs,
                 endedAt = endedAt,
                 durationSec = harvest.durationMs / 1000L,

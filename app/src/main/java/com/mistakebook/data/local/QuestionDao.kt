@@ -3,6 +3,7 @@ package com.mistakebook.data.local
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.mistakebook.data.local.entities.Question
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +27,10 @@ import kotlinx.coroutines.flow.Flow
  * 里面是选项的原文，LIKE 是子串匹配，用户搜「常数」就能命中「C. 常数」。
  * 代价是可能匹配到转义字符——那只是多搜出几条，不是漏搜。
  *
+ * 所有 LIKE 都带 `ESCAPE '\'`（T9）：关键词里的 `%`/`_` 不转义的话
+ * 会被当通配符——搜「100%」命中一切含「100」的题，「_」匹配任意单字。
+ * 仓库层传参前先经 escapeLike 把 `\`→`\\`、`%`→`\%`、`_`→`\_`。
+ *
  * **两处查询必须同步改**（列表与计数）。只改一处的话，
  * 列表显示 3 条而角标写「共 12 条」，用户会以为漏了几条。
  */
@@ -42,12 +47,12 @@ interface QuestionDao {
           AND (:reasonName = '' OR errorReason = :reasonName)
           AND (
             :keyword = ''
-            OR stem LIKE '%' || :keyword || '%'
-            OR title LIKE '%' || :keyword || '%'
-            OR answer LIKE '%' || :keyword || '%'
-            OR analysis LIKE '%' || :keyword || '%'
-            OR optionsJson LIKE '%' || :keyword || '%'
-            OR note LIKE '%' || :keyword || '%'
+            OR stem LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR title LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR answer LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR analysis LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR optionsJson LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR note LIKE '%' || :keyword || '%' ESCAPE '\'
           )
         ORDER BY updatedAt DESC
         LIMIT :limit OFFSET :offset
@@ -73,12 +78,12 @@ interface QuestionDao {
           AND (:reasonName = '' OR errorReason = :reasonName)
           AND (
             :keyword = ''
-            OR stem LIKE '%' || :keyword || '%'
-            OR title LIKE '%' || :keyword || '%'
-            OR answer LIKE '%' || :keyword || '%'
-            OR analysis LIKE '%' || :keyword || '%'
-            OR optionsJson LIKE '%' || :keyword || '%'
-            OR note LIKE '%' || :keyword || '%'
+            OR stem LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR title LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR answer LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR analysis LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR optionsJson LIKE '%' || :keyword || '%' ESCAPE '\'
+            OR note LIKE '%' || :keyword || '%' ESCAPE '\'
           )
         """
     )
@@ -218,6 +223,22 @@ interface QuestionDao {
 
     @Update
     suspend fun update(question: Question)
+
+    /**
+     * 复习结果原子落库（T1）：一条 review_log + 一次 question 推进，
+     * 任一失败整体回滚。原来这两步是分开写的死代码（ReviewRules 全库无调用方），
+     * 复习状态从不推进、每日提醒永远报全量——闭环接回来之后必须保证
+     * 「记录」与「推进」要么都成功要么都不发生，否则会出现日志有了、
+     * 队列没变的半更新状态。
+     */
+    @Transaction
+    suspend fun applyReviewResult(log: com.mistakebook.data.local.entities.ReviewLog, updated: Question) {
+        insertReviewLog(log)
+        update(updated)
+    }
+
+    @Insert
+    abstract suspend fun insertReviewLog(log: com.mistakebook.data.local.entities.ReviewLog)
 
     @Query("UPDATE questions SET deletedAt = :now, updatedAt = :now WHERE id = :id")
     suspend fun softDelete(id: Long, now: Long)

@@ -27,7 +27,17 @@ enum class FocusMode(
     val hasTarget: Boolean
 ) {
     POMODORO("番茄", 45, hasTarget = true),
-    STOPWATCH("正计时", 0, hasTarget = false);
+    STOPWATCH("正计时", 0, hasTarget = false),
+
+    /**
+     * 休息（T2 休息循环）：番茄到点自动进入的缓冲倒计时。
+     *
+     * **不可手动选中**——只能由到点自动触发。长按循环（[next]）会跳过它，
+     * 模式切换 UI 也不展示它，用户永远不该「开始一个休息」。
+     * 落库后统计口径把它从时长/连续天数里排除（见 PomodoroDao 各查询
+     * 的 `mode != 'BREAK'`），只进「最近专注」明细带「休息」标签可追溯。
+     */
+    BREAK("休息", 10, hasTarget = true);
 
     /** 供统计与进度显示用的默认目标秒数。 */
     fun defaultTargetMs(): Long = if (hasTarget) defaultMinutes * 60_000L else 0L
@@ -36,9 +46,18 @@ enum class FocusMode(
         fun fromName(name: String): FocusMode =
             entries.firstOrNull { it.name == name } ?: POMODORO
 
-        /** 长按循环切换的顺序：番茄 → 正计时 → 番茄。 */
-        fun next(current: FocusMode): FocusMode =
-            entries[(current.ordinal + 1) % entries.size]
+        /**
+         * 长按循环切换的顺序：番茄 → 正计时 → 番茄。
+         *
+         * BREAK 被显式跳过：它是到点的自动产物，不该出现在手动循环里。
+         */
+        fun next(current: FocusMode): FocusMode {
+            var candidate = entries[(current.ordinal + 1) % entries.size]
+            while (candidate == BREAK) {
+                candidate = entries[(candidate.ordinal + 1) % entries.size]
+            }
+            return candidate
+        }
     }
 }
 

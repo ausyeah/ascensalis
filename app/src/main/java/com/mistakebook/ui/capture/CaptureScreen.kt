@@ -167,7 +167,11 @@ fun CaptureScreen(
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            if (!checkRecognitionKeys()) return@launch
+            // CHAT 用途跳过 Key 门禁（T11）：附件与批改不强依赖 Key，
+            // 发消息时才按现有逻辑提示
+            if (container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION &&
+                !checkRecognitionKeys()
+            ) return@launch
             importing = true
             val files = container.imageImporter.importUris(listOf(uri))
             importing = false
@@ -348,7 +352,10 @@ fun CaptureScreen(
                     errorText = null
                     capturing = true
                     scope.launch {
-                        if (!checkRecognitionKeys()) {
+                        // CHAT 用途跳过 Key 门禁（T11），见 checkRecognitionKeys 处注释
+                        if (container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION &&
+                            !checkRecognitionKeys()
+                        ) {
                             capturing = false
                             return@launch
                         }

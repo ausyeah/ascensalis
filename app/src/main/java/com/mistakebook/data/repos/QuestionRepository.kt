@@ -41,7 +41,7 @@ class QuestionRepository(
             subjectFilter = filter.subjectId ?: 0L,
             notebookFilter = filter.notebookId ?: 0L,
             reasonName = filter.reason?.name.orEmpty(),
-            keyword = filter.keyword.trim(),
+            keyword = escapeLike(filter.keyword.trim()),
             limit = pageSize,
             offset = page.coerceAtLeast(0) * pageSize
         )
@@ -52,7 +52,7 @@ class QuestionRepository(
             subjectFilter = filter.subjectId ?: 0L,
             notebookFilter = filter.notebookId ?: 0L,
             reasonName = filter.reason?.name.orEmpty(),
-            keyword = filter.keyword.trim()
+            keyword = escapeLike(filter.keyword.trim())
         )
 
     fun observeTotalCount(): Flow<Int> = questionDao.observeTotalCount()
@@ -259,6 +259,50 @@ class QuestionRepository(
         )
     }
 
+    /**
+     * 复习结果原子落库（T1 复习闭环）。
+     *
+     * 一次事务完成两件事：
+     * 1. 插入 [ReviewLog]（stageIndex 记**当前**轮次，即评分前的轮次）；
+     * 2. 推进 question：reviewStage / nextReviewAt / status。
+     *
+     * 与 setMastered() 的约定对齐：达到 MAX_STAGE 时 nextReviewAt = null
+     * （不再进队列、不再进每日提醒）。
+     *
+     * 返回是否落库成功。题不存在或 `deletedAt != null`（复习中途被删）
+     * 时静默跳过返回 false——调用方照常切下一题即可，不要报错打断复习流。
+     */
+    suspend fun applyReviewResult(
+        questionId: Long,
+        result: ReviewResult,
+        now: Long = System.currentTimeMillis(),
+        today: LocalDate = LocalDate.now()
+    ): Boolean {
+        val question = questionDao.findById(questionId) ?: return false
+        if (question.deletedAt != null) return false
+        val newStage = ReviewRules.nextStage(question.reviewStage, result)
+        val updated = question.copy(
+            reviewStage = newStage,
+            nextReviewAt = if (newStage >= ReviewRules.MAX_STAGE) {
+                null
+            } else {
+                ReviewRules.nextReviewDay(question.reviewStage, result, today).toEpochDay()
+            },
+            status = ReviewRules.statusFor(newStage, question.status),
+            updatedAt = now
+        )
+        questionDao.applyReviewResult(
+            log = ReviewLog(
+                questionId = questionId,
+                reviewedAt = now,
+                stageIndex = question.reviewStage,
+                result = result
+            ),
+            updated = updated
+        )
+        return true
+    }
+
     private suspend fun resolveSubjectId(draft: QuestionDraft): Long? {
         val id = draft.subjectId
         if (id != null && subjectDao.findById(id) != null) return id
@@ -278,3 +322,13 @@ class QuestionRepository(
         const val PAGE_SIZE = 30
     }
 }
+
+/**
+ * LIKE 关键词转义（T9）：配合 QuestionDao 各查询里的 `ESCAPE '\'`。
+ *
+ * 不转义的话 `%`/`_` 会被当通配符——搜「100%」命中一切含「100」的题，
+ * 搜「a_b」把「a+b」也带出来。反斜杠必须**先**转，否则它会破坏
+ * 后两步刚写进去的转义序列（`\%` 里的 `\` 又被翻倍一次）。
+ */
+internal fun escapeLike(s: String): String =
+    s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

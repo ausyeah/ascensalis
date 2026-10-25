@@ -11,11 +11,18 @@ import com.mistakebook.domain.QuestionDraft
 import com.mistakebook.pipeline.DraftBundle
 import com.mistakebook.pipeline.DraftBundleCodec
 import com.mistakebook.pipeline.DraftQuestion
+import com.mistakebook.pipeline.RefinedOptionDto
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/** 自动暂存的防抖窗口（毫秒）：停止输入 0.8 秒后才落盘。 */
+private const val AUTOSAVE_DEBOUNCE_MS = 800L
 
 // 一道题在编辑页中的可变状态
 data class EditableDraft(
@@ -78,7 +85,9 @@ data class EditUiState(
      * 手动录入模式：没有原图、没有识别文本可对照，保存后也不回填识别任务。
      * UI 据此隐藏「查看原始识别文本」等只对识别流程有意义的入口。
      */
-    val manualEntry: Boolean = false
+    val manualEntry: Boolean = false,
+    /** 手动录入：DataStore 槽里有上次未保存的草稿，等用户决定恢复/丢弃（T4）。 */
+    val pendingManualRestore: Boolean = false
 ) {
     val current: EditableDraft? get() = drafts.getOrNull(index)
     val canSave: Boolean get() = current?.stem?.isNotBlank() == true
@@ -130,6 +139,14 @@ class EditViewModel(
 
     private var saveInProgress = false
 
+    /**
+     * 初始加载基线（T4 dirty 判定）：加载完成前为 null，dirty 恒 false。
+     * 每次保存成功后把对应索引的基线更新为已保存内容——「保存成功后
+     * 返回不弹确认」靠这条保持成立。
+     */
+    private var baselineDrafts: List<EditableDraft>? = null
+    private var baselineMarkdown: String = ""
+
     init {
         viewModelScope.launch {
             val subjects = container.subjectRepository.observeAll().first()
@@ -150,8 +167,15 @@ class EditViewModel(
                     subjects = subjects,
                     notebooks = notebooks,
                     imageRefs = emptyList(),
-                    savedCount = 0
+                    savedCount = 0,
+                    // 上次没保存完的草稿还在槽里：先标记，等用户决定恢复/丢弃（T4）
+                    pendingManualRestore = DraftBundleCodec
+                        .decode(container.settingsStore.getManualDraftJson())
+                        ?.questions?.isNotEmpty() == true
                 )
+                baselineDrafts = listOf(EditableDraft(imagePath = "", notebookId = defaultNotebookId))
+                baselineMarkdown = ""
+                startAutosave()
                 return@launch
             }
 
@@ -200,7 +224,90 @@ class EditViewModel(
                 savedCount = savedQuestionIds.size,
                 savedQuestionIds = savedQuestionIds
             )
+            baselineDrafts = seeded
+            baselineMarkdown = markdown
+            startAutosave()
         }
+    }
+
+    /**
+     * 自动暂存收集器（T4）：字段变化后 debounce 800ms 落一份暂存。
+     *
+     * - taskId != null：写回 capture_tasks.refinedJson，且**只替换当前 index
+     *   那一份草稿**（[replaceDraftQuestionInBundle]，bundle 从库里现读，
+     *   同批其他题的草稿原样保留——整包重编码会把其他题的编辑覆盖掉）；
+     * - taskId == null（手动录入）：DataStore 单槽 manual_draft_json。
+     *
+     * baseline 为空（加载中）或与基线一致（不脏）时跳过：暂存只发生
+     * 在真正改动过之后。
+     */
+    @OptIn(FlowPreview::class)
+    private fun startAutosave() {
+        viewModelScope.launch {
+            _uiState
+                .debounce(AUTOSAVE_DEBOUNCE_MS)
+                .collect { autosaveSnapshot() }
+        }
+    }
+
+    private suspend fun autosaveSnapshot() {
+        val state = _uiState.value
+        val baseline = baselineDrafts ?: return
+        if (!state.loading && state.drafts == baseline && state.markdown == baselineMarkdown) return
+        if (taskId == null) {
+            val draft = state.drafts.firstOrNull() ?: return
+            val bundle = DraftBundle(
+                imagePath = "",
+                markdown = state.markdown,
+                questions = listOf(draft.toDraftQuestion())
+            )
+            container.settingsStore.setManualDraftJson(DraftBundleCodec.encode(bundle))
+        } else {
+            val task = container.captureTaskRepository.findById(taskId) ?: return
+            val refined = task.refinedJson ?: return
+            val updated = replaceDraftQuestionInBundle(refined, state.index, state.current ?: return)
+                ?: return
+            container.captureTaskRepository.updateRefinedJson(
+                id = taskId,
+                refinedJson = updated,
+                now = System.currentTimeMillis()
+            )
+        }
+    }
+
+    /** 手动录入：恢复上次未保存的草稿到当前草稿位（T4）。 */
+    fun restoreManualDraft() {
+        viewModelScope.launch {
+            val bundle = DraftBundleCodec.decode(container.settingsStore.getManualDraftJson())
+                ?: return@launch
+            val question = bundle.questions.firstOrNull() ?: return@launch
+            val restored = toEditable(question, imagePath = "", figureRefs = emptyList())
+            val state = _uiState.value
+            val drafts = state.drafts.toMutableList()
+            if (drafts.isEmpty()) return@launch
+            drafts[0] = restored.copy(notebookId = drafts[0].notebookId)
+            _uiState.value = state.copy(
+                drafts = drafts,
+                markdown = bundle.markdown,
+                pendingManualRestore = false
+            )
+        }
+    }
+
+    /** 手动录入：丢弃上次未保存的草稿（清槽）。 */
+    fun discardManualDraft() {
+        viewModelScope.launch {
+            container.settingsStore.setManualDraftJson(null)
+            _uiState.update { it.copy(pendingManualRestore = false) }
+        }
+    }
+
+    /** dirty（T4）：任一可编辑字段与初始加载值不同。基线未就绪时恒 false。 */
+    fun isDirty(): Boolean {
+        val baseline = baselineDrafts ?: return false
+        val state = _uiState.value
+        if (state.loading) return false
+        return state.drafts != baseline || state.markdown != baselineMarkdown
     }
 
     private fun toEditable(
@@ -393,6 +500,16 @@ class EditViewModel(
                     savedCount = completedIndices.size,
                     index = if (latest.index == index) nextIndex ?: index else latest.index
                 )
+                // 基线推进：已保存的这份不再算 dirty（T4「保存成功后返回不弹确认」）
+                baselineDrafts?.let { base ->
+                    val updatedBase = base.toMutableList()
+                    latest.drafts.getOrNull(index)?.let { updatedBase[index] = it }
+                    baselineDrafts = updatedBase
+                }
+                // 手动录入：refinedJson 路径没有，暂存槽已无意义，清掉
+                if (taskId == null) {
+                    container.settingsStore.setManualDraftJson(null)
+                }
                 if (nextIndex == null) {
                     finishTask(savedIds, task?.refinedJson.orEmpty(), onSaved)
                 }
@@ -437,6 +554,15 @@ class EditViewModel(
                     dirtyDraftIndices = remainingDirty,
                     savedCount = completedIndices.size
                 )
+                // 基线推进到已保存内容（T4）
+                baselineDrafts?.let { base ->
+                    baselineDrafts = latest.drafts.mapIndexed { i, draft ->
+                        if (i in savedIds) draft else base.getOrNull(i) ?: draft
+                    }
+                }
+                if (taskId == null) {
+                    container.settingsStore.setManualDraftJson(null)
+                }
                 if (latest.drafts.isNotEmpty() && completedIndices.size == latest.drafts.size) {
                     finishTask(savedIds, task?.refinedJson.orEmpty(), onSaved)
                 }
