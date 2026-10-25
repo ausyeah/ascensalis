@@ -8,6 +8,11 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.view.WindowManager
+import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -100,6 +105,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import com.mistakebook.R
 import com.mistakebook.data.chat.ChatContextAssembler
@@ -185,6 +191,19 @@ fun ChatScreen(
     // 用 collectAsState 而不是 collectAsStateWithLifecycle：
     // 后者在 lifecycle-runtime-compose 里，本项目没引这个依赖（零新增依赖）。
     val state by viewModel.state.collectAsState()
+
+    // AI 流式输出期间保持屏幕常亮（用户反馈：会话正在输出时因「长时间无操作」被息屏）。
+    // 一次回答经常几十秒，用户全程在读、不需要碰屏幕，系统却按无操作掐屏，阅读被打断。
+    // FLAG_KEEP_SCREEN_ON 是窗口级标志：只在 streaming 期间置位，结束/离开页面即清除，
+    // 不引入 WakeLock 权限，也不影响其它页面的息屏策略。
+    val chatView = LocalView.current
+    val streamingNow = state.isStreaming
+    DisposableEffect(chatView, streamingNow) {
+        val window = chatView.context.findActivity()?.window
+        if (streamingNow) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -1680,4 +1699,14 @@ private fun formatSize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"
     else -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
+}
+
+/** 从 View.context 一路剥 ContextWrapper 找到宿主 Activity；找不到返回 null（如 Preview）。 */
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
 }
