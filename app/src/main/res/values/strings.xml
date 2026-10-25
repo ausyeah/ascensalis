@@ -271,6 +271,18 @@
     <string name="settings_recognition_warn_llm">当前模型不支持识图（或尚未配置模型），大模型识别这条路走不通。请到下方切换到识图模型，或把识别方式改回「自动」/「仅 MinerU」。</string>
     <string name="settings_recognition_warn_auto">当前模型不支持识图（或尚未配置模型），MinerU 不可用时将没有兜底。建议切换到识图模型以获得自动回落能力。</string>
 
+    <!-- 生图渠道（v0.0.45） -->
+    <string name="settings_image_profiles">生图设置</string>
+    <string name="settings_image_profiles_desc">单词场景图、详情页辅助图都通过这里配置的渠道生成。各家生图 API 请求体差异大：留空请求体模板时走内置默认格式，不兼容时按 API 文档贴一份模板自行适配。</string>
+    <string name="settings_add_image_profile">新增生图渠道</string>
+    <string name="settings_image_profile_name">渠道名称</string>
+    <string name="settings_image_profile_model">模型 / 引擎名</string>
+    <string name="settings_image_profile_template">请求体模板（可选）</string>
+    <string name="settings_image_profile_template_hint">占位符：{prompt} 提示词、{width} 宽、{height} 高。写在引号内，如 {"model":"xxx","prompt":"{prompt}","n":1,"size":"{width}x{height}"}。留空走内置默认格式。</string>
+    <string name="settings_image_profile_delete">删除该渠道</string>
+    <string name="settings_hint_image_key">尚未配置生图渠道。配好地址、Key 与模型名后，单词卡与详情页的图片功能即可使用。</string>
+    <string name="settings_save">保存</string>
+
     <string name="settings_active_profile">当前使用</string>
     <string name="settings_add_profile">新增配置</string>
     <string name="settings_edit_profile">编辑配置</string>

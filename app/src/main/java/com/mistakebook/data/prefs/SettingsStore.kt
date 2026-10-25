@@ -87,6 +87,9 @@ class SettingsStore(context: Context) {
     private fun snapshot(prefs: Preferences): SettingsSnapshot {
         val profiles = loadProfiles()
         val activeId = prefs[KEY_ACTIVE_PROFILE] ?: profiles.firstOrNull()?.id
+        // 生图渠道：与对话配置同构——JSON 密文存 key，激活 id 走 DataStore。
+        val imageProfiles = loadImageProfiles()
+        val activeImageId = prefs[KEY_ACTIVE_IMAGE_PROFILE] ?: imageProfiles.firstOrNull()?.id
         return SettingsSnapshot(
             // 占位符不能当成真 Key，否则「已配置」判断会误判为通过
             mineruKey = readSecure(SECURE_MINERU_KEY).ifBlank {
@@ -94,6 +97,8 @@ class SettingsStore(context: Context) {
             },
             llmProfiles = profiles,
             activeProfileId = activeId,
+            imageProfiles = imageProfiles,
+            activeImageProfileId = activeImageId,
             themeMode = ThemeMode.fromKey(prefs[KEY_THEME_MODE]),
             networkMode = NetworkMode.fromKey(prefs[KEY_NETWORK_MODE]),
             reasoningEffort = ReasoningEffort.fromKey(prefs[KEY_REASONING_EFFORT]),
@@ -227,6 +232,61 @@ class SettingsStore(context: Context) {
     suspend fun setActiveProfileId(id: String?) {
         appContext.settingsDataStore.edit { prefs ->
             if (id == null) prefs.remove(KEY_ACTIVE_PROFILE) else prefs[KEY_ACTIVE_PROFILE] = id
+        }
+    }
+
+    // ===== 生图渠道（多套，可切换；同 LlmProfile 体系，字段更少） =====
+
+    /**
+     * 读已保存的生图渠道。
+     *
+     * 与 [loadProfiles] 不同：**没有 buildConfig 预填兜底**——生图渠道
+     * 没有任何默认值可填（公开包不预置任何密钥），存量为空就是空，
+     * 各功能按「未配置」给出友好提示。
+     */
+    private fun loadImageProfiles(): List<ImageProfile> {
+        val raw = readSecure(SECURE_IMAGE_PROFILES)
+        if (raw.isBlank()) return emptyList()
+        return runCatching { json.decodeFromString<List<ImageProfile>>(raw) }
+            .getOrDefault(emptyList())
+    }
+
+    private fun writeImageProfiles(profiles: List<ImageProfile>) {
+        val normalized = profiles.map { it.normalized() }
+        securePrefs.edit()
+            .putString(SECURE_IMAGE_PROFILES, json.encodeToString(normalized))
+            .apply()
+    }
+
+    fun saveImageProfiles(profiles: List<ImageProfile>) {
+        writeImageProfiles(profiles)
+        secureVersion.value += 1
+    }
+
+    suspend fun upsertImageProfile(profile: ImageProfile) {
+        val hadActive = appContext.settingsDataStore.data.first()[KEY_ACTIVE_IMAGE_PROFILE].isNullOrBlank()
+        val current = loadImageProfiles().toMutableList()
+        val index = current.indexOfFirst { it.id == profile.id }
+        val normalized = profile.normalized()
+        if (index >= 0) current[index] = normalized else current.add(normalized)
+        saveImageProfiles(current)
+        // 第一套渠道保存后自动激活：用户不该面对「配好了但没启用」的空态。
+        if (hadActive) setActiveImageProfileId(normalized.id)
+    }
+
+    suspend fun deleteImageProfile(id: String) {
+        val prefs = appContext.settingsDataStore.data.first()
+        val remaining = loadImageProfiles().filterNot { it.id == id }
+        saveImageProfiles(remaining)
+        if (prefs[KEY_ACTIVE_IMAGE_PROFILE] == id) {
+            setActiveImageProfileId(remaining.firstOrNull()?.id)
+        }
+    }
+
+    suspend fun setActiveImageProfileId(id: String?) {
+        appContext.settingsDataStore.edit { prefs ->
+            if (id == null) prefs.remove(KEY_ACTIVE_IMAGE_PROFILE)
+            else prefs[KEY_ACTIVE_IMAGE_PROFILE] = id
         }
     }
 
@@ -469,6 +529,7 @@ class SettingsStore(context: Context) {
         const val SECURE_FILE = "mistakebook_secure_prefs"
         const val SECURE_MINERU_KEY = "mineru_api_key"
         const val SECURE_LLM_PROFILES = "llm_profiles_json"
+        const val SECURE_IMAGE_PROFILES = "image_profiles_json"
 
         // KEY_MINERU_MODEL / KEY_OCR_LANGUAGE / KEY_FORCE_OCR 已删：
         // 对应设置项固定为 vlm / ch / 开启，不再可配。旧库里的这些键会被忽略。
@@ -508,6 +569,7 @@ class SettingsStore(context: Context) {
         // 500 对「雅思/托福刷词」也够用，再高就不是目标是许愿了。
         const val MAX_WORDBOOK_DAILY_GOAL = 500
         val KEY_ACTIVE_PROFILE = stringPreferencesKey("active_llm_profile")
+        val KEY_ACTIVE_IMAGE_PROFILE = stringPreferencesKey("active_image_profile")
         val KEY_HOME_QUESTION_ORDER = stringPreferencesKey("home_question_order")
     }
 }

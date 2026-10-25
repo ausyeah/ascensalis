@@ -17,6 +17,15 @@ class AppFiles(context: Context) {
 
     val importDir: File = File(filesRoot, "imports")
 
+    /**
+     * 生图结果目录（filesDir/images/gen）。
+     *
+     * 生成产物不是用户数据：**不进备份**（BackupManager 白名单制，
+     * 这里天然不在列），容量由 [com.mistakebook.util.ImageDiskCache]
+     * 的 LRU 上限兜底。
+     */
+    val genImageDir: File = File(filesRoot, "images/gen")
+
     val exportDir: File = File(filesRoot, "exports")
 
     val shareCacheDir: File = File(context.cacheDir, "share")

@@ -205,6 +205,12 @@ fun SettingsScreen(
                 viewModel = viewModel
             )
 
+            // 生图渠道：单词场景图 / 详情页辅助图的出口，与大模型配置同构但独立。
+            ImageProfilesSection(
+                state = state,
+                viewModel = viewModel
+            )
+
             // 联网搜索：开关与出口选择在模型面板，Key 等配置在这里（v0.0.43）。
             SearchProviderSection(
                 state = state,

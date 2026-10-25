@@ -1121,6 +1121,190 @@ private fun ExtraKeyRow(
 }
 
 /**
+ * 生图渠道（多套，可切换）：单词场景图、详情页辅助图都走这里配置的渠道。
+ *
+ * 交互仿 [LlmProfilesSection] 的展开式卡片，但字段更少——生图 API
+ * 没有统一端点，请求体差异用「模板」兜底（见 [ImageProfile.requestBodyTemplate]），
+ * 所以没有拉模型列表、key 池那套。
+ */
+@Composable
+internal fun ImageProfilesSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    // 「新增渠道」后强制展开刚建的空渠道：用户点了新增就是要填它，
+    // 不该再手动点开。空渠道 id 只在本次组合有效，记住它即可。
+    var forceExpandId by remember { mutableStateOf<String?>(null) }
+    SettingsGroup(title = stringResource(R.string.settings_image_profiles)) {
+        Text(
+            text = stringResource(R.string.settings_image_profiles_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        state.snapshot.imageProfiles.forEach { profile ->
+            ImageProfileRow(
+                profile = profile,
+                selected = profile.id == state.snapshot.activeImageProfileId,
+                forceExpanded = forceExpandId == profile.id,
+                onSelect = { viewModel.selectImageProfile(profile.id) },
+                onDelete = { viewModel.deleteImageProfile(profile.id) },
+                onSave = { draft -> viewModel.saveImageProfile(draft) }
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        OutlinedButton(
+            onClick = {
+                val fresh = com.mistakebook.data.prefs.ImageProfile()
+                forceExpandId = fresh.id
+                viewModel.addImageProfile(fresh)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Text(stringResource(R.string.settings_add_image_profile))
+        }
+        if (!state.snapshot.imageConfigured) {
+            Spacer(Modifier.height(8.dp))
+            FirstRunHint(R.string.settings_hint_image_key)
+        }
+    }
+}
+
+/**
+ * 一张生图渠道卡片：RadioButton 管激活，标题栏管展开/收起，
+ * 展开后是五个字段的编辑表单 + 保存 / 删除。
+ */
+@Composable
+private fun ImageProfileRow(
+    profile: com.mistakebook.data.prefs.ImageProfile,
+    selected: Boolean,
+    forceExpanded: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+    onSave: (com.mistakebook.data.prefs.ImageProfile) -> Unit
+) {
+    // 展开态跟着配置 id 走；forceExpanded 只在新渠道创建那一刻为真，
+    // 用户手动收起后不被它强行拽回来（初始值只用一次）。
+    var expanded by remember(profile.id) {
+        mutableStateOf(selected || forceExpanded)
+    }
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
+    var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
+    var model by remember(profile.id) { mutableStateOf(profile.model) }
+    var template by remember(profile.id) { mutableStateOf(profile.requestBodyTemplate) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(selected = selected, onClick = onSelect)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = profile.displayName(),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = profile.baseUrl.ifBlank { "未填写地址" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (expanded) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.settings_image_profile_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text(stringResource(R.string.settings_base_url)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                PasswordField(
+                    label = stringResource(R.string.settings_api_key),
+                    value = apiKey,
+                    onValueChange = { apiKey = it }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    label = { Text(stringResource(R.string.settings_image_profile_model)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = template,
+                    onValueChange = { template = it },
+                    label = { Text(stringResource(R.string.settings_image_profile_template)) },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = stringResource(R.string.settings_image_profile_template_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Row {
+                    Button(
+                        onClick = {
+                            onSave(
+                                profile.copy(
+                                    name = name.trim(),
+                                    baseUrl = baseUrl.trim(),
+                                    apiKey = apiKey.trim(),
+                                    model = model.trim(),
+                                    requestBodyTemplate = template
+                                )
+                            )
+                            expanded = false
+                        },
+                        enabled = name.isNotBlank() || baseUrl.isNotBlank() ||
+                            apiKey.isNotBlank() || model.isNotBlank()
+                    ) {
+                        Text(stringResource(R.string.settings_save))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_image_profile_delete),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/**
  * 网络代理分区：系统代理 / 直连 / 自动。
  *
  * 用户诉求：「mineru 走代理就会说没网，把它改成直连吧，在设置里面加一个

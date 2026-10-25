@@ -201,6 +201,18 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun selectProfile(id: String) = viewModelScope.launch { store.setActiveProfileId(id) }
 
+    // ===== 生图渠道（多套，可切换） =====
+
+    fun saveImageProfile(profile: com.mistakebook.data.prefs.ImageProfile) =
+        viewModelScope.launch { store.upsertImageProfile(profile) }
+
+    fun addImageProfile(profile: com.mistakebook.data.prefs.ImageProfile) =
+        viewModelScope.launch { store.upsertImageProfile(profile) }
+
+    fun deleteImageProfile(id: String) = viewModelScope.launch { store.deleteImageProfile(id) }
+
+    fun selectImageProfile(id: String) = viewModelScope.launch { store.setActiveImageProfileId(id) }
+
     // setMineruModelVersion / setOcrLanguage / setForceOcr 已随设置项移除。
     // 模型版本固定 vlm、语言固定 ch、强制 OCR 固定开启，写在 SettingsSnapshot 里。
 

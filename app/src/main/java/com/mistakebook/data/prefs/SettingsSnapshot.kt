@@ -52,6 +52,10 @@ data class SettingsSnapshot(
     val mineruKey: String = "",
     val llmProfiles: List<LlmProfile> = emptyList(),
     val activeProfileId: String? = null,
+
+    /** 生图渠道（多套，可切换）。key 走 EncryptedSharedPreferences，同 [llmProfiles]。 */
+    val imageProfiles: List<ImageProfile> = emptyList(),
+    val activeImageProfileId: String? = null,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
 
     /**
@@ -165,9 +169,17 @@ data class SettingsSnapshot(
     val activeProfile: LlmProfile?
         get() = llmProfiles.firstOrNull { it.id == activeProfileId } ?: llmProfiles.firstOrNull()
 
+    /** 当前激活的生图渠道：显式选的优先，没选过时用第一套。 */
+    val activeImageProfile: ImageProfile?
+        get() = imageProfiles.firstOrNull { it.id == activeImageProfileId }
+            ?: imageProfiles.firstOrNull()
+
     val mineruConfigured: Boolean get() = mineruKey.isNotBlank()
 
     val llmConfigured: Boolean get() = activeProfile?.isConfigured() == true
+
+    /** 生图渠道是否可用。所有生图入口统一按这个门禁决定「提示去设置」还是真调 API。 */
+    val imageConfigured: Boolean get() = activeImageProfile?.isConfigured() == true
 
     companion object {
         const val MINERU_MODEL_VLM = "vlm"

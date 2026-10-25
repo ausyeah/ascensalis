@@ -13,12 +13,14 @@ import com.mistakebook.data.repos.QuestionRepository
 import com.mistakebook.data.repos.SubjectRepository
 import com.mistakebook.data.repos.TagRepository
 import com.mistakebook.net.HttpFactory
+import com.mistakebook.net.ImageGenClient
 import com.mistakebook.net.llm.LlmApi
 import com.mistakebook.net.mineru.MineruApi
 import com.mistakebook.pipeline.LlmClient
 import com.mistakebook.pipeline.MineruClient
 import com.mistakebook.pipeline.RecognitionEngine
 import com.mistakebook.pipeline.RecognitionSubmitter
+import com.mistakebook.util.ImageDiskCache
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -218,6 +220,12 @@ class AppContainer(context: Context) {
     }
 
     val llmClient: LlmClient by lazy { LlmClient(llmApi) }
+
+    /** 生图客户端（渠道由设置里配置，见 [com.mistakebook.data.prefs.ImageProfile]）。 */
+    val imageGenClient: ImageGenClient by lazy { ImageGenClient() }
+
+    /** 生图结果磁盘 LRU 缓存（filesDir/images/gen，上限 200 张，不进备份）。 */
+    val imageDiskCache: ImageDiskCache by lazy { ImageDiskCache(files.genImageDir) }
 
     /**
      * 对话流式客户端。
