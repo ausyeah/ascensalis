@@ -236,6 +236,9 @@ dependencies {
 
     // ===== 图片加载 =====
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // SVG 解码（Coil 官方插件，约 28KB）：精确图示走 LLM 出 SVG 代码的路线，
+    // 形状确定、可缩放、不依赖生图 API。
+    implementation("io.coil-kt:coil-svg:2.7.0")
 
     // ===== 后台提醒 =====
     implementation("androidx.work:work-runtime-ktx:2.9.1")

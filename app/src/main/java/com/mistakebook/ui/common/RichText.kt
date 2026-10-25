@@ -239,6 +239,13 @@ fun RichText(
                         .padding(8.dp)
                 )
 
+                // ```svg 围栏：渲染成图形而不是等宽文本。
+                // 详情页与对话页共用 RichText，这里接一次两处都生效。
+                is MarkdownParser.Block.Svg -> SvgBlock(
+                    source = block.source,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
                 is MarkdownParser.Block.Table -> TableBlock(block)
 
                 is MarkdownParser.Block.Image -> AsyncImage(

@@ -79,12 +79,13 @@ object PromptTemplates {
             "可能有手写作答痕迹、印刷题目、公式与表格。照片就是唯一输入，" +
             "你需要自己读出其中的文字与公式。"
 
-    /** 看图直连：系统提示词（多题 + LaTeX 规范 + 标题解析 全套追加）。 */
+    /** 看图直连：系统提示词（多题 + LaTeX 规范 + 标题解析 + 图示规范 全套追加）。 */
     fun visionSystemPrompt(): String = buildString {
         append(VISION_SYSTEM_PROMPT)
         append('\n').append(MULTI_QUESTION_APPENDIX)
         append('\n').append(LATEX_FORMAT_APPENDIX)
         append('\n').append(TITLE_AND_ANALYSIS_APPENDIX)
+        append(SVG_FIGURE_APPENDIX)
     }
 
     /** 看图直连：用户提示词（原图已随消息附上，这里只交代注意事项）。 */
@@ -198,11 +199,33 @@ object PromptTemplates {
         并把无法从图片确认的内容放入 uncertain。
     """.trimIndent()
 
+    /**
+     * 辅助图示规范（**追加项**，不动上面任何既有内容）。
+     *
+     * 精确图示走 SVG：模型画几何不可靠（三角形画歪、坐标轴标错），
+     * 但 SVG 是代码，形状确定、可缩放。这里是告诉模型「什么时候画、
+     * 画成什么样」，渲染与安全清洗在实现侧（SvgBlock / SvgSanitizer）。
+     */
+    val SVG_FIGURE_APPENDIX: String = """
+
+        辅助图示（**只在解析确实需要几何图 / 函数图像 / 受力分析时才用**）：
+
+        需要示意图时，在对应位置输出一个 ```svg 围栏代码块
+        （语言标记必须是 svg，否则会被当成普通代码块显示成文本）。要求：
+        1. viewBox 统一写 "0 0 400 300"；在 JSON 字符串里双引号要转义成 \"。
+        2. 线条用 stroke="#333"，填充用浅色：深色主题下纯黑线条会看不见。
+        3. 只画必要的线段、箭头与标注，不要装饰性元素、不要背景色块。
+        4. 文字一律用 <text> 标签，font-size 写 14。
+        5. 不要写 <script>，不要引用外部图片链接：这些会被过滤掉，图就空了。
+        6. 不需要图时一个 svg 块都不要输出——多余的图只会把正文挤走。
+    """.trimIndent()
+
     fun systemPrompt(multiQuestion: Boolean, attachImage: Boolean): String = buildString {
         append(SYSTEM_PROMPT)
         if (multiQuestion) append('\n').append(MULTI_QUESTION_APPENDIX)
         append('\n').append(LATEX_FORMAT_APPENDIX)
         append('\n').append(TITLE_AND_ANALYSIS_APPENDIX)
         if (attachImage) append('\n').append(IMAGE_ATTACH_APPENDIX)
+        append(SVG_FIGURE_APPENDIX)
     }
 }

@@ -16,7 +16,16 @@ object MarkdownParser {
         data class Table(val rows: List<List<String>>) : Block
         data class Image(val path: String, val alt: String) : Block
         data class Math(val latex: String, val display: Boolean, val complete: Boolean = true) : Block
-        data class Code(val text: String) : Block
+        /** 围栏代码块的**语言标记**（```svg / ```python / 无标记都是空串）。 */
+        data class Code(val text: String, val language: String = "") : Block
+
+        /**
+         * ```svg 围栏：不走等宽文本渲染，走 [com.mistakebook.ui.common.SvgBlock]。
+         *
+         * [source] 已经是**清洗过**的 SVG（去脚本 / 外链等），
+         * 渲染层可以放心交给解码器。
+         */
+        data class Svg(val source: String) : Block
         data object Rule : Block
     }
 
@@ -107,6 +116,8 @@ object MarkdownParser {
         val paragraph = StringBuilder()
         var inCode = false
         val code = StringBuilder()
+        /** 当前围栏的语言标记（```svg → "svg"）；无标记为空串。 */
+        var codeLanguage = ""
 
         // 跨行 `$$` 公式的状态。
         //
@@ -149,11 +160,28 @@ object MarkdownParser {
 
                 line.trimStart().startsWith("```") -> {
                     if (inCode) {
-                        blocks += Block.Code(code.toString().trimEnd())
+                        // 闭合：按语言分流。svg 走图形块，其余（含无标记）
+                        // 走等宽代码块——语言标记一并带出去，渲染层可据此
+                        // 决定要不要显示语言标签。
+                        val text = code.toString().trimEnd()
+                        blocks += if (codeLanguage.equals("svg", ignoreCase = true)) {
+                            Block.Svg(sanitizeSvg(text))
+                        } else {
+                            Block.Code(text, codeLanguage)
+                        }
                         code.clear()
+                        codeLanguage = ""
                         inCode = false
                     } else {
                         flushParagraph()
+                        // 开围栏那行的剩余内容就是语言标记：
+                        // ```svg / ```python / ```（空）
+                        codeLanguage = line.trimStart()
+                            .removePrefix("```")
+                            .trim()
+                            // 有些模型会写成 ```svg title="xx"，只取第一个词
+                            .substringBefore(' ')
+                            .substringBefore('\t')
                         inCode = true
                     }
                 }
@@ -252,7 +280,15 @@ object MarkdownParser {
             val latex = open.toString().trim()
             if (latex.isNotEmpty()) blocks += Block.Math(latex, display = true, complete = false)
         }
-        if (inCode && code.isNotBlank()) blocks += Block.Code(code.toString().trimEnd())
+        // 同上：流式渲染期间围栏可能还没闭合，有内容就先渲染。
+        if (inCode && code.isNotBlank()) {
+            val text = code.toString().trimEnd()
+            blocks += if (codeLanguage.equals("svg", ignoreCase = true)) {
+                Block.Svg(sanitizeSvg(text))
+            } else {
+                Block.Code(text, codeLanguage)
+            }
+        }
     }
 
     private fun paragraphBlock(text: String): Block {
