@@ -74,6 +74,23 @@ data class PendingAttachment(
 )
 
 /**
+ * 气泡里非图片附件的最小展示信息（PDF/文档/其它）。
+ *
+ * 只带 UI 需要的字段，不把 [com.mistakebook.data.local.entities.ChatAttachment]
+ * 的 textExcerpt 大段文本透进界面。
+ */
+data class BubbleFile(
+    val localPath: String,
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val extractedChars: Int,
+    val kind: AttachmentKind,
+    /** 非空 = 这个附件处理失败，芯片按错误态展示。 */
+    val errorMessage: String? = null
+)
+
+/**
  * 对话页状态。**单一 StateFlow**（项目规则 5）。
  *
  * 一次性事件（错误提示、已复制等）走 [ChatViewModel.events]，不塞进这里——
@@ -96,6 +113,15 @@ data class ChatUiState(
      * 也不该在打开会话时全部 base64 一遍。
      */
     val bubbleImages: Map<Long, List<String>> = emptyMap(),
+
+    /**
+     * 消息 id -> 该消息里**非图片**附件（PDF/文档等）。
+     *
+     * 这些附件只抽文本喂模型，变不出缩略图——但气泡里什么都不渲染
+     * 的话，用户看到的就是「发出去了却是空的」。以文件芯片呈现，
+     * 点击交给系统对应的应用打开（本应用不做 PDF 阅读器）。
+     */
+    val bubbleFiles: Map<Long, List<BubbleFile>> = emptyMap(),
 
     /** 输入框内容。首问会预填但不自动发送。 */
     val input: String = "",
@@ -497,25 +523,44 @@ class ChatViewModel(
     private fun loadBubbleImages(messages: List<ChatMessage>) {
         val targets = messages.filter { it.role == ChatRole.USER && it.attachmentIdsJson.isNotBlank() }
         if (targets.isEmpty()) {
-            if (_state.value.bubbleImages.isNotEmpty()) {
-                _state.value = _state.value.copy(bubbleImages = emptyMap())
+            if (_state.value.bubbleImages.isNotEmpty() || _state.value.bubbleFiles.isNotEmpty()) {
+                _state.value = _state.value.copy(bubbleImages = emptyMap(), bubbleFiles = emptyMap())
             }
             return
         }
         bubbleImageJob?.cancel()
         bubbleImageJob = viewModelScope.launch(Dispatchers.IO) {
             val loaded = mutableMapOf<Long, List<String>>()
+            val loadedFiles = mutableMapOf<Long, List<BubbleFile>>()
             targets.forEach { message ->
-                val urls = message.attachmentIds()
+                val attachments = message.attachmentIds()
                     .mapNotNull { repository.attachmentById(it) }
+                val urls = attachments
                     .filter { it.kind == AttachmentKind.IMAGE && it.status == AttachmentStatus.READY }
                     .mapNotNull { attachment -> repository.imageDataUrlOf(attachment) }
                 if (urls.isNotEmpty()) loaded[message.id] = urls
+                // 非图片附件：PDF/文档/其它，气泡里以文件芯片呈现（点击系统打开）。
+                // 处理失败的也带上——用户需要看到「这个附件没处理成功」而不是空白。
+                val files = attachments
+                    .filter { it.kind != AttachmentKind.IMAGE }
+                    .map {
+                        BubbleFile(
+                            localPath = it.localPath,
+                            fileName = it.fileName,
+                            mimeType = it.mimeType,
+                            sizeBytes = it.sizeBytes,
+                            extractedChars = it.extractedChars,
+                            kind = it.kind,
+                            errorMessage = it.errorMessage
+                        )
+                    }
+                if (files.isNotEmpty()) loadedFiles[message.id] = files
             }
             // 中途可能已经切走或又发了一条，以最新的消息列表为准
             val current = _state.value.messages.map { it.id }.toSet()
             _state.value = _state.value.copy(
-                bubbleImages = loaded.filterKeys { it in current }
+                bubbleImages = loaded.filterKeys { it in current },
+                bubbleFiles = loadedFiles.filterKeys { it in current }
             )
         }
     }

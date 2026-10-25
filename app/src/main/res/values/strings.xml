@@ -526,6 +526,9 @@
     <string name="chat_attachment_ready">就绪</string>
     <string name="chat_attachment_failed">处理失败</string>
     <string name="chat_attachment_remove">移除附件</string>
+    <string name="chat_attachment_open">用系统应用打开</string>
+    <string name="chat_attachment_open_missing">附件文件已不存在</string>
+    <string name="chat_attachment_no_viewer">没有可以打开这类文件的应用</string>
     <string name="chat_attachment_extracted">已提取 %1$d 字</string>
     <string name="chat_attachment_size">%1$s</string>
     <string name="chat_attachment_unsupported">不支持这种文件：%1$s</string>

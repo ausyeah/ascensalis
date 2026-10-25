@@ -11,6 +11,7 @@ import androidx.compose.animation.core.tween
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.view.WindowManager
 import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -47,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Note
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Close
@@ -420,6 +422,7 @@ fun ChatScreen(
                         listState = listState,
                         mathRenderer = container.mathRenderer,
                         bubbleImages = state.bubbleImages,
+                        bubbleFiles = state.bubbleFiles,
                         truncatedMessageId = state.truncatedMessageId,
                         onCopy = { text ->
                             clipboard.setText(AnnotatedString(text))
@@ -516,6 +519,7 @@ private fun MessageList(
     listState: LazyListState,
     mathRenderer: com.mistakebook.math.MathRenderer,
     bubbleImages: Map<Long, List<String>>,
+    bubbleFiles: Map<Long, List<BubbleFile>>,
     truncatedMessageId: Long?,
     onCopy: (String) -> Unit,
     onRetry: () -> Unit,
@@ -567,6 +571,7 @@ private fun MessageList(
                 is ChatListItem.Message -> MessageBubble(
                     message = item.message,
                     images = bubbleImages[item.message.id].orEmpty(),
+                    files = bubbleFiles[item.message.id].orEmpty(),
                     truncated = truncatedMessageId == item.message.id,
                     mathRenderer = mathRenderer,
                     onCopy = onCopy,
@@ -664,6 +669,8 @@ private fun ContextStatusRow(
 private fun MessageBubble(
     message: ChatMessage,
     images: List<String>,
+    /** 非图片附件（PDF/文档等）。点击交给系统打开，本应用不做阅读器。 */
+    files: List<BubbleFile>,
     truncated: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer,
     onCopy: (String) -> Unit,
@@ -751,6 +758,17 @@ private fun MessageBubble(
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         images.forEach { dataUrl ->
                             BubbleImage(dataUrl = dataUrl)
+                        }
+                    }
+                    if (message.content.isNotBlank()) Spacer(Modifier.height(8.dp))
+                }
+
+                // 非图片附件（PDF/文档等）：之前只抽文本喂模型、气泡里什么都不渲染，
+                // 用户看到「发出去了却是空的」。以文件芯片呈现，点击交给系统打开。
+                if (files.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        files.forEach { file ->
+                            AttachmentFileChip(file = file)
                         }
                     }
                     if (message.content.isNotBlank()) Spacer(Modifier.height(8.dp))
@@ -1694,6 +1712,125 @@ private fun PendingAttachmentChip(
 }
 
 /** 字节数 -> 人类可读。 */
+/**
+ * 气泡里的非图片附件芯片（PDF/文档/其它）。
+ *
+ * 展示图标 + 文件名 + 大小/提取字数；点击经 FileProvider 授权后
+ * 交给**系统**按类型打开（PDF 阅读器这类能力不进本应用——系统里
+ * 装了什么就用什么）。文件副本丢失或没有可接手的应用时给 toast，
+ * 不抛异常也不静默。
+ */
+@Composable
+private fun AttachmentFileChip(file: BubbleFile) {
+    val context = LocalContext.current
+    val failed = file.errorMessage != null
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (failed) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { openChatAttachment(context, file) }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+        ) {
+            Icon(
+                imageVector = when (file.kind) {
+                    com.mistakebook.domain.AttachmentKind.PDF -> Icons.Default.PictureAsPdf
+                    com.mistakebook.domain.AttachmentKind.IMAGE -> Icons.Default.Image
+                    else -> Icons.Default.Description
+                },
+                contentDescription = null,
+                tint = if (failed) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = file.fileName.ifBlank { stringResource(R.string.chat_attach_file) },
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val subtitle = file.errorMessage ?: run {
+                    // stringResource 是 @Composable，只能在本层调用，
+                    // buildString 的 lambda 里拿不到。
+                    val extracted = stringResource(
+                        R.string.chat_attachment_extracted, file.extractedChars
+                    )
+                    buildString {
+                        file.sizeBytes.takeIf { it > 0 }?.let { append(formatSize(it)) }
+                        file.extractedChars.takeIf { it > 0 }?.let {
+                            if (isNotEmpty()) append(" · ")
+                            append(extracted)
+                        }
+                    }
+                }
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (failed) {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = stringResource(R.string.chat_attachment_open),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+/**
+ * 用系统应用打开一条聊天附件。
+ *
+ * FileProvider 授权（附件在 filesDir/chats 下，`file_paths.xml` 的
+ * `internal_files` 已覆盖）→ ACTION_VIEW 带类型；系统没有能接手的应用、
+ * 或本地副本已被清掉时 toast 说明，绝不静默失败。
+ */
+private fun openChatAttachment(context: Context, file: BubbleFile) {
+    val local = File(file.localPath)
+    if (!local.exists()) {
+        Toast.makeText(context, R.string.chat_attachment_open_missing, Toast.LENGTH_SHORT).show()
+        return
+    }
+    val uri = FileProvider.getUriForFile(
+        context, context.packageName + ".fileprovider", local
+    )
+    val mime = file.mimeType.ifBlank {
+        when (file.kind) {
+            com.mistakebook.domain.AttachmentKind.PDF -> "application/pdf"
+            com.mistakebook.domain.AttachmentKind.TEXT -> "text/plain"
+            else -> "application/octet-stream"
+        }
+    }
+    val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, mime)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    runCatching { context.startActivity(intent) }.onFailure {
+        Toast.makeText(context, R.string.chat_attachment_no_viewer, Toast.LENGTH_SHORT).show()
+    }
+}
+
 private fun formatSize(bytes: Long): String = when {
     bytes <= 0 -> ""
     bytes < 1024 -> "$bytes B"
