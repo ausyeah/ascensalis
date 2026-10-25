@@ -151,6 +151,9 @@ class ChatRepository(
         )
     }
 
+    /** 按 id 取一条消息（T13 批改结果「存入题目备注」用）。 */
+    suspend fun findMessageById(id: Long): ChatMessage? = chatDao.findMessage(id)
+
     suspend fun insertUserMessage(
         sessionId: Long,
         text: String,
@@ -356,9 +359,22 @@ class ChatRepository(
          * 不能看图时：图片附件的 data URL **不再发给模型**（发了也只会得到
          * 「不支持图片」的错误或空回答），改为只发 MinerU 抽出来的文字。
          */
-        supportsVision: Boolean = true
+        supportsVision: Boolean = true,
+        /**
+         * 手写过程批改指令（T13）。非空时拼在题目上下文之后——**与题目上下文
+         * 同一条 system 消息**，模型读起来是「这道题 + 按这个方式批」。
+         *
+         * 普通对话传空串：不注入任何额外内容，行为与 v0.0.33 逐字一致。
+         */
+        gradingInstruction: String = ""
     ): AssembledContext {
-        val systemContext = if (questionId != null) buildQuestionContext(questionId).orEmpty() else ""
+        val systemContext = buildString {
+            if (questionId != null) append(buildQuestionContext(questionId).orEmpty())
+            if (gradingInstruction.isNotBlank()) {
+                if (isNotBlank()) append("\n\n")
+                append(gradingInstruction)
+            }
+        }
         // 失败的、取消的消息**都保留**：它们的内容是有效的对话上下文。
         // 整条剔除会让模型看到「用户问了什么」却看不到「已经答到哪」，
         // 于是换个说法把同一段重讲一遍。

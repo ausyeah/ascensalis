@@ -9,6 +9,7 @@ import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.chat.ChatContextCompressor
 import com.mistakebook.data.chat.ChatImageOcr
 import com.mistakebook.data.chat.ChatOcrText
+import com.mistakebook.data.chat.ChatPrompts
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.chat.PreparedAttachment
 import com.mistakebook.data.local.entities.ChatAttachment
@@ -18,6 +19,10 @@ import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.data.repos.ChatRepository
+import com.mistakebook.data.repos.QuestionRepository
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.mistakebook.domain.AttachmentKind
 import com.mistakebook.domain.AttachmentStatus
 import com.mistakebook.domain.ChatRole
@@ -38,6 +43,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import java.io.File
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,6 +99,12 @@ data class ChatUiState(
 
     /** 输入框内容。首问会预填但不自动发送。 */
     val input: String = "",
+
+    /**
+     * 手写过程批改模式（T13）。仅题目会话（questionId != null）由 UI 展示开关；
+     * 自由会话恒 false。开关状态进 UiState，旋转屏不丢。
+     */
+    val gradingMode: Boolean = false,
 
     /** 还没发送的待发附件。 */
     val pendingAttachments: List<PendingAttachment> = emptyList(),
@@ -214,6 +226,9 @@ data class ChatProviderOption(
 sealed interface ChatEvent {
     data class Error(val text: String) : ChatEvent
     data object Copied : ChatEvent
+
+    /** 一次性成功提示（如「已存入题目备注」）。 */
+    data class Info(val text: String) : ChatEvent
 }
 
 /**
@@ -227,6 +242,8 @@ sealed interface ChatEvent {
  */
 class ChatViewModel(
     private val repository: ChatRepository,
+    /** 题目备注写入（T13 批改结果「存入题目备注」）。 */
+    private val questionRepository: QuestionRepository,
     private val stream: ChatCompletionStream,
     private val settingsStore: SettingsStore,
     private val usageStatsStore: UsageStatsStore,
@@ -568,6 +585,41 @@ class ChatViewModel(
         )
     }
 
+    /**
+     * 切换手写过程批改模式（T13）。仅题目会话的 UI 会暴露这个开关，
+     * 自由会话不展示、状态恒 false。
+     */
+    fun toggleGrading() {
+        _state.value = _state.value.copy(gradingMode = !_state.value.gradingMode)
+    }
+
+    /**
+     * 把一条助手回复存入题目备注（T13）。
+     *
+     * 追加而不是覆盖：`updateNote` 会 trim，这里自己拼好换行——
+     * 用户此前的笔记一个字都不能丢。
+     */
+    fun saveToNote(messageId: Long) {
+        val qid = questionId ?: return
+        viewModelScope.launch {
+            val message = repository.findMessageById(messageId) ?: return@launch
+            val existing = questionRepository.findById(qid)?.note.orEmpty()
+            val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+            val body = message.content.trim().take(2000)
+            val merged = buildString {
+                if (existing.isNotBlank()) {
+                    append(existing.trim())
+                    append("\n\n")
+                }
+                append("[AI 批改 $stamp]")
+                append("\n")
+                append(body)
+            }
+            questionRepository.updateNote(qid, merged)
+            _events.trySend(ChatEvent.Info("已存入题目备注"))
+        }
+    }
+
     fun send() {
         val current = _state.value
         // `generationActive` 是**本地**的在途守卫：`isStreaming` 由后台服务
@@ -615,7 +667,74 @@ class ChatViewModel(
                     runCatching { settingsStore.setChatDraft(sessionId, "") }
                 }
             }
-            runOnce(profile, text, ready.mapNotNull { it.prepared }, isRetry = false)
+
+            // ---- T13 批改模式分流 ----
+            // 批改不是独立页面，是对话的一种发送模式：普通文字/附件照旧，
+            // 开关开启时才走下面这条「先 OCR、再拼文、后注入指令」的路。
+            var messageText = text
+            if (current.gradingMode) {
+                val images = ready
+                    .mapNotNull { it.prepared }
+                    .filter { it.kind == AttachmentKind.IMAGE && it.ok }
+                if (images.isEmpty()) {
+                    _events.trySend(ChatEvent.Error("批改模式需要附上手写过程照片"))
+                    return@launch
+                }
+                if (messageText.isBlank()) {
+                    // 输入框为空时给个默认问法（用户可改）
+                    messageText = "请批改我的解题过程，指出从哪一步开始错"
+                }
+                // OCR 总是执行——**不依赖模型是否支持图片**：纯文本模型靠
+                // 拼进消息的 OCR 文本也能批；多模态模型图+文双保险，且公式
+                // 经 MinerU 转成 LaTeX 比视觉模型看图更准。
+                // 失败不阻断发送：图片按现有机制照发，消息前加一行小字说明。
+                val ocrTexts = mutableListOf<String>()
+                var ocrFailed = false
+                val settings = settingsStore.settings.first()
+                images.forEachIndexed { index, prepared ->
+                    _state.value = _state.value.copy(
+                        ocrStage = "正在识别手写过程…（${index + 1}/${images.size}）"
+                    )
+                    when (
+                        val r = imageOcr.recognize(
+                            sessionId = current.sessionId,
+                            imageFile = File(prepared.localPath),
+                            settings = settings,
+                            onStage = { stage ->
+                                _state.value = _state.value.copy(ocrStage = "正在识别手写过程…：$stage")
+                            }
+                        )
+                    ) {
+                        is com.mistakebook.net.ApiResult.Success ->
+                            if (r.data.isNotBlank()) ocrTexts += r.data
+                        is com.mistakebook.net.ApiResult.Failure -> ocrFailed = true
+                    }
+                }
+                _state.value = _state.value.copy(ocrStage = null)
+
+                val sb = StringBuilder(messageText)
+                if (ocrFailed) {
+                    sb.insert(
+                        0,
+                        "手写过程未能 OCR 为文字，请确保模型支持图片，或到设置配置 MinerU\n\n"
+                    )
+                }
+                if (ocrTexts.isNotEmpty()) {
+                    sb.append("\n\n【手写过程识别文本】\n")
+                    ocrTexts.forEach {
+                        sb.append(it.trim()).append("\n\n")
+                    }
+                }
+                messageText = sb.toString().trimEnd()
+            }
+
+            runOnce(
+                profile = profile,
+                text = messageText,
+                attachments = ready.mapNotNull { it.prepared },
+                isRetry = false,
+                grading = current.gradingMode
+            )
         }
     }
 
@@ -663,7 +782,9 @@ class ChatViewModel(
         profile: LlmProfile,
         text: String,
         attachments: List<PreparedAttachment>,
-        isRetry: Boolean
+        isRetry: Boolean,
+        /** 手写过程批改模式（T13）：true 时向题目上下文注入批改指令。 */
+        grading: Boolean = false
     ) {
         val sessionId = _state.value.sessionId
         if (sessionId == 0L) return
@@ -719,7 +840,10 @@ class ChatViewModel(
         val context = repository.buildContext(
             sessionId = sessionId,
             questionId = questionId,
-            supportsVision = effectiveProfile.supportsVision
+            supportsVision = effectiveProfile.supportsVision,
+            // 批改指令与题目上下文拼进同一条 system 消息（ChatRepository）；
+            // 不开批改时传空串——普通对话的上下文与 v0.0.33 逐字一致
+            gradingInstruction = if (grading) ChatPrompts.GRADING_INSTRUCTION else ""
         )
         _state.value = _state.value.copy(
             omittedCount = context.omittedCount,

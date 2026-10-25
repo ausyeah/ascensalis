@@ -576,4 +576,10 @@
     <string name="edit_restore_message">上次手动录入的内容还没保存，可以接着上次的继续填。</string>
     <string name="edit_restore_confirm">恢复</string>
     <string name="edit_restore_dismiss">丢弃</string>
+    <!-- ===== T13 手写过程批改 ===== -->
+    <string name="chat_grading_toggle">批改我的解题过程</string>
+    <string name="chat_input_hint_grading">已开启批改：附上手写过程照片，发送后 AI 逐步对照</string>
+    <string name="chat_save_to_note">存入题目备注</string>
+    <string name="chat_grading_need_image">批改模式需要附上手写过程照片</string>
+    <string name="chat_saved_to_note">已存入题目备注</string>
 </resources>

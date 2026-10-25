@@ -41,12 +41,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -167,6 +169,7 @@ fun ChatScreen(
     ) { c ->
         ChatViewModel(
             repository = c.chatRepository,
+            questionRepository = c.questionRepository,
             stream = c.chatCompletionStream,
             settingsStore = c.settingsStore,
             usageStatsStore = c.usageStatsStore,
@@ -250,6 +253,7 @@ fun ChatScreen(
             when (event) {
                 is ChatEvent.Copied -> snackbarHost.showSnackbar(copiedText)
                 is ChatEvent.Error -> snackbarHost.showSnackbar(event.text)
+                is ChatEvent.Info -> snackbarHost.showSnackbar(event.text)
             }
         }
     }
@@ -406,7 +410,9 @@ fun ChatScreen(
                         onDelete = { id ->
                             pendingDeleteId = id
                             showDeleteDialog = true
-                        }
+                        },
+                        // T13：批改结果「存入题目备注」（仅题目会话的 ChatScreen 传得进来）
+                        onSaveToNote = viewModel::saveToNote
                     )
                 }
 
@@ -460,7 +466,11 @@ fun ChatScreen(
                 onStop = viewModel::stop,
                 onAttach = { showAttachSheet = true },
                 onPickModel = { showModelSheet = true },
-                onRemoveAttachment = viewModel::removePendingAttachment
+                onRemoveAttachment = viewModel::removePendingAttachment,
+                // T13 批改开关：仅题目会话显示（自由会话 questionId == null）
+                gradingMode = state.gradingMode,
+                gradingVisible = questionId != null,
+                onToggleGrading = viewModel::toggleGrading
             )
         }
     }
@@ -490,7 +500,9 @@ private fun MessageList(
     truncatedMessageId: Long?,
     onCopy: (String) -> Unit,
     onRetry: () -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    /** T13：批改结果「存入题目备注」入口；自由会话传 null 不展示。 */
+    onSaveToNote: ((Long) -> Unit)? = null
 ) {
     // 倒序提供数据配合 reverseLayout：最新消息固定在底边，流式气泡增长无需反复重启滚动动画。
     val items: List<ChatListItem> = buildList {
@@ -540,7 +552,8 @@ private fun MessageList(
                     mathRenderer = mathRenderer,
                     onCopy = onCopy,
                     onRetry = onRetry,
-                    onDelete = onDelete
+                    onDelete = onDelete,
+                    onSaveToNote = onSaveToNote
                 )
             }
         }
@@ -636,7 +649,9 @@ private fun MessageBubble(
     mathRenderer: com.mistakebook.math.MathRenderer,
     onCopy: (String) -> Unit,
     onRetry: () -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    /** T13：把助手回复存入题目备注。null = 当前会话不展示该入口（自由会话）。 */
+    onSaveToNote: ((Long) -> Unit)? = null
 ) {
     val isUser = message.role == ChatRole.USER
     val isInjected = message.injected
@@ -783,7 +798,8 @@ private fun MessageBubble(
             isUser = isUser,
             onCopy = onCopy,
             onRetry = onRetry,
-            onDelete = onDelete
+            onDelete = onDelete,
+            onSaveToNote = onSaveToNote
         )
     }
 }
@@ -934,7 +950,9 @@ private fun StatusRow(
     isUser: Boolean,
     onCopy: (String) -> Unit,
     onRetry: () -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    /** T13：非空时对完成态助手消息展示「存入题目备注」入口。 */
+    onSaveToNote: ((Long) -> Unit)? = null
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -972,6 +990,20 @@ private fun StatusRow(
                         modifier = Modifier.size(14.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                // T13：批改结果一键存进题目备注（题目会话专属，自由会话不传该回调）
+                if (onSaveToNote != null) {
+                    IconButton(
+                        onClick = { onSaveToNote(message.id) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Note,
+                            contentDescription = stringResource(R.string.chat_save_to_note),
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -1186,7 +1218,12 @@ private fun ChatInputBar(
     onStop: () -> Unit,
     onAttach: () -> Unit,
     onPickModel: () -> Unit,
-    onRemoveAttachment: (Long) -> Unit
+    onRemoveAttachment: (Long) -> Unit,
+    /** 批改模式开闭（T13）。 */
+    gradingMode: Boolean = false,
+    /** 是否展示批改开关：仅题目会话。 */
+    gradingVisible: Boolean = false,
+    onToggleGrading: () -> Unit = {}
 ) {
     Surface(tonalElevation = 3.dp, shadowElevation = 8.dp) {
         Column(
@@ -1214,7 +1251,14 @@ private fun ChatInputBar(
                 value = text,
                 onValueChange = onTextChange,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(stringResource(R.string.chat_input_hint)) },
+                placeholder = {
+                    Text(
+                        stringResource(
+                            if (gradingMode) R.string.chat_input_hint_grading
+                            else R.string.chat_input_hint
+                        )
+                    )
+                },
                 maxLines = 5,
                 shape = RoundedCornerShape(20.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -1238,6 +1282,26 @@ private fun ChatInputBar(
                 }
 
                 Spacer(Modifier.width(6.dp))
+
+                // 批改开关（T13）：选中态高亮 + contentDescription 说明。
+                // 只对题目会话显示——自由会话没有题干/答案可对照，批改无从谈起。
+                if (gradingVisible) {
+                    val gradingTint =
+                        if (gradingMode) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    IconButton(
+                        onClick = onToggleGrading,
+                        enabled = !streaming,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.RateReview,
+                            contentDescription = stringResource(R.string.chat_grading_toggle),
+                            tint = gradingTint
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
 
                 // 模型选择入口：圆形图标 + 当前模型名 + 下拉箭头。
                 // 一个 provider 常供应几十个模型，点这里弹出完整列表。
