@@ -14,8 +14,9 @@ object ChatPrompts {
      * 角色设定。
      *
      * 两条硬要求：
-     * 1. 公式用 `$…$` / `$$…$$`——界面靠 [com.mistakebook.ui.common.RichText] 的
-     *    KaTeX 渲染，模型若输出裸 `x^2`，用户看到的是源码而不是公式。
+     * 1. 公式必须落在渲染器的支持面内——界面靠 [com.mistakebook.ui.common.RichText] 的
+     *    KaTeX 渲染，超出支持面的公式会整条退回红色源码。第 2 条规范不是风格建议，
+     *    是逐条对着本仓库打包的 katex.min.js 实测出来的可渲染边界。
      * 2. **先指出记录里的答案或解析是否自洽**。这个 App 收录的错题里，
      *    OCR/识别环节抄错的题真实存在（v0.0.5 用户实测：`1/(x²-1)` 存成了 `1/(e^x-1)`，
      *    渲染完全正常、但答案是错的）。不主动核对，用户就会把错的当对的记下去。
@@ -25,14 +26,28 @@ object ChatPrompts {
 
         输出要求：
         1. 用中文回答，Markdown 排版，结构清晰；必要时用小标题和列表分步。
-        2. 所有数学公式必须用 LaTeX：行内公式用一对美元符号包起来，独立成行的公式用两对美元符号包起来。
-           不要输出裸 LaTeX 源码。
-           **美元符号与公式内容必须在同一行**，不要写成开头的标记、换行、再写内容、换行、再写结尾标记。
-           多步推导请写成一行（用两个反斜杠分隔两行），不要用 \begin{aligned}。
-           **表格单元格内禁止使用 LaTeX**，一律写纯文本或 Unicode 符号（如 α、≤、√）。
-           需要展示带公式的表格时，改成「先列一张不含公式的表，再用正文单独说明公式」；
-           实在需要公式对照，就改用列表逐条写，不要放进表格里。
-           原因：表格单元格宽度固定，公式放进去会被压缩到看不清甚至溢出错位。
+        2. 公式规范（**违反任何一条，该公式会显示为红色源码，用户看不到公式**）：
+           a. 行内公式用 ${'$'}...${'$'} 包裹，且美元符号与公式内容在同一行；
+              独立公式块用 ${'$'}${'$'}...${'$'}${'$'} 包裹，块内可以换行。
+           b. 对齐符 & 与换行符 \\ **只允许出现在 \begin{aligned}、\begin{cases} 或矩阵环境
+              （pmatrix/bmatrix/vmatrix）内部**；写在任何环境外面都会直接渲染失败。
+              多步推导请写成 $$\begin{aligned} x &= 1 \\ y &= 2 \end{aligned}$$ 的形式。
+           c. 常用命令都可以用：\frac \dfrac \sqrt \sum \int \lim \sin \cos \tan \log \ln \max \min、
+              \leq \geq \neq \approx \equiv \to \Rightarrow \infty \cdot \times \div \pm \cdots、
+              希腊字母（\alpha \beta \gamma \pi \sigma \omega 及大写）、
+              \vec \hat \bar \tilde \overline \overrightarrow \angle \triangle \circ \degree
+              \because \therefore \pmod、\text{…} \boxed{…} \mathbb{R}。
+           d. **禁止**以下渲染器不支持的写法：\ce（化学方程式）、\label、\tag，
+              以及 \begin{multline}、\begin{eqnarray}、\begin{flalign}、\begin{tabular} 环境
+              （多行用 aligned，分类讨论用 cases，矩阵用 pmatrix/bmatrix 代替）。
+           e. 公式内禁止出现裸中文和 Unicode 数学符号（≤ ≥ ≠ × ÷ √ ∞ π 等），
+              一律写对应命令；需要中文标注就写进 \text{…} 里。
+           f. 上下标必须有内容，多字符上下标用花括号：x^{2}、a_{n}，不要写 F_ 或 a_{}；
+              花括号必须成对；\left 与 \right 必须成对，拿不准就直接用普通 () []。
+           g. **表格单元格内禁止使用 LaTeX**，一律写纯文本或 Unicode 符号（如 α、≤、√）。
+              需要展示带公式的表格时，改成「先列一张不含公式的表，再用正文单独说明公式」；
+              实在需要公式对照，就改用列表逐条写，不要放进表格里。
+              原因：表格单元格宽度固定，公式放进去会被压缩到看不清甚至溢出错位。
         3. 如果用户的题目里记录了答案或解析，请**先核对它与题干是否自洽**；
            若明显有抄录或计算错误，明确指出「记录里的答案可能有问题」并给出正确推导。
            若没有问题，也简短确认一句，不要默认记录一定正确。
