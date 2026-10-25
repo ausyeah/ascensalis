@@ -75,8 +75,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -100,6 +106,7 @@ import com.mistakebook.ui.theme.PaperBorderLight
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.icons.filled.Landscape
+import androidx.compose.material.icons.filled.Share
 import com.mistakebook.ui.theme.PaperLv0
 import com.mistakebook.ui.theme.PaperLv1
 import com.mistakebook.ui.theme.PaperLv2
@@ -1845,6 +1852,58 @@ internal fun StatsView(
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
             ) {
                 WeeklyAccuracyCard(stats = state.weeklyDayStats)
+            }
+        }
+
+        // 打卡海报（F-IMG-2）：本地 Canvas 渲染的一张图，
+        // 不经过任何生图 API——数据是本地统计，画也是本地画。
+        item {
+            val context = LocalContext.current
+            val scope = rememberCoroutineScope()
+            var generating by remember { mutableStateOf(false) }
+            OutlinedButton(
+                onClick = {
+                    if (generating) return@OutlinedButton
+                    generating = true
+                    scope.launch {
+                        val uri = withContext(Dispatchers.IO) {
+                            val bitmap = renderCheckInPoster(buildPosterData(state))
+                            savePosterToGallery(
+                                context = context,
+                                bitmap = bitmap,
+                                displayName = "登临打卡-${System.currentTimeMillis()}.png"
+                            )
+                        }
+                        generating = false
+                        if (uri != null) {
+                            sharePoster(context, uri)
+                        } else {
+                            viewModel.showMessage("海报保存失败，请检查相册权限")
+                        }
+                    }
+                },
+                enabled = !generating,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (generating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("生成中…")
+                } else {
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("生成打卡海报")
+                }
             }
         }
     }

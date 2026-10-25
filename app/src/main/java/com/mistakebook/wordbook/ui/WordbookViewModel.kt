@@ -1509,6 +1509,11 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** 供 UI 层（如海报分享结果）直接推一条提示消息。 */
+    fun showMessage(text: String) {
+        _uiState.update { it.copy(snackbarMessage = text) }
+    }
+
     fun clearSnackbar() {
         _uiState.update { it.copy(snackbarMessage = null) }
     }
