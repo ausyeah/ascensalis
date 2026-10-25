@@ -1083,7 +1083,12 @@ class ChatViewModel(
                     is com.mistakebook.net.ApiResult.Failure -> {
                         // 单张失败不中断后面的：一张图识别不出来，
                         // 不该让整会话的其他图都不识别。
-                        val reason = result.error.serverMessage.ifBlank { "识别请求失败" }
+                        // 网络类失败带上当前出口模式（用户反馈「切换代理/直连
+                        // 没发挥作用」——把决策面亮出来，切换效果立刻可对账）。
+                        val reason = result.error.serverMessage.ifBlank { "识别请求失败" } +
+                            if (result.error.kind == com.mistakebook.net.ApiErrorKind.NETWORK ||
+                                result.error.kind == com.mistakebook.net.ApiErrorKind.TIMEOUT
+                            ) "（出口：${com.mistakebook.net.NetworkRouter.describe()}）" else ""
                         Log.w(TAG, "图片 OCR 失败: ${attachment.fileName} / $reason")
                         markOcrFailed(attachment, reason)
                         failureReasons += reason

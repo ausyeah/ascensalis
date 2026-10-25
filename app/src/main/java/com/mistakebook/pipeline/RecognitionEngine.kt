@@ -170,7 +170,9 @@ class RecognitionEngine(
             is PipelineException -> taskRepository.fail(
                 id = taskId,
                 message = error.apiError.serverMessage
-                    .ifBlank { defaultMessageFor(error.apiError.kind) },
+                    .ifBlank {
+                        buildFailureMessage(error.apiError)
+                    },
                 now = now,
                 kind = error.apiError.kind.name
             )
@@ -182,6 +184,24 @@ class RecognitionEngine(
                 now
             )
         }
+    }
+
+    /**
+     * 组装用户可读的失败原因。
+     *
+     * 网络类错误把底层异常（[com.mistakebook.net.ApiError.detail]，如
+     * 「无法解析主机 mineru.net」「connect timeout」）与**当前网络出口
+     * 模式**一并展示——用户反馈「切换代理/直连没发挥作用」，实际上
+     * 模式每次建连都在生效，但通用文案把真实原因全盖住了，无法对账。
+     * 有了这两样，切模式立刻能看到差别；报给开发者也能直接定位。
+     */
+    private fun buildFailureMessage(apiError: com.mistakebook.net.ApiError): String {
+        val base = defaultMessageFor(apiError.kind)
+        val diagnostic = apiError.kind == com.mistakebook.net.ApiErrorKind.NETWORK ||
+            apiError.kind == com.mistakebook.net.ApiErrorKind.TIMEOUT
+        val detail = apiError.detail.trim()
+        if (!diagnostic || detail.isBlank()) return base
+        return "$base（${detail.take(120)} · 出口：${com.mistakebook.net.NetworkRouter.describe()}）"
     }
 
     private fun defaultMessageFor(kind: com.mistakebook.net.ApiErrorKind): String = when (kind) {

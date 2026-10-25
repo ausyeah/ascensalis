@@ -63,4 +63,18 @@ object NetworkRouter {
 
     private fun isDirectHost(host: String): Boolean =
         DIRECT_HOSTS.any { host == it || host.endsWith(".$it") }
+
+    /**
+     * 当前模式的**人话描述**，拼进网络类错误里展示。
+     *
+     * 用户反馈「切换代理/直连没发挥作用」——模式其实每次建连都在生效，
+     * 但失败文案只说「网络不通」，真实异常（DNS 失败？代理拒绝？超时？）
+     * 和当前走了哪条出口全被吞掉，用户无法验证。把两者一起展示，
+     * 切换模式的效果立刻可对账。
+     */
+    fun describe(): String = when (mode) {
+        NetworkMode.SYSTEM -> "跟随系统代理"
+        NetworkMode.DIRECT -> "全部直连"
+        NetworkMode.AUTO -> "自动（MinerU 直连，其余跟随系统）"
+    }
 }
