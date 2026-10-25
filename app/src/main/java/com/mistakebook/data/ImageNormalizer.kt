@@ -8,6 +8,7 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.media.ExifInterface
+import android.util.Log
 import java.io.File
 
 /**
@@ -274,8 +275,31 @@ object ImageNormalizer {
         return scaled.toInt().coerceIn(0, MID.toInt())
     }
 
-    /** Otsu 法求灰度直方图的最大类间方差阈值。 */
-    private fun otsuThreshold(pixels: IntArray): Int {
+    /**
+     * Otsu 法求灰度直方图的最大类间方差阈值。
+     *
+     * ## 为什么要有两道 sanity（T15）
+     * 用户报告过小概率「增强后黑白颠倒」。[steepen] 的映射对固定阈值是单调的，
+     * 单次处理数学上不可能反转输出；怀疑根因就在这里：极端直方图
+     * （图上有一小块强反光 / 深阴影 / 黑边，占比小但极端）会把 Otsu 阈值拉偏，
+     * 整页被推向全白或全暗，被感知为「颠倒」。按防御性修复处理，不追求复现：
+     * - **分位钳制**：阈值必须落在灰度直方图的 [P2, P98] 分位之间，越界钳回边界；
+     * - **占比守卫**：阈值两侧任何一侧占比 < 5% 都回退到
+     *   `(加权中位数 + 128) / 2`——两簇严重失衡时 Otsu 的分界没有统计意义。
+     *
+     * 回退时留 `Log.w`：下次用户再遇到，凭这条日志就能定位是不是这条路径。
+     *
+     * internal 而非 private 是为了让单测能直接构造极端直方图验证守卫
+     * （与 [steepen]、[calculateSampleSize] 同一约定）。
+     *
+     * [onFallback] 可注入是为了 JVM 单测：Paparazzi 带来的 layoutlib jar 里
+     * `android.util.Log` 是真身（native 调用），且排在 mockable android.jar
+     * 之前，单测里打 Log 会 UnsatisfiedLinkError。生产走默认值 = 真 Log.w。
+     */
+    internal fun otsuThreshold(
+        pixels: IntArray,
+        onFallback: (String) -> Unit = { msg -> Log.w("ImageNormalizer", msg) }
+    ): Int {
         val histogram = IntArray(256)
         pixels.forEach { pixel ->
             val alpha = (pixel ushr 24) and 0xFF
@@ -308,7 +332,49 @@ object ImageNormalizer {
                 best = threshold
             }
         }
-        return best
+
+        // 第一道：分位钳制。阈值必须落在 [P2, P98] 之间
+        // （累积分布单调，P2 必然 <= P98，coerceIn 不会因 min > max 抛异常）
+        var threshold = best.coerceIn(
+            quantileOfHistogram(histogram, total, 0.02),
+            quantileOfHistogram(histogram, total, 0.98)
+        )
+
+        // 第二道：占比守卫。亮侧（>=t）或暗侧（<t）任何一侧不足 5%，
+        // 说明两簇严重失衡，Otsu 分界没有统计意义，回退到中位数与 128 的中点。
+        // 乘 20 与 total 比较是为了全程整数运算（占比 < 5% <=> 权重*20 < total）。
+        var darkWeight = 0
+        var brightWeight = 0
+        for (value in 0..255) {
+            if (value < threshold) darkWeight += histogram[value] else brightWeight += histogram[value]
+        }
+        if (darkWeight * 20 < total || brightWeight * 20 < total) {
+            val median = quantileOfHistogram(histogram, total, 0.5)
+            val fallback = ((median + 128) / 2f).toInt().coerceIn(0, 255)
+            onFallback(
+                "Otsu 阈值异常已回退: t=$threshold" +
+                    " 亮侧占比=${brightWeight * 100 / total}%" +
+                    " 暗侧占比=${darkWeight * 100 / total}%" +
+                    " -> $fallback"
+            )
+            threshold = fallback
+        }
+        return threshold
+    }
+
+    /**
+     * 灰度直方图的 [ratio] 分位值（按像素数加权）。
+     * 累积计数首次达到 `ratio * total` 的灰度值即为该分位。
+     */
+    private fun quantileOfHistogram(histogram: IntArray, total: Int, ratio: Double): Int {
+        if (total <= 0) return 128
+        val target = ratio * total
+        var cumulative = 0
+        for (value in 0..255) {
+            cumulative += histogram[value]
+            if (cumulative >= target) return value
+        }
+        return 255
     }
 
     /** 纯色覆盖绘制，供调用方复用（避免各处重复 new Canvas）。 */
