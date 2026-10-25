@@ -169,6 +169,14 @@ data class WordbookUiState(
     val libraryFilterLevel: Int? = null,
     val libraryWords: List<Pair<Word, WordProgress?>> = emptyList(),
 
+    // 场景图（F-IMG-1）：当前词已生成的场景图。
+    // 切词时自动 peek 缓存：同词同义项出过图就直接显示，不用再点一次。
+    val sceneImagePath: String? = null,
+    /** 生图进行中（按钮转 spinner + 「生成中…」）。 */
+    val sceneImageLoading: Boolean = false,
+    /** 模型写的场景描述，出图后展示来源（用户可知道图是怎么来的）。 */
+    val sceneImagePrompt: String? = null,
+
     val isLoading: Boolean = false,
     val snackbarMessage: String? = null
 )

@@ -20,6 +20,7 @@ import com.mistakebook.pipeline.LlmClient
 import com.mistakebook.pipeline.MineruClient
 import com.mistakebook.pipeline.RecognitionEngine
 import com.mistakebook.pipeline.RecognitionSubmitter
+import com.mistakebook.pipeline.SceneImageGenerator
 import com.mistakebook.util.ImageDiskCache
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -226,6 +227,13 @@ class AppContainer(context: Context) {
 
     /** 生图结果磁盘 LRU 缓存（filesDir/images/gen，上限 200 张，不进备份）。 */
     val imageDiskCache: ImageDiskCache by lazy { ImageDiskCache(files.genImageDir) }
+
+    /**
+     * 两步生图编排：LLM 出场景 prompt → 生图 API 出图（单词场景图 / 详情页辅助图共用）。
+     */
+    val sceneImageGenerator: SceneImageGenerator by lazy {
+        SceneImageGenerator(llmClient, imageGenClient, imageDiskCache, settingsStore)
+    }
 
     /**
      * 对话流式客户端。

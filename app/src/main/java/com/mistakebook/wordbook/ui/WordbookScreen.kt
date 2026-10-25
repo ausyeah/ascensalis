@@ -97,6 +97,9 @@ import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.theme.LocalDarkTheme
 import com.mistakebook.ui.theme.PaperBorderLight
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material.icons.filled.Landscape
 import com.mistakebook.ui.theme.PaperLv0
 import com.mistakebook.ui.theme.PaperLv1
 import com.mistakebook.ui.theme.PaperLv2
@@ -358,6 +361,90 @@ private fun WordbookTabBar(
 // =========================================================================
 // 1. 刷题页面 (Study View)
 // =========================================================================
+
+/**
+ * 单词场景图（F-IMG-1）：三态渲染——生成中 / 已有图 / 未生成。
+ *
+ * ## 为什么按钮常驻而不是藏在菜单里
+ *
+ * 场景图是「想看就看」的辅助，不是答题的一部分。常驻一颗按钮，
+ * 出过图的词切回来直接显示（磁盘缓存命中），没出过图的给入口。
+ *
+ * ## 反馈纪律
+ *
+ * 生成中按钮转 spinner + 「生成中…」：生图是 5~15 秒的操作，
+ * 没有任何反馈用户会以为按钮坏了而连点（连点会真的多烧几次额度）。
+ */
+@Composable
+private fun WordSceneImage(
+    state: WordbookUiState,
+    viewModel: WordbookViewModel
+) {
+    Spacer(Modifier.height(8.dp))
+    if (state.sceneImageLoading) {
+        OutlinedButton(
+            onClick = {},
+            enabled = false,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("生成中…")
+        }
+        return
+    }
+    val path = state.sceneImagePath
+    if (path != null) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column {
+                AsyncImage(
+                    model = path,
+                    contentDescription = "场景图",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                )
+                // 展示模型写的场景描述：让用户知道这张图是怎么来的，
+                // 也便于判断「图不对」是 prompt 的问题还是生图模型的问题。
+                if (!state.sceneImagePrompt.isNullOrBlank()) {
+                    Text(
+                        text = state.sceneImagePrompt,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+        return
+    }
+    OutlinedButton(
+        onClick = viewModel::generateSceneImage,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(46.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Icon(
+            Icons.Default.Landscape,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("场景图")
+    }
+}
 
 @Composable
 internal fun StudyView(
@@ -835,6 +922,14 @@ internal fun StudyView(
                         }
                     }
                     }
+                }
+            }
+
+            // 场景图（F-IMG-1）：答题卡下方的视觉锚点。
+            // 出过图的词切回来直接显示（磁盘缓存），没出过图给一颗按钮。
+            if (currentWord != null) {
+                item {
+                    WordSceneImage(state = state, viewModel = viewModel)
                 }
             }
 
@@ -1558,7 +1653,8 @@ private fun WrongBookView(
                         showRemove = state.wrongSubTab == WrongSubTab.WRONG_BOOK,
                         onRemove = { viewModel.removeFromWrongBook(word.word) },
                         onSpeak = { viewModel.speakWord(word.word) },
-                        onToggleFavorite = { viewModel.toggleFavorite(word.word) }
+                        onToggleFavorite = { viewModel.toggleFavorite(word.word) },
+                        scenePath = viewModel.scenePathFor(word.word, word.meaning)
                     )
                 }
             }
@@ -2146,7 +2242,14 @@ private fun WordItemCard(
     showRemove: Boolean,
     onRemove: () -> Unit,
     onSpeak: () -> Unit = {},
-    onToggleFavorite: () -> Unit = {}
+    onToggleFavorite: () -> Unit = {},
+    /**
+     * 场景图缩略图路径（已生成过才有值）。
+     *
+     * 错词本列表用它做**视觉锚点**：背单词时那张图比文字更容易被记起来，
+     * 列表里露出 40dp 小图，扫一眼就能把词和场景对上。
+     */
+    scenePath: String? = null
 ) {
     val levelColor = when (progress.level) {
         1 -> PaperLv1
@@ -2210,6 +2313,19 @@ private fun WordItemCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // 场景图缩略图：出过图才占位置（没出过图的词布局不变）。
+            if (scenePath != null) {
+                AsyncImage(
+                    model = scenePath,
+                    contentDescription = "场景图",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                Spacer(Modifier.width(6.dp))
             }
 
             // 列表里的发音与收藏：单词旁的即点即读/即收藏，

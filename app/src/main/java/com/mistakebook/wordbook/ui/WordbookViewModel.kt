@@ -3,6 +3,7 @@ package com.mistakebook.wordbook.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.di.AppContainer
+import com.mistakebook.pipeline.SceneImageResult
 import com.mistakebook.wordbook.algo.SpellRules
 import com.mistakebook.wordbook.algo.WordbookRules
 import com.mistakebook.wordbook.data.SenseQuestion
@@ -256,6 +257,30 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 reloadAfterExternalReset()
             }
         }
+        // 生图渠道的模型名（参与场景图缓存 key）。
+        // 列表缩略图要在**组合期同步**查缓存，读不了 suspend 的 snapshotNow，
+        // 所以在这里持续跟踪一份最新值。
+        viewModelScope.launch {
+            container.settingsStore.settings.collect { s ->
+                activeImageModel = s.activeImageProfile?.model.orEmpty()
+            }
+        }
+    }
+
+    /** 当前生图渠道的模型名；还没从设置流里拿到时为空串（见 init）。 */
+    private var activeImageModel: String = ""
+
+    /**
+     * 同步查场景图缓存（列表缩略图用）。
+     *
+     * 拿不到模型名就返回 null（组合期不阻塞、不读 DataStore），
+     * 代价只是「首帧可能少一张缩略图」，下一次重组会补上。
+     */
+    fun scenePathFor(word: String, sense: String? = null): String? {
+        val model = activeImageModel
+        if (model.isBlank()) return null
+        val key = container.imageDiskCache.keyFor(sceneSeed(word, sense), model)
+        return container.imageDiskCache.peek(key)?.absolutePath
     }
 
     /**
@@ -605,6 +630,11 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     spellInput = "",
                     spellSubmitted = false,
                     spellCorrect = false,
+                    // 场景图跟着词走：先按缓存回填（出过图就立刻显示），
+                    // 没出过图就置空，等用户点「场景图」再生成。
+                    sceneImagePath = cachedScenePath(word, null),
+                    sceneImagePrompt = null,
+                    sceneImageLoading = false,
                     isLoading = false
                 )
             }
@@ -650,6 +680,11 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                         // 这道新题上——答完还能点选项，状态就乱了。
                         allowReselect = false,
                         isCardRevealed = false,
+                        // 义项辨析的「同一道题」是 词 + 单一义项，
+                        // 缓存种子带上 sense，换义项算另一个题目。
+                        sceneImagePath = cachedScenePath(senseQ.word, senseQ.sense),
+                        sceneImagePrompt = null,
+                        sceneImageLoading = false,
                         isLoading = false
                     )
                 }
@@ -686,11 +721,87 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 isAnswered = false,
                 allowReselect = false,
                 isCardRevealed = false,
+                sceneImagePath = cachedScenePath(word, null),
+                sceneImagePrompt = null,
+                sceneImageLoading = false,
                 isLoading = false
             )
         }
         // 新题入库存档：之后切模式再切回来，重放的是这道新题
         captureModeSnapshot()
+    }
+
+    // =====================================================================
+    // 场景图（F-IMG-1）
+    // =====================================================================
+
+    /**
+     * 缓存种子：词 + 义项。
+     *
+     * 义项不同的同一个词要算两道题（"bank"：河岸 / 银行），
+     * 图也该是两张——所以 sense 一起进种子。
+     */
+    private fun sceneSeed(word: String, sense: String?): String =
+        word.trim().lowercase() + "|" + (sense?.trim()?.lowercase().orEmpty())
+
+    /**
+     * 已经出过图就返回磁盘路径（切词时自动显示，不重复烧额度）。
+     *
+     * 是 suspend：设置快照要从 DataStore 读一次（拿当前生图渠道的模型名，
+     * 模型名参与缓存 key——换渠道就该重新生成）。
+     */
+    private suspend fun cachedScenePath(word: Word, sense: String?): String? {
+        val profile = container.settingsStore.snapshotNow().activeImageProfile ?: return null
+        val key = container.imageDiskCache.keyFor(
+            sceneSeed(word.word, sense ?: word.meaning),
+            profile.model
+        )
+        return container.imageDiskCache.peek(key)?.absolutePath
+    }
+
+    /**
+     * 生成当前词的场景图：LLM 出英文场景描述 → 生图 API 出图 → 存盘显示。
+     *
+     * 生成中 [WordbookUiState.sceneImageLoading] 为真（按钮转 spinner），
+     * 失败或未配渠道都落到 snackbar——不弹窗、不崩溃。
+     */
+    fun generateSceneImage() {
+        val word = _uiState.value.currentWord ?: return
+        val sense = _uiState.value.currentSense ?: word.meaning
+        viewModelScope.launch {
+            if (_uiState.value.sceneImageLoading) return@launch
+            _uiState.update { it.copy(sceneImageLoading = true, sceneImagePrompt = null) }
+            val result = container.sceneImageGenerator.generate(
+                cacheKeySeed = sceneSeed(word.word, sense),
+                systemPrompt = "You describe a vivid scene for the word '${word.word}' ($sense). " +
+                    "Reply with ONLY the image prompt, 30 words max, no explanation.",
+                userPrompt = "Word: ${word.word}\nSense: $sense"
+            )
+            _uiState.update { state ->
+                when (result) {
+                    is SceneImageResult.Cached -> state.copy(
+                        sceneImageLoading = false,
+                        sceneImagePath = result.file.absolutePath
+                    )
+
+                    is SceneImageResult.Generated -> state.copy(
+                        sceneImageLoading = false,
+                        sceneImagePath = result.file.absolutePath,
+                        sceneImagePrompt = result.prompt
+                    )
+
+                    is SceneImageResult.NotConfigured -> state.copy(
+                        sceneImageLoading = false,
+                        snackbarMessage = "尚未配置生图渠道：请到设置 → 生图设置里添加一套"
+                    )
+
+                    is SceneImageResult.Failed -> state.copy(
+                        sceneImageLoading = false,
+                        snackbarMessage = result.message
+                    )
+                }
+            }
+        }
     }
 
     /**
