@@ -29,6 +29,8 @@ import com.mistakebook.ui.notebook.NotebookScreen
 import com.mistakebook.ui.print.PrintScreen
 import com.mistakebook.ui.progress.ProgressScreen
 import com.mistakebook.ui.settings.SettingsScreen
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 object Routes {
     const val HOME = "home"
@@ -93,6 +95,28 @@ fun MistakeBookNavHost(
     // 错题本页选中后回传给首页筛选。用 remember 而不是导航参数：
     // 筛选状态本来就归 HomeViewModel 管，多带一层参数只会让两边状态不同步。
     var homeNotebookPick by remember { mutableStateOf<Long?>(null) }
+    val scope = rememberCoroutineScope()
+
+    /**
+     * F6：提交整批连拍成果。drainCropped 取走文件后**不能**再清空批次
+     * ——识别任务还要读这些文件，删了就全批失败。只跳进度页第一张 task，
+     * 其余在进度页按组列表可见（groupPosition）。
+     */
+    fun submitCaptureBatch() {
+        val batch = container.captureBatch
+        // sourceIsGallery 会被 drainCropped 重置，标题要先取
+        val title = if (batch.sourceIsGallery) "相册导入" else "拍照识别"
+        val files = batch.drainCropped()
+        if (files.isEmpty()) return
+        scope.launch {
+            val ids = container.recognitionSubmitter.submitImages(files, title)
+            if (ids.isNotEmpty()) {
+                navController.navigate(Routes.progress(ids.first())) {
+                    popUpTo(Routes.HOME)
+                }
+            }
+        }
+    }
     androidx.compose.runtime.LaunchedEffect(filterDueRequest) {
         if (filterDueRequest > 0) {
             navController.navigate(Routes.HOME) {
@@ -115,6 +139,9 @@ fun MistakeBookNavHost(
                     // T11：每个相机入口都显式设置用途，不依赖默认值——
                     // 上次从对话进来残留 CHAT 的话，这里必须扳回来
                     container.cameraPurpose = AppContainer.CameraPurpose.QUESTION
+                    // F6：新拍摄会话先清掉上次可能残留的批次（兜底；
+                    // 正常路径提交/丢弃时都已清空，这里是防状态泄漏）
+                    container.captureBatch.clear()
                     navController.navigate(Routes.CAPTURE)
                 },
                 onImportPdf = { navController.navigate(Routes.PDF_IMPORT) },
@@ -179,6 +206,18 @@ fun MistakeBookNavHost(
                 onBack = {
                     container.cameraPurpose = AppContainer.CameraPurpose.QUESTION
                     navController.popBackStack()
+                },
+                onStartBatchCrop = {
+                    // F6：点「完成」。有未裁的从第一张开始逐张裁；
+                    // 若从裁切页返回后已全部裁完（paths 空、成果在册），直接提交。
+                    val batch = container.captureBatch
+                    if (batch.paths.isNotEmpty()) {
+                        navController.navigate(Routes.crop(batch.paths.first())) {
+                            popUpTo(Routes.CAPTURE) { inclusive = true }
+                        }
+                    } else {
+                        submitCaptureBatch()
+                    }
                 }
             )
         }
@@ -192,6 +231,19 @@ fun MistakeBookNavHost(
             // 与 recrop 互斥——前者要提交识别，后者只换图。
             val reRecognizeQuestionId = container.reRecognizeQuestionId
             val chatCropping = container.chatCropping
+            // F6：连拍批次模式。批次只从相机 QUESTION 链路来，与这三个模式
+            // 天然互斥；若批次偏偏非空，是状态泄漏——清掉防接力卡死
+            // （带着幽灵批次会让每张裁切完都导航去「下一张」死循环）。
+            val batchHasPending = container.captureBatch.hasPending
+            val batchMode = batchHasPending &&
+                listOf(recrop, reRecognizeQuestionId != null, chatCropping).count { it } == 0
+            if (batchHasPending && !batchMode) {
+                Log.w(
+                    "MistakeBookNavHost",
+                    "裁切页模式标志冲突: 连拍批次与 recrop/reRecognize/chat 同时激活，已丢弃批次"
+                )
+                container.captureBatch.clear()
+            }
             // 三个模式标志互斥（T11）。同时为真视为 bug：按
             // recropOnly > reRecognize > chatCropping 的优先级取第一个，
             // 其余清掉并留日志——静默择一会把产物送进错误的链路。
@@ -213,6 +265,30 @@ fun MistakeBookNavHost(
                 recropOnly = recrop,
                 reRecognizeQuestionId = reRecognizeQuestionId,
                 chatMode = chatCropping,
+                batchMode = batchMode,
+                onBatchNext = { next ->
+                    // 接力裁下一张：替换当前 crop 路由，返回栈保持 [HOME, CROP]
+                    navController.navigate(Routes.crop(next)) {
+                        popUpTo(Routes.HOME)
+                    }
+                },
+                onBatchCompleted = { submitCaptureBatch() },
+                onBatchSkip = {
+                    // 当前张原图丢失：出队跳过，不阻塞其余
+                    container.captureBatch.dropCurrent()
+                    val next = container.captureBatch.paths.firstOrNull()
+                    if (next != null) {
+                        navController.navigate(Routes.crop(next)) {
+                            popUpTo(Routes.HOME)
+                        }
+                    } else if (container.captureBatch.cropped.isNotEmpty()) {
+                        // 跳完了但前面已有成果：照常提交
+                        submitCaptureBatch()
+                    } else {
+                        // 一张都没裁成：回相机页重新来
+                        navController.navigate(Routes.CAPTURE)
+                    }
+                },
                 onChatConfirmed = {
                     // 栈此时应自然回到 ChatScreen（CAPTURE 已被 popUpTo 弹掉）
                     navController.popBackStack()
@@ -241,7 +317,16 @@ fun MistakeBookNavHost(
                     // 用户中途退出裁剪页时必须清掉来源标记，
                     // 否则下一次拍照提交会被错标成「相册导入」
                     container.cropSourceIsGallery = false
-                    navController.popBackStack()
+                    if (batchMode) {
+                        // F6：当前张没裁完，出队（计数减 1），回相机页继续攒批。
+                        // 先 pop 回 HOME 再压 CAPTURE——CROP 进栈时 CAPTURE
+                        // 已被 popUpTo 弹掉，直接 popBackStack 只会回首页。
+                        container.captureBatch.dropCurrent()
+                        navController.popBackStack()
+                        navController.navigate(Routes.CAPTURE)
+                    } else {
+                        navController.popBackStack()
+                    }
                 }
             )
         }

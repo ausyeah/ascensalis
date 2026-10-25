@@ -3,6 +3,7 @@ package com.mistakebook.ui.crop
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import android.util.Log
@@ -198,7 +199,20 @@ fun CropScreen(
      */
     chatMode: Boolean = false,
     /** 聊天附件模式确认后的退出：popBackStack 回到对话页。 */
-    onChatConfirmed: () -> Unit = {}
+    onChatConfirmed: () -> Unit = {},
+    /**
+     * 连拍批次模式（F6）：本张是批次里的一张。确认后不直接提交，
+     * 而是把成果记进 [com.mistakebook.di.AppContainer.captureBatch] 并
+     * 经 [onBatchNext] 去裁下一张；全部裁完经 [onBatchCompleted] 统一提交。
+     * 与 [recropOnly] / [reRecognizeQuestionId] / [chatMode] 互斥。
+     */
+    batchMode: Boolean = false,
+    /** 批次接力：裁完本张去裁下一张（NavHost 导航到下一张 crop 路由）。 */
+    onBatchNext: (String) -> Unit = {},
+    /** 批次全部裁完：NavHost 取走成果提交识别并跳进度页。 */
+    onBatchCompleted: () -> Unit = {},
+    /** 批次里当前张的原图丢失：跳过它（toast 后由 NavHost 出队并推进）。 */
+    onBatchSkip: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -351,6 +365,20 @@ fun CropScreen(
                         color = Color.White,
                         textAlign = TextAlign.Center
                     )
+                    // F6：批次里某张原图丢失（被清理/导入失败）时，让用户跳过它
+                    // 继续裁后面的，不阻塞整批
+                    if (batchMode) {
+                        TextButton(onClick = {
+                            Toast.makeText(
+                                context,
+                                R.string.capture_batch_skip_missing,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            onBatchSkip()
+                        }) {
+                            Text(stringResource(R.string.crop_skip), color = Color.White)
+                        }
+                    }
                     TextButton(onClick = onBack) {
                         Text(stringResource(R.string.crop_back), color = Color.White)
                     }
@@ -624,6 +652,21 @@ fun CropScreen(
                             )
                         }
                         if (saved != null) {
+                            // 连拍批次（F6）：成果入账，队列推进；最后一张才统一提交。
+                            // 批次标题用批次自带的来源标志（cropSourceIsGallery 在第一张
+                            // 提交后即被清掉，跨张会丢），单张流程才用它。
+                            if (batchMode) {
+                                sessionStore.clear(imagePath)
+                                container.cropSourceIsGallery = false
+                                container.captureBatch.commitCropped(saved.absolutePath)
+                                val next = container.captureBatch.paths.firstOrNull()
+                                if (next != null) {
+                                    onBatchNext(next)
+                                } else {
+                                    onBatchCompleted()
+                                }
+                                return@launch
+                            }
                             val title = if (container.cropSourceIsGallery) {
                                 "相册导入"
                             } else {
