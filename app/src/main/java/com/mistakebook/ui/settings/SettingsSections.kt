@@ -942,10 +942,16 @@ internal fun MineruKeySection(
 }
 
 /**
- * 识别方式：仅 MinerU / 大模型直连 / 自动（MinerU 优先，不可用落大模型）。
+ * 识别方式：仅 MinerU / 识图模型 / 当前模型 / 自动（自动回落链）。
  *
  * 放在 MinerU 配置之后、大模型配置之前——这里是两条路的「路口」，
  * 两条路各自的配置刚展示完，用户在这里决定拍照后走哪条。
+ *
+ * 四个选项（v0.0.49 补齐「识图模型」与「当前模型」两个）：
+ * - 仅 MinerU：只用 MinerU 解析。
+ * - 识图模型：只用**用户单独配置的识图模型**看原图（主对话模型识不识图都行）。
+ * - 当前模型：用**当前会话/默认的大模型**看原图。
+ * - 自动：按「MinerU → 当前模型 → 识图模型」的顺序回落，任一环节失败不中断。
  */
 @Composable
 internal fun RecognitionModeSection(
@@ -956,9 +962,8 @@ internal fun RecognitionModeSection(
     val mode = snapshot.recognitionMode
     val profile = state.activeProfile
     // 大模型这条路通不通：没配任何模型，或当前模型不能识图，都算不通。
-    // AUTO 模式下 MinerU 配了 Key 仍可用，只丢大模型兜底，提示降级即可；
-    // LLM 模式下大模型是唯一去路，必须醒目警告。
     val llmPathBlocked = profile == null || !profile.supportsVision
+    val visionReady = snapshot.visionConfigured
     SettingsGroup(title = stringResource(R.string.settings_recognition_title)) {
         Text(
             text = stringResource(R.string.settings_recognition_desc),
@@ -966,35 +971,51 @@ internal fun RecognitionModeSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = mode == RecognitionMode.MINERU,
-                onClick = { viewModel.setRecognitionMode(RecognitionMode.MINERU) },
-                label = { Text(stringResource(R.string.settings_recognition_mineru)) },
-                modifier = Modifier.weight(1f)
-            )
-            FilterChip(
-                selected = mode == RecognitionMode.LLM,
-                onClick = { viewModel.setRecognitionMode(RecognitionMode.LLM) },
-                label = { Text(stringResource(R.string.settings_recognition_llm)) },
-                modifier = Modifier.weight(1f)
-            )
-            FilterChip(
-                selected = mode == RecognitionMode.AUTO,
-                onClick = { viewModel.setRecognitionMode(RecognitionMode.AUTO) },
-                label = { Text(stringResource(R.string.settings_recognition_auto)) },
-                modifier = Modifier.weight(1f)
-            )
+        // 四个选项分两行放：一行四个会挤到标签只剩半个字。
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = mode == RecognitionMode.MINERU,
+                    onClick = { viewModel.setRecognitionMode(RecognitionMode.MINERU) },
+                    label = { Text(stringResource(R.string.settings_recognition_mineru)) },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = mode == RecognitionMode.VISION,
+                    onClick = { viewModel.setRecognitionMode(RecognitionMode.VISION) },
+                    label = { Text(stringResource(R.string.settings_recognition_vision)) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = mode == RecognitionMode.CURRENT,
+                    onClick = { viewModel.setRecognitionMode(RecognitionMode.CURRENT) },
+                    label = { Text(stringResource(R.string.settings_recognition_llm)) },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = mode == RecognitionMode.AUTO,
+                    onClick = { viewModel.setRecognitionMode(RecognitionMode.AUTO) },
+                    label = { Text(stringResource(R.string.settings_recognition_auto)) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(
             text = when (mode) {
                 RecognitionMode.MINERU ->
                     stringResource(R.string.settings_recognition_hint_mineru)
-                RecognitionMode.LLM ->
+                RecognitionMode.VISION ->
+                    stringResource(R.string.settings_recognition_hint_vision)
+                RecognitionMode.CURRENT ->
                     stringResource(R.string.settings_recognition_hint_llm)
                 RecognitionMode.AUTO ->
                     stringResource(R.string.settings_recognition_hint_auto)
@@ -1002,7 +1023,8 @@ internal fun RecognitionModeSection(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        if (mode != RecognitionMode.MINERU && llmPathBlocked) {
+        // 「当前模型」这条路必须醒目警告：它不通时整条识别直接失败。
+        if (mode == RecognitionMode.CURRENT && llmPathBlocked) {
             Spacer(Modifier.height(10.dp))
             Surface(
                 shape = MaterialTheme.shapes.small,
@@ -1021,11 +1043,34 @@ internal fun RecognitionModeSection(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = if (mode == RecognitionMode.LLM) {
-                            stringResource(R.string.settings_recognition_warn_llm)
-                        } else {
-                            stringResource(R.string.settings_recognition_warn_auto)
-                        },
+                        text = stringResource(R.string.settings_recognition_warn_llm),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
+        // 「识图模型」没配时也要提示——否则用户选了才发现这条路是空的。
+        if (mode == RecognitionMode.VISION && !visionReady) {
+            Spacer(Modifier.height(10.dp))
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.settings_recognition_warn_vision),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )

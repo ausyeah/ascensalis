@@ -929,6 +929,7 @@ class ChatViewModel(
             questionId = questionId,
             supportsVision = effectiveProfile.supportsVision,
             visionToolAvailable = settingsStore.snapshotNow().visionConfigured,
+            ocrToolAvailable = settingsStore.snapshotNow().mineruConfigured,
             // 批改指令与题目上下文拼进同一条 system 消息（ChatRepository）；
             // 不开批改时传空串——普通对话的上下文与 v0.0.33 逐字一致
             gradingInstruction = if (grading) ChatPrompts.GRADING_INSTRUCTION else ""
@@ -1064,144 +1065,64 @@ class ChatViewModel(
         try {
             val settings = settingsStore.settings.first()
 
-            // 有识图工具可用、或用户明确「仅大模型识图」时，**不再自动用
-            // MinerU 预处理每张图**：
+            // **会话里不再自动预识别**（v0.0.49）。
             //
-            // 1. 用户在设置里选了「仅大模型」就是不想依赖 MinerU
-            //    （以前这条设置只管拍照识别，对话里照旧先烧一次 MinerU——
-            //    选了等于没选，这是必须修的）；
-            // 2. 配了识图模型时，图由模型**按需**调识图工具去看，
-            //    MinerU 按页计费，不管用不用都跑一遍太贵。
+            // 用户诉求：「会话里的逻辑不一样，mineru 速度很慢，会话里这些都
+            // 作为工具可以调用，模型自己决定用不用工具」。
             //
-            // 这两种情况下 MinerU 仍然可用——只是从「每图必跑」变成
-            // 对话里的一个 ocr_image 工具，模型想读才读。
-            if (settings.visionConfigured ||
-                settings.recognitionMode == com.mistakebook.data.prefs.RecognitionMode.LLM
-            ) {
-                _state.value = _state.value.copy(ocrStage = null)
-                return
-            }
-            if (!settings.mineruConfigured) {
-                // 没配 MinerU Key 就别白跑一趟。用常驻通知而不是一次性 toast——
-                // 这个原因不会自己消失，用户回到应用时还得看见它。
-                _state.value = _state.value.copy(
-                    ocrStage = null,
-                    ocrNotice = "当前模型看不到图片，需要先用 MinerU 把图转成文字，" +
-                        "但还没有配置 MinerU Key。去设置里配置后，可点右侧「重试」。"
-                )
-                return
-            }
+            // 这里只做一件事：**确认模型有办法读到图**。
+            // - 模型支持识图：图片本体直接随请求发出，不需要任何预处理；
+            // - 模型不识图但配了识图模型 / MinerU：它们分别是
+            //   describe_image / ocr_image 工具，模型按需调用；
+            // - 两者都没有：模型物理上读不到图，只能如实告诉用户。
+            //
+            // 关键的一点：**图片附件仍然会进请求上下文**（见
+            // `ChatRepository.attachmentManifest`），模型知道有图、
+            // 知道该调哪个工具——早先这里预跑一次 MinerU，模型既看不到图、
+            // 也拿不到工具，纯属白烧一次按页计费的额度。
+            val profile = settings.activeProfile
+            val modelCanSee = profile?.supportsVision == true
+            val hasVisionTool = settings.visionConfigured
+            val hasOcrTool = settings.mineruConfigured
             val pending = repository.imageAttachmentsWithoutOcr(sessionId)
-            if (pending.isEmpty()) {
-                _state.value = _state.value.copy(ocrStage = null)
+
+            if (modelCanSee || pending.isEmpty()) {
+                _state.value = _state.value.copy(ocrStage = null, ocrNotice = null)
                 return
             }
-            val failureReasons = mutableListOf<String>()
-            for ((index, attachment) in pending.withIndex()) {
-                _state.value = _state.value.copy(
-                    ocrStage = "正在用 MinerU 识别图片（${index + 1}/${pending.size}）…"
-                )
-                val file = java.io.File(attachment.localPath)
-                if (!file.exists()) {
-                    // 文件没了（被清理或没拷完）：记一条说明，
-                    // 否则它会永远待在待识别队列里，每轮重传一次。
-                    markOcrFailed(attachment, "图片文件不存在")
-                    failureReasons += "图片文件不存在"
-                    continue
-                }
-                // 本会话已认真试过的图不重传（正常不会走到这——失败说明已落库；
-                // 这是落库失败时的兜底）
-                if (imageOcr.alreadyTried(file)) continue
-                val result = imageOcr.recognize(
-                    sessionId = sessionId,
-                    imageFile = file,
-                    settings = settings,
-                    onStage = { stage ->
-                        _state.value = _state.value.copy(
-                            ocrStage = "正在用 MinerU 识别图片（${index + 1}/${pending.size}）：$stage"
-                        )
-                    }
-                )
-                when (result) {
-                    is com.mistakebook.net.ApiResult.Success -> {
-                        if (result.data.isNotBlank()) {
-                            repository.updateAttachmentOcr(attachment.id, result.data)
-                        } else {
-                            // 跑通了但没抽到字：同样记一笔，别让下一句话再烧一次额度
-                            markOcrFailed(attachment, "MinerU 已返回，但图里没有识别出文字")
-                            failureReasons += "图里没有识别出文字"
-                        }
-                    }
-
-                    is com.mistakebook.net.ApiResult.Failure -> {
-                        // 单张失败不中断后面的：一张图识别不出来，
-                        // 不该让整会话的其他图都不识别。
-                        // 网络类失败带上当前出口模式（用户反馈「切换代理/直连
-                        // 没发挥作用」——把决策面亮出来，切换效果立刻可对账）。
-                        val reason = result.error.serverMessage.ifBlank { "识别请求失败" } +
-                            if (result.error.kind == com.mistakebook.net.ApiErrorKind.NETWORK ||
-                                result.error.kind == com.mistakebook.net.ApiErrorKind.TIMEOUT
-                            ) "（出口：${com.mistakebook.net.NetworkRouter.describe()}）" else ""
-                        Log.w(TAG, "图片 OCR 失败: ${attachment.fileName} / $reason")
-                        markOcrFailed(attachment, reason)
-                        failureReasons += reason
-                    }
-                }
+            if (hasVisionTool || hasOcrTool) {
+                // 有工具可用：交给模型自己决定要不要读。
+                _state.value = _state.value.copy(ocrStage = null, ocrNotice = null)
+                return
             }
+            // 没有任何一条能读到图的路径：如实告诉用户，别让模型对着空气瞎猜。
             _state.value = _state.value.copy(
                 ocrStage = null,
-                ocrNotice = if (failureReasons.isEmpty()) {
-                    null
-                } else {
-                    buildOcrNotice(failureReasons)
-                }
+                ocrNotice = "当前模型（${profile?.model ?: "未配置"}）看不到图片，" +
+                    "也没有配置识图模型或 MinerU，无法读取图片内容。" +
+                    "请到设置里配置识图模型（设置 → 大模型 → 识图模型），" +
+                    "或换用支持识图的模型。"
             )
         } catch (cancelled: CancellationException) {
-            // 用户按了停止：进度条必须撤掉，不能卡在「正在识别」——
-            // 撤了才重抛，state 写入不是挂起函数，取消态下照样能执行。
             _state.value = _state.value.copy(ocrStage = null)
             throw cancelled
         } catch (t: Throwable) {
-            Log.w(TAG, "图片 OCR 任务异常", t)
-            _state.value = _state.value.copy(
-                ocrStage = null,
-                ocrNotice = buildOcrNotice(listOf(t.message ?: "识别任务异常"))
-            )
-        }
-    }
-
-    /** 把一条失败说明写进附件：不重传 + 模型知道 + 用户看得见。 */
-    private suspend fun markOcrFailed(attachment: ChatAttachment, reason: String) {
-        runCatching { repository.updateAttachmentOcr(attachment.id, ChatOcrText.failureNote(reason)) }
-            .onFailure { Log.w(TAG, "写入 OCR 失败说明失败: ${attachment.fileName}", it) }
-    }
-
-    /** 通知条文案：第一张的原因 + 总数。MinerU 的文案可能很长，只取代表性的那条。 */
-    private fun buildOcrNotice(reasons: List<String>): String {
-        val first = reasons.firstOrNull { it.isNotBlank() }?.take(120).orEmpty()
-        val count = reasons.size
-        return if (count <= 1) {
-            "图片识别失败：$first 已如实告知模型这张图没能读出来；" +
-                "网络或额度恢复后可点右侧「重试」。"
-        } else {
-            "$count 张图片识别失败，第一张的原因：$first " +
-                "已如实告知模型这些图没能读出来；恢复后可点右侧「重试」。"
+            Log.w(TAG, "图片可读性检查异常", t)
+            _state.value = _state.value.copy(ocrStage = null)
         }
     }
 
     /**
      * 重试识别失败的图片（通知条上的「重试」）。
      *
-     * 网断了、额度没了导致的失败不该是终局：把失败说明清掉、
-     * 撤掉内存里的「已尝试」标记，重新跑一遍 [ensureImageOcr]。
-     * 全部成功则通知条自动消失。
+     * 会话里图片由**工具**按需读取，不再有「待识别队列」——
+     * 但工具调用本身可能失败（网络、额度）。这个入口把失败说明清掉，
+     * 让模型下一轮能重新调工具。
      */
     fun retryOcr() {
         val sessionId = _state.value.sessionId
         // 流式进行中不重试：那一轮的请求早就带着现状发出去了，
         // 现在补识别只对下一轮有用，没理由和生成中的界面抢 attention。
-        // 已经有一轮 OCR 在跑也同样不重试——两个 ensureImageOcr 并发
-        // 会重复处理同一批图。
         if (sessionId == 0L || _state.value.isStreaming || ocrJob?.isActive == true) return
         viewModelScope.launch {
             _state.value = _state.value.copy(ocrNotice = null)
@@ -1214,12 +1135,6 @@ class ChatViewModel(
                         .takeIf { it.exists() }
                         ?.let { imageOcr.forget(it) }
                 }
-                ocrJob = currentCoroutineContext()[Job]
-                try {
-                    ensureImageOcr(sessionId)
-                } finally {
-                    ocrJob = null
-                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (t: Throwable) {
@@ -1228,7 +1143,6 @@ class ChatViewModel(
             }
         }
     }
-
 
     // ------------------------------------------------------------ 附件
 

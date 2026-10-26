@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
@@ -1857,52 +1858,157 @@ internal fun StatsView(
 
         // 打卡海报（F-IMG-2）：本地 Canvas 渲染的一张图，
         // 不经过任何生图 API——数据是本地统计，画也是本地画。
+        //
+        // v0.0.49 补两个生图入口：
+        // - 「背景图生成打卡」：生图模型只出背景，文字仍由本地 Canvas 画
+        //   （中文清晰、数字绝对准确）；
+        // - 「生图打卡」：文字内容也交给生图模型一起画（风格自由，
+        //   但生图模型写中文偶尔会出错）。
         item {
             val context = LocalContext.current
             val scope = rememberCoroutineScope()
             var generating by remember { mutableStateOf(false) }
-            OutlinedButton(
-                onClick = {
-                    if (generating) return@OutlinedButton
-                    generating = true
-                    scope.launch {
-                        val uri = withContext(Dispatchers.IO) {
-                            val bitmap = renderCheckInPoster(buildPosterData(state))
-                            savePosterToGallery(
-                                context = context,
-                                bitmap = bitmap,
-                                displayName = "登临打卡-${System.currentTimeMillis()}.png"
-                            )
-                        }
-                        generating = false
-                        if (uri != null) {
-                            sharePoster(context, uri)
-                        } else {
-                            viewModel.showMessage("海报保存失败，请检查相册权限")
-                        }
-                    }
-                },
-                enabled = !generating,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (generating) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp
+            // 三个入口共用一个 loading：生图很慢，两个按钮同时转圈没意义。
+            var generatingMode by remember { mutableStateOf<String?>(null) }
+
+            suspend fun saveAndShare(bitmap: android.graphics.Bitmap) {
+                val uri = withContext(Dispatchers.IO) {
+                    savePosterToGallery(
+                        context = context,
+                        bitmap = bitmap,
+                        displayName = "登临打卡-${System.currentTimeMillis()}.png"
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text("生成中…")
+                }
+                if (uri != null) {
+                    sharePoster(context, uri)
                 } else {
-                    Icon(
-                        Icons.Default.Share,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("生成打卡海报")
+                    viewModel.showMessage("海报保存失败，请检查相册权限")
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        generating = true
+                        scope.launch {
+                            val bitmap = withContext(Dispatchers.Default) {
+                                com.mistakebook.poster.PosterRenderer.render(buildPosterContent(state))
+                            }
+                            saveAndShare(bitmap)
+                            generating = false
+                        }
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (generating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生成中…")
+                    } else {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生成打卡海报")
+                    }
+                }
+
+                // ---- 生图入口 1：只生成背景，文字本地叠 ----
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        generating = true
+                        generatingMode = "background"
+                        viewModel.generateCheckInPoster(
+                            mode = com.mistakebook.poster.PosterImageMode.BACKGROUND,
+                            onBitmap = { bitmap ->
+                                scope.launch { saveAndShare(bitmap) }
+                                generating = false
+                                generatingMode = null
+                            },
+                            onFailed = { message ->
+                                generating = false
+                                generatingMode = null
+                                viewModel.showMessage(message)
+                            }
+                        )
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (generatingMode == "background") {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图背景中…")
+                    } else {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("用背景图生成打卡")
+                    }
+                }
+
+                // ---- 生图入口 2：文字也交给生图模型 ----
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        generating = true
+                        generatingMode = "full"
+                        viewModel.generateCheckInPoster(
+                            mode = com.mistakebook.poster.PosterImageMode.FULL,
+                            onBitmap = { bitmap ->
+                                scope.launch { saveAndShare(bitmap) }
+                                generating = false
+                                generatingMode = null
+                            },
+                            onFailed = { message ->
+                                generating = false
+                                generatingMode = null
+                                viewModel.showMessage(message)
+                            }
+                        )
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (generatingMode == "full") {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图中…")
+                    } else {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图打卡")
+                    }
                 }
             }
         }

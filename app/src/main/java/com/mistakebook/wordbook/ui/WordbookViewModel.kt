@@ -1518,6 +1518,39 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         _uiState.update { it.copy(snackbarMessage = null) }
     }
 
+    // ------------------------------------------------------------ 打卡海报（v0.0.49）
+
+    /**
+     * 生成打卡海报。
+     *
+     * @param mode [PosterImageMode.BACKGROUND] 生图模型只出背景、文字本地画；
+     *   [PosterImageMode.FULL] 生图模型连文字一起画。
+     *
+     * @param onBitmap 成功后回调（界面拿去存相册 + 分享）。
+     * @param onFailed 失败时回调（界面撤掉 loading 并提示）。
+     */
+    fun generateCheckInPoster(
+        mode: com.mistakebook.poster.PosterImageMode,
+        onBitmap: (android.graphics.Bitmap) -> Unit,
+        onFailed: (String) -> Unit = { showMessage(it) }
+    ) {
+        val state = _uiState.value
+        viewModelScope.launch {
+            val content = buildPosterContent(state)
+            when (val result = container.posterImageService.generate(content, mode)) {
+                is com.mistakebook.net.ApiResult.Success -> {
+                    withContext(Dispatchers.Main) { onBitmap(result.data) }
+                }
+
+                is com.mistakebook.net.ApiResult.Failure -> {
+                    val message =
+                        "海报生成失败：${result.error.serverMessage.ifBlank { "请检查生图配置" }}"
+                    withContext(Dispatchers.Main) { onFailed(message) }
+                }
+            }
+        }
+    }
+
     private fun getStartOfDayMillis(): Long {
         val calendar = Calendar.getInstance()
         calendar.set(Calendar.HOUR_OF_DAY, 0)

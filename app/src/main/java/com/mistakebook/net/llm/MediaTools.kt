@@ -6,6 +6,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
@@ -56,6 +57,17 @@ object MediaTools {
                             buildJsonObject {
                                 put("type", "string")
                                 put("description", "你想从这张图里知道什么")
+                            }
+                        )
+                        put(
+                            "image_index",
+                            buildJsonObject {
+                                put("type", "integer")
+                                put(
+                                    "description",
+                                    "要读第几张图片，从 1 开始，按附件清单里的顺序。" +
+                                        "省略则读最近发的那一张"
+                                )
                             }
                         )
                     }
@@ -117,6 +129,17 @@ object MediaTools {
                                 put("description", "你想从图里读到什么；只要全文就填「完整转录图中的所有文字」")
                             }
                         )
+                        put(
+                            "image_index",
+                            buildJsonObject {
+                                put("type", "integer")
+                                put(
+                                    "description",
+                                    "要读第几张图片，从 1 开始，按附件清单里的顺序。" +
+                                        "省略则读最近发的那一张"
+                                )
+                            }
+                        )
                     }
                 )
                 put("required", buildJsonArray { add(JsonPrimitive("question")) })
@@ -155,5 +178,19 @@ object MediaTools {
         return runCatching { value.jsonPrimitive.contentOrNull }.getOrNull()
             ?.trim()
             ?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * 从模型的 arguments JSON 里取一个整数字段（**纯函数，可单测**）。
+     *
+     * 模型常把整数写成字符串（`"image_index": "2"`），两种都要认。
+     * 取不到或不是正数时返回 null（调用方按「未指定」处理）。
+     */
+    fun integerArgument(arguments: String, key: String): Int? {
+        if (arguments.isBlank()) return null
+        val element = runCatching { Json.parseToJsonElement(arguments) }.getOrNull() ?: return null
+        val value = runCatching { element.jsonObject[key] }.getOrNull() ?: return null
+        val number = runCatching { value.jsonPrimitive.intOrNull }.getOrNull() ?: return null
+        return number.takeIf { it >= 1 }
     }
 }

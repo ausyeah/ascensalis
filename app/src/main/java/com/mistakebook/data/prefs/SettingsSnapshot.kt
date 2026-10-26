@@ -22,23 +22,33 @@ enum class ThemeMode {
 /**
  * 题目识别方式（拍照/导入错题时，「图 → 文字」这一步走哪条路）。
  *
+ * 四个选项（v0.0.49 补齐）：
  * - [MINERU]：只用 MinerU（老行为）。没配 Key 时按「请配置 Key」失败。
- * - [LLM]：只用大模型——可识图模型直接看原图、输出结构化题目，
- *   完全不依赖 MinerU。当前模型不支持识图时按「请换识图模型」失败。
- * - [AUTO]（默认）：MinerU 优先；**MinerU 不可用（没配 Key / 调用失败）
- *   时自动落到大模型**——用户诉求「mineru 不可用的时候多一条路」。
- *   两者都不可用才失败，错误信息会把两条路都说清楚。
+ * - [CURRENT]：只用**当前会话/当前默认的大模型**——可识图模型直接看原图、
+ *   输出结构化题目，完全不依赖 MinerU。当前模型不支持识图时按「请换识图
+ *   模型」失败。
+ * - [VISION]：只用**用户单独配置的识图模型**（设置 → 大模型 → 识图模型）。
+ *   主对话模型再笨也没关系——识图是另一套配置。
+ * - [AUTO]（默认）：**自动回落链**，依次尝试：
+ *   ① MinerU（可用就用）；② MinerU 失败则用当前默认大模型直连；
+ *   ③ 当前默认大模型不识图则用配置的识图模型；④ 最后把拿到的文字交回
+ *   大模型整理。**中途失败不弹失败**，只在整条链都不通时才报错。
+ *
+ * 历史键名兼容：[fromKey] 把旧的 `llm` 当作 [CURRENT]。
  */
 enum class RecognitionMode {
     MINERU,
-    LLM,
+    CURRENT,
+    VISION,
     AUTO;
 
     companion object {
         fun fromKey(key: String?): RecognitionMode = when (key?.lowercase()) {
-            "llm" -> LLM
+            // 旧键名 `llm` = 「用大模型直连」= 现在的「当前模型」。
+            "llm", "current" -> CURRENT
+            "vision" -> VISION
             "auto" -> AUTO
-            else -> MINERU
+            else -> AUTO
         }
     }
 }

@@ -236,6 +236,15 @@ class AppContainer(context: Context) {
     }
 
     /**
+     * 海报生图：打卡海报（词库统计页 / 番茄钟统计页）共用。
+     *
+     * 两种模式：只生背景（文字本地画，数字准确）或整图交给生图模型。
+     */
+    val posterImageService: com.mistakebook.poster.PosterImageService by lazy {
+        com.mistakebook.poster.PosterImageService(imageGenClient, imageDiskCache, settingsStore)
+    }
+
+    /**
      * 对话流式客户端。
      *
      * 传的是**同一个** [httpClient]：`ChatCompletionStream` 内部会派生出

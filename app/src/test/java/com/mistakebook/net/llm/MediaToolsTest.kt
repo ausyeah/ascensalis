@@ -49,6 +49,32 @@ class MediaToolsTest {
     }
 
     @Test
+    fun `取到整数参数`() {
+        assertEquals(
+            2,
+            MediaTools.integerArgument("""{"image_index":2}""", "image_index")
+        )
+    }
+
+    @Test
+    fun `整数参数写成字符串时也认`() {
+        assertEquals(
+            3,
+            MediaTools.integerArgument("""{"image_index":"3"}""", "image_index")
+        )
+    }
+
+    @Test
+    fun `整数参数缺失或非法时返回 null`() {
+        assertNull(MediaTools.integerArgument("""{"question":"x"}""", "image_index"))
+        assertNull(MediaTools.integerArgument("""{"image_index":0}""", "image_index"))
+        assertNull(MediaTools.integerArgument("""{"image_index":-1}""", "image_index"))
+        assertNull(MediaTools.integerArgument("""{"image_index":"abc"}""", "image_index"))
+        assertNull(MediaTools.integerArgument("这不是 JSON", "image_index"))
+        assertNull(MediaTools.integerArgument("", "image_index"))
+    }
+
+    @Test
     fun `工具按配置装配`() {
         assertTrue(MediaTools.all(visionConfigured = false, imageConfigured = false).isEmpty())
         assertEquals(

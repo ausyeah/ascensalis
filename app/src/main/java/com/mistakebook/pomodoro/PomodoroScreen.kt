@@ -49,9 +49,11 @@ import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.UploadFile
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -72,6 +74,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +89,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -94,7 +98,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.mistakebook.data.local.entities.PomodoroTask
 import com.mistakebook.data.local.entities.Subject
 import com.mistakebook.di.AppContainer
@@ -142,7 +149,8 @@ fun PomodoroScreen(container: AppContainer) {
             dao = c.pomodoroDao,
             subjectDao = c.subjectDao,
             timer = c.pomodoroTimer,
-            subjectsFlow = c.subjectsFlow
+            subjectsFlow = c.subjectsFlow,
+            posterImageService = c.posterImageService
         )
     }
     val state by viewModel.ui.collectAsStateWithLifecycle()
@@ -218,6 +226,9 @@ fun PomodoroScreen(container: AppContainer) {
                     onShiftDay = viewModel::shiftSingleDay,
                     onResetStats = viewModel::resetStats,
                     onManualEntry = { viewModel.openManualEntry() },
+                    onGeneratePoster = { mode, onBitmap, onFailed ->
+                        viewModel.generateFocusPoster(mode, onBitmap, onFailed)
+                    },
                     onImportCsv = {
                         csvLauncher.launch(
                             arrayOf(
@@ -1451,7 +1462,18 @@ internal fun StatsTab(
     onShiftDay: (Long) -> Unit,
     onResetStats: () -> Unit,
     onImportCsv: () -> Unit,
-    onManualEntry: () -> Unit
+    onManualEntry: () -> Unit,
+    /**
+     * 生成「今日专注」打卡海报。
+     *
+     * 与词库统计页的「打卡海报」共用同一条流水线（本地渲染 / 背景图生图 /
+     * 整图生图），只是数据口径不同。
+     */
+    onGeneratePoster: (
+        mode: com.mistakebook.poster.PosterImageMode,
+        onBitmap: (android.graphics.Bitmap) -> Unit,
+        onFailed: (String) -> Unit
+    ) -> Unit = { _, _, _ -> }
 ) {
     var confirmReset by remember { mutableStateOf(false) }
     // 翻页位置留在 LazyColumn 的 state 里：切去计时页再回来，
@@ -1743,6 +1765,144 @@ internal fun StatsTab(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StatCell("坚持天数", "${state.activeDays} 天", Modifier.weight(1f))
                     StatCell("跨度", "${state.activeMonths} 个月", Modifier.weight(1f))
+                }
+            }
+        }
+
+        // ---- 今日专注打卡海报（v0.0.49）----
+        //
+        // 与词库统计页的「打卡海报」是同一套东西：本地渲染 / 生图背景 / 整图生图。
+        // 这里讲的是**专注**，那边讲的是**背单词**。
+        item {
+            val context = LocalContext.current
+            val scope = rememberCoroutineScope()
+            var generating by remember { mutableStateOf(false) }
+            var generatingMode by remember { mutableStateOf<String?>(null) }
+
+            suspend fun saveAndShare(bitmap: android.graphics.Bitmap) {
+                val uri = withContext(Dispatchers.IO) {
+                    com.mistakebook.wordbook.ui.savePosterToGallery(
+                        context = context,
+                        bitmap = bitmap,
+                        displayName = "登临专注打卡-${System.currentTimeMillis()}.png"
+                    )
+                }
+                if (uri != null) {
+                    com.mistakebook.wordbook.ui.sharePoster(context, uri)
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        generating = true
+                        scope.launch {
+                            val bitmap = withContext(Dispatchers.Default) {
+                                com.mistakebook.poster.PosterRenderer.render(
+                                    buildPomodoroPosterContent(state)
+                                )
+                            }
+                            saveAndShare(bitmap)
+                            generating = false
+                        }
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (generating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生成中…")
+                    } else {
+                        Icon(
+                            Icons.Outlined.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生成今日专注打卡")
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        generating = true
+                        generatingMode = "background"
+                        onGeneratePoster(
+                            com.mistakebook.poster.PosterImageMode.BACKGROUND,
+                            { bitmap ->
+                                scope.launch { saveAndShare(bitmap) }
+                                generating = false
+                                generatingMode = null
+                            },
+                            { message ->
+                                generating = false
+                                generatingMode = null
+                            }
+                        )
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (generatingMode == "background") {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图背景中…")
+                    } else {
+                        Spacer(Modifier.width(8.dp))
+                        Text("用背景图生成打卡")
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        generating = true
+                        generatingMode = "full"
+                        onGeneratePoster(
+                            com.mistakebook.poster.PosterImageMode.FULL,
+                            { bitmap ->
+                                scope.launch { saveAndShare(bitmap) }
+                                generating = false
+                                generatingMode = null
+                            },
+                            { message ->
+                                generating = false
+                                generatingMode = null
+                            }
+                        )
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (generatingMode == "full") {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图中…")
+                    } else {
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图打卡")
+                    }
                 }
             }
         }

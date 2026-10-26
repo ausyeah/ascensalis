@@ -4,10 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Typeface
 import android.os.Build
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
@@ -36,141 +32,32 @@ import java.util.Locale
 // [CheckInPosterData] 与 [buildPosterData] 在同包的 CheckInPosterData.kt：
 // 那边没有 Android 依赖，海报上的数字可以 JVM 单测。
 
-private const val POSTER_WIDTH = 1080
-private const val POSTER_HEIGHT = 1620
 
 // 固定浅色纸感配色（不跟主题，见文件头注释）。
 // 用 Color.parseColor 而不是 0xFFxxxxxx 字面量：后者超过 Int 上界时
 // Kotlin 推断成 Long，再 toInt() 回来是个负数，读代码的人得在脑子里
 // 补一次补码转换才能确认颜色，纯属自找麻烦。
-private val BG_COLOR = Color.parseColor("#F6F4EE")       // PaperBgLight
-private val PRIMARY_COLOR = Color.parseColor("#3B5BDB")  // PaperPrimary
-private val INK_COLOR = Color.parseColor("#1F2430")
-private val MUTED_COLOR = Color.parseColor("#6B7280")
-private val LINE_COLOR = Color.parseColor("#DAD5C9")
-private val OK_COLOR = Color.parseColor("#087F5B")       // PaperOk
-private val BAND_TEXT_COLOR = Color.parseColor("#CCFFFFFF")
 
-/** 渲染一张 1080×1620 的打卡海报。 */
-fun renderCheckInPoster(data: CheckInPosterData): Bitmap {
-    val bitmap = Bitmap.createBitmap(POSTER_WIDTH, POSTER_HEIGHT, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    canvas.drawColor(BG_COLOR)
-
-    // 顶部主色带：海报的第一眼，把「Day N」托住。
-    canvas.drawRect(0f, 0f, POSTER_WIDTH.toFloat(), 260f, fillPaint(PRIMARY_COLOR))
-
-    val sans = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
-    val bold = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-
-    // ---- 顶部：日期 + 背单词 Day N ----
-    canvas.drawTextCentered(
-        text = data.dateText,
-        cx = POSTER_WIDTH / 2f,
-        y = 96f,
-        paint = textPaint(36f, BAND_TEXT_COLOR, sans)
+/**
+ * 渲染一张 1080×1620 的打卡海报。
+ *
+ * v0.0.49 起统一走 [com.mistakebook.poster.PosterRenderer]：
+ * 本地渲染、生图背景、整图生图三种模式共用同一套版式代码，
+ * 免得「词库打卡」和「番茄打卡」两套画法越走越偏。
+ */
+fun renderCheckInPoster(data: CheckInPosterData): Bitmap =
+    com.mistakebook.poster.PosterRenderer.render(
+        com.mistakebook.poster.PosterContent(
+            dateText = data.dateText,
+            headline = "背单词 Day ${data.streakDays}",
+            stats = listOf(
+                com.mistakebook.poster.PosterStat("学过", "${data.studiedToday}", "词"),
+                com.mistakebook.poster.PosterStat("正确率", data.accuracyText(), emphasis = true),
+                com.mistakebook.poster.PosterStat("目标", "${data.dailyGoal}", "词")
+            ),
+            footerText = "登临 · 错题本"
+        )
     )
-    canvas.drawTextCentered(
-        text = "背单词 Day ${data.streakDays}",
-        cx = POSTER_WIDTH / 2f,
-        y = 190f,
-        paint = textPaint(76f, Color.WHITE, bold)
-    )
-
-    // ---- 中间：今日三项数据（大字号 + 分隔线）----
-    val midTop = 380f
-    canvas.drawTextCentered(
-        text = "今日学习",
-        cx = POSTER_WIDTH / 2f,
-        y = midTop,
-        paint = textPaint(34f, MUTED_COLOR, sans)
-    )
-
-    val rowH = 150f
-    drawStatRow(canvas, "学过", "${data.studiedToday}", "词", midTop + rowH, bold, sans, INK_COLOR)
-    drawDivider(canvas, midTop + rowH + 44f)
-    drawStatRow(canvas, "正确率", data.accuracyText(), "", midTop + rowH * 2, bold, sans, OK_COLOR)
-    drawDivider(canvas, midTop + rowH * 2 + 44f)
-    drawStatRow(canvas, "目标", "${data.dailyGoal}", "词", midTop + rowH * 3, bold, sans, INK_COLOR)
-
-    // ---- 底部：累计掌握 + App 名 + 装饰线条 ----
-    val bottomTop = POSTER_HEIGHT - 300f
-    drawDivider(canvas, bottomTop - 40f)
-    canvas.drawTextCentered(
-        text = "累计掌握 ${data.masteredCount} 词",
-        cx = POSTER_WIDTH / 2f,
-        y = bottomTop + 60f,
-        paint = textPaint(44f, INK_COLOR, bold)
-    )
-    // 淡色装饰线：左右对称的两道，给底部一点「卡片」的收口感，
-    // 又不抢中间数据的视觉重心。
-    canvas.drawLine(
-        160f, bottomTop + 130f, POSTER_WIDTH - 160f, bottomTop + 130f,
-        strokePaint(4f, LINE_COLOR)
-    )
-    canvas.drawTextCentered(
-        text = "登临 · 错题本",
-        cx = POSTER_WIDTH / 2f,
-        y = bottomTop + 210f,
-        paint = textPaint(34f, MUTED_COLOR, sans)
-    )
-    return bitmap
-}
-
-/** 一行「标签 + 数值 + 单位」：标签与单位小字，数值大字。 */
-private fun drawStatRow(
-    canvas: Canvas,
-    label: String,
-    value: String,
-    unit: String,
-    baselineY: Float,
-    bold: Typeface,
-    sans: Typeface,
-    valueColor: Int
-) {
-    val cx = POSTER_WIDTH / 2f
-    val labelPaint = textPaint(32f, MUTED_COLOR, sans)
-    val valuePaint = textPaint(64f, valueColor, bold)
-    val unitPaint = textPaint(32f, MUTED_COLOR, sans)
-    val labelW = labelPaint.measureText(label)
-    val valueW = valuePaint.measureText(value)
-    val unitW = if (unit.isBlank()) 0f else unitPaint.measureText(unit)
-    val total = labelW + 24f + valueW + if (unit.isBlank()) 0f else 12f + unitW
-    var x = cx - total / 2f
-    canvas.drawText(label, x, baselineY, labelPaint)
-    x += labelW + 24f
-    canvas.drawText(value, x, baselineY, valuePaint)
-    if (unit.isNotBlank()) {
-        x += valueW + 12f
-        canvas.drawText(unit, x, baselineY, unitPaint)
-    }
-}
-
-private fun drawDivider(canvas: Canvas, y: Float) {
-    canvas.drawLine(140f, y, POSTER_WIDTH - 140f, y, strokePaint(2f, LINE_COLOR))
-}
-
-private fun fillPaint(color: Int): Paint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; this.color = color }
-
-private fun strokePaint(width: Float, color: Int): Paint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = width
-        this.color = color
-    }
-
-private fun textPaint(size: Float, color: Int, typeface: Typeface): Paint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = color
-        textSize = size
-        this.typeface = typeface
-    }
-
-/** 水平居中绘制（Compose Canvas 有 center 概念，native Canvas 只能自己算宽度）。 */
-private fun Canvas.drawTextCentered(text: String, cx: Float, y: Float, paint: Paint) {
-    drawText(text, cx - paint.measureText(text) / 2f, y, paint)
-}
 
 /**
  * 把海报存进系统相册 `Pictures/登临/`，返回 content Uri。

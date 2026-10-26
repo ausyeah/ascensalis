@@ -376,6 +376,14 @@ class ChatRepository(
          */
         visionToolAvailable: Boolean = false,
         /**
+         * 是否已经配了 **MinerU**（对话里会有 ocr_image 工具）。
+         *
+         * 与 [visionToolAvailable] 分开是因为两条路读出来的东西不一样：
+         * MinerU 给的是**逐字文字**（题目、公式），识图模型给的是**理解**。
+         * 附件清单要据此告诉模型该调哪个工具。
+         */
+        ocrToolAvailable: Boolean = false,
+        /**
          * 手写过程批改指令（T13）。非空时拼在题目上下文之后——**与题目上下文
          * 同一条 system 消息**，模型读起来是「这道题 + 按这个方式批」。
          *
@@ -402,7 +410,7 @@ class ChatRepository(
                 it.content.startsWith(ChatContextAssembler.SUMMARY_PREFIX)
         }
         val history = raw.filterNot { it.id == summaryMessage?.id }
-            .map { it.toOutgoing(supportsVision, visionToolAvailable) }
+            .map { it.toOutgoing(supportsVision, visionToolAvailable, ocrToolAvailable) }
         return ChatContextAssembler.assemble(
             systemPrompt = ChatPrompts.SYSTEM,
             questionContext = systemContext,
@@ -414,21 +422,23 @@ class ChatRepository(
 
     private suspend fun ChatMessage.toOutgoing(
         supportsVision: Boolean,
-        visionToolAvailable: Boolean = false
+        visionToolAvailable: Boolean = false,
+        ocrToolAvailable: Boolean = false
     ): OutgoingMessage {
         val attachments = attachmentIds().mapNotNull { chatDao.findAttachment(it) }
         val usable = attachments.filter { it.status == AttachmentStatus.READY }
         val imageAttachments = usable.filter { it.kind == AttachmentKind.IMAGE }
+        val docAttachments = usable.filter { it.kind != AttachmentKind.IMAGE }
         val text = buildString {
             append(content)
             // 文档类附件的正文：一直都要带。
-            val excerpts = usable.filter { it.kind != AttachmentKind.IMAGE }
+            val excerpts = docAttachments
                 .mapNotNull { it.textExcerpt.takeIf { excerpt -> excerpt.isNotBlank() } }
             if (excerpts.isNotEmpty()) {
                 append("\n\n")
                 append(excerpts.joinToString("\n\n"))
             }
-            // **模型不识图时**，把 MinerU 从图片里抽出的文字补上。
+            // **模型不识图时**，把已经从图片里抽出的文字补上。
             //
             // 图片本身这时不发（`images` 为空），模型完全看不到那张图；
             // 若不给文字，模型只能对着「用户发了张图」这句话瞎猜。
@@ -436,8 +446,12 @@ class ChatRepository(
             // 识别失败的图也会带一条失败说明进来（见 [ChatOcrText.failureNote]）：
             // 模型由此知道「这里有一张图但没读出来」，能如实让用户补充文字，
             // 而不是忽略这张图继续答。
-            // 识图工具可用时不预塞 OCR 原文：模型想看会自己调 describe_image。
-            if (!supportsVision && !visionToolAvailable) {
+            //
+            // **只要文字已经存在就带上**（v0.0.49）：这份文字是之前
+            // 已经识别过的、**不额外花钱**，没理由浪费。此前这里是
+            // 「有识图工具就不预塞」，于是清单说「见上文」而上文根本没有
+            // 那段字——模型被自己的清单骗了一次。
+            if (!supportsVision) {
                 val imageTexts = imageAttachments
                     .mapNotNull { it.textExcerpt.takeIf { excerpt -> excerpt.isNotBlank() } }
                 if (imageTexts.isNotEmpty()) {
@@ -446,6 +460,19 @@ class ChatRepository(
                         imageTexts.joinToString("\n\n") { ChatOcrText.section(it) }
                     )
                 }
+            }
+            // **附件清单**（v0.0.49）。
+            //
+            // 之前的问题（用户反馈「不可识图的模型根本接收不到文件」）：
+            // 模型不识图时图片 data URL 被丢掉、OCR 文字也可能没有，
+            // 于是这条消息发给模型的内容里**完全看不出用户发过文件**——
+            // 模型不知道有图，就不会去调识图工具，只能对着空气瞎猜。
+            //
+            // 附件清单把「发过什么、能不能读、怎么读」讲清楚，
+            // 模型据此决定要不要调用 describe_image / ocr_image。
+            if (!supportsVision && usable.isNotEmpty()) {
+                append("\n\n")
+                append(attachmentManifest(usable, visionToolAvailable, ocrToolAvailable))
             }
         }
         val images = if (supportsVision) {
@@ -462,6 +489,20 @@ class ChatRepository(
             images = images
         )
     }
+
+    /**
+     * 附件清单：交给 [com.mistakebook.data.chat.AttachmentManifest] 生成
+     * （那边是纯逻辑，可 JVM 单测）。
+     */
+    private fun attachmentManifest(
+        attachments: List<com.mistakebook.data.local.entities.ChatAttachment>,
+        visionToolAvailable: Boolean,
+        ocrToolAvailable: Boolean
+    ): String = com.mistakebook.data.chat.AttachmentManifest.build(
+        attachments = attachments,
+        visionToolAvailable = visionToolAvailable,
+        ocrToolAvailable = ocrToolAvailable
+    )
 
     /**
      * 会话里还没有 OCR 文字的图片附件（最新的在前）。

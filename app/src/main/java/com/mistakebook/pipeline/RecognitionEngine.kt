@@ -119,6 +119,7 @@ class RecognitionEngine(
                     mode = settings.recognitionMode,
                     mineruConfigured = settings.mineruConfigured,
                     supportsVision = settings.activeProfile?.supportsVision == true,
+                    visionConfigured = settings.visionConfigured,
                     modelName = settings.activeProfile?.model.orEmpty()
                 )
             }
@@ -126,10 +127,37 @@ class RecognitionEngine(
             // 大模型直连：一步出结构化题目，没有 MinerU 中间产物。
             // markdown 槽位存模型原始输出——重试的缓存路径与降级展示都读它。
             if (plan is RecognitionPlan.LlmDirect) {
-                val bundle = recognizeWithVisionLlm(taskId, task, file, settings)
+                val bundle = recognizeWithVisionLlm(
+                    taskId = taskId,
+                    task = task,
+                    file = file,
+                    settings = settings,
+                    profile = settings.activeProfile
+                )
                 finishWith(taskId, bundle)
                 return
             }
+
+            // 用**用户单独配置的识图模型**直连看图。
+            if (plan is RecognitionPlan.VisionDirect) {
+                val vision = settings.visionProfile
+                    ?: throw PipelineException(
+                        com.mistakebook.net.ApiError(
+                            kind = com.mistakebook.net.ApiErrorKind.NO_KEY,
+                            serverMessage = "尚未配置识图模型（设置 → 大模型 → 识图模型）。"
+                        )
+                    )
+                val bundle = recognizeWithVisionLlm(
+                    taskId = taskId,
+                    task = task,
+                    file = file,
+                    settings = settings,
+                    profile = vision
+                )
+                finishWith(taskId, bundle)
+                return
+            }
+
             // 两条路都走不通：把原因作为任务失败落库（与其它失败同一套 UI）。
             if (plan is RecognitionPlan.Unavailable) {
                 throw PipelineException(
@@ -140,21 +168,52 @@ class RecognitionEngine(
                 )
             }
 
-            // AUTO：先 MinerU，失败/不可用自动落大模型直连。
-            if (plan is RecognitionPlan.MineruThenLlm) {
-                val markdown = mineruMarkdownOrNull(taskId, task, file, settings)
-                if (markdown == null) {
-                    taskRepository.setStage(
-                        taskId,
-                        "MinerU 不可用，自动改用大模型识别…",
-                        System.currentTimeMillis()
-                    )
-                    val bundle = recognizeWithVisionLlm(taskId, task, file, settings)
-                    finishWith(taskId, bundle)
-                    return
+            // 自动回落链（AUTO）：依次尝试，**中途失败不中断**，
+            // 全部失败才报错。链的顺序见 [RecognitionPlan.decide]。
+            if (plan is RecognitionPlan.Chain) {
+                val failures = mutableListOf<String>()
+                for (route in plan.routes) {
+                    val result = runCatching {
+                        when (route) {
+                            RecognitionPlan.Route.MINERU -> {
+                                val markdown = mineruMarkdown(taskId, task, file, settings)
+                                // MinerU 出的是原始文字，**最后一步交回大模型整理**
+                                // ——「自动」链条的终点就是大模型处理。
+                                refineWithLlm(taskId, task, markdown, settings)
+                            }
+
+                            RecognitionPlan.Route.CURRENT_LLM -> recognizeWithVisionLlm(
+                                taskId = taskId,
+                                task = task,
+                                file = file,
+                                settings = settings,
+                                profile = settings.activeProfile
+                            )
+
+                            RecognitionPlan.Route.VISION_LLM -> recognizeWithVisionLlm(
+                                taskId = taskId,
+                                task = task,
+                                file = file,
+                                settings = settings,
+                                profile = settings.visionProfile
+                            )
+                        }
+                    }
+                    val bundle = result.getOrNull()
+                    if (bundle != null) {
+                        finishWith(taskId, bundle)
+                        return
+                    }
+                    failures += routeFailureText(route, result.exceptionOrNull())
                 }
-                refineAndFinish(taskId, task, markdown, settings)
-                return
+                // 整条链都不通：把每一条的失败原因都说清楚，用户才知道该改哪一项。
+                throw PipelineException(
+                    com.mistakebook.net.ApiError(
+                        kind = com.mistakebook.net.ApiErrorKind.NO_KEY,
+                        serverMessage = "自动识别的所有途径都没成功：\n" +
+                            failures.joinToString("\n") { "· $it" }
+                    )
+                )
             }
 
             // 纯 MinerU：失败（含没配 Key）按老行为报错，不回落。
@@ -294,18 +353,27 @@ class RecognitionEngine(
     }
 
     /**
-     * AUTO 路线的 MinerU 尝试：**失败不抛**，返回 null 让调用方落大模型直连。
+     * 自动回落链里某一条路失败时的一句话说明。
      *
-     * 「失败」覆盖没配 Key、网络错误、服务端报错、抽不出字——用户在
-     * 「自动」模式下要的就是「MinerU 不可用时有别的一条路」，
-     * 任何一种不可用都该落 LLM，而不是把整条任务打死。
+     * 用户要看到的是「每条路各为什么不行」，而不是一句笼统的
+     * 「识别失败」——否则他不知道该去配 MinerU 还是去配识图模型。
      */
-    private suspend fun mineruMarkdownOrNull(
-        taskId: Long,
-        task: CaptureTask,
-        file: File,
-        settings: SettingsSnapshot
-    ): String? = runCatching { mineruMarkdown(taskId, task, file, settings) }.getOrNull()
+    private fun routeFailureText(
+        route: RecognitionPlan.Route,
+        error: Throwable?
+    ): String {
+        val name = when (route) {
+            RecognitionPlan.Route.MINERU -> "MinerU"
+            RecognitionPlan.Route.CURRENT_LLM -> "当前大模型直连"
+            RecognitionPlan.Route.VISION_LLM -> "识图模型直连"
+        }
+        val detail = when (error) {
+            is PipelineException -> error.apiError.serverMessage.ifBlank { "调用失败" }
+            null -> "未知原因"
+            else -> error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+        }
+        return "$name：$detail"
+    }
 
     /** 调 MinerU 拿 markdown；失败抛 [PipelineException]（由调用方决定是否回落）。 */
     private suspend fun mineruMarkdown(
@@ -352,25 +420,27 @@ class RecognitionEngine(
         taskId: Long,
         task: CaptureTask,
         file: File,
-        settings: SettingsSnapshot
+        settings: SettingsSnapshot,
+        /** 用哪个模型看图：当前默认模型，或用户单独配置的识图模型。 */
+        profile: com.mistakebook.data.prefs.LlmProfile?
     ): DraftBundle {
-        val profile = settings.activeProfile ?: throw PipelineException(noProfileError())
-        if (!profile.supportsVision) {
+        val active = profile ?: throw PipelineException(noProfileError())
+        if (!active.supportsVision) {
             // 正常情况下 decide() 已经把这条路堵死了；这里是纵深防御——
             // 用户可能在任务排队期间换了模型，执行时必须再验一次。
             throw PipelineException(
                 com.mistakebook.net.ApiError(
                     kind = com.mistakebook.net.ApiErrorKind.NO_KEY,
-                    serverMessage = "当前模型（${profile.model}）不支持识图，" +
+                    serverMessage = "当前模型（${active.model}）不支持识图，" +
                         "无法直接识别图片。请在设置里切换到识图模型，" +
-                        "或把识别方式改回「自动」/「仅 MinerU」。"
+                        "或把识别方式改成「自动」/「仅 MinerU」。"
                 )
             )
         }
         taskRepository.setStatus(taskId, TaskStatus.PARSING, System.currentTimeMillis())
         taskRepository.setStage(taskId, "大模型识图中…", System.currentTimeMillis())
         val raw = llmClient.refineJson(
-            profile = profile,
+            profile = active,
             systemPrompt = PromptTemplates.visionSystemPrompt(),
             userPrompt = PromptTemplates.visionUserPrompt(),
             imageFile = file,
@@ -391,7 +461,7 @@ class RecognitionEngine(
             )
 
             is com.mistakebook.net.ApiResult.Failure -> throw PipelineException(
-                raw.error.copy(serverMessage = visionFailureMessage(raw.error, profile.model))
+                raw.error.copy(serverMessage = visionFailureMessage(raw.error, active.model))
             )
         }
     }

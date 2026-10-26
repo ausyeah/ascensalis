@@ -170,7 +170,8 @@ class ChatGenerationService : Service() {
             sessionId = sessionId,
             questionId = questionId,
             supportsVision = profile.supportsVision,
-            visionToolAvailable = container.settingsStore.snapshotNow().visionConfigured
+            visionToolAvailable = container.settingsStore.snapshotNow().visionConfigured,
+            ocrToolAvailable = container.settingsStore.snapshotNow().mineruConfigured
         )
         val assistantId = repository.insertStreamingAssistantMessage(sessionId, profile.model)
 
@@ -198,8 +199,8 @@ class ChatGenerationService : Service() {
             mineruConfigured = settings.mineruConfigured
         )
 
-        // 本次会话最近一张用户发的图（识图工具的输入）。
-        val sessionImageFile = latestImageFile(container, context.messages, sessionId)
+        // 本次会话最近一张用户发的图（识图 / OCR 工具的输入）。
+        val sessionImageFile = latestImageFile(container, sessionId)
 
         // 生图工具产出的图片路径：循环结束后以 Markdown 接到回答末尾。
         val generatedImages = mutableListOf<String>()
@@ -419,9 +420,15 @@ class ChatGenerationService : Service() {
 
                         MediaTools.DESCRIBE_IMAGE -> executeDescribeImage(
                             container = container,
+                            sessionId = sessionId,
                             settings = settings,
                             question = MediaTools.argument(call.arguments, "question"),
-                            imageFile = sessionImageFile,
+                            imageFile = pickImageFile(
+                                container,
+                                sessionId,
+                                MediaTools.integerArgument(call.arguments, "image_index"),
+                                sessionImageFile
+                            ),
                             stage = { stage -> publishStage(currentText, stage) }
                         )
 
@@ -430,7 +437,12 @@ class ChatGenerationService : Service() {
                             sessionId = sessionId,
                             settings = settings,
                             question = MediaTools.argument(call.arguments, "question"),
-                            imageFile = sessionImageFile,
+                            imageFile = pickImageFile(
+                                container,
+                                sessionId,
+                                MediaTools.integerArgument(call.arguments, "image_index"),
+                                sessionImageFile
+                            ),
                             stage = { stage -> publishStage(currentText, stage) }
                         )
 
@@ -653,27 +665,58 @@ class ChatGenerationService : Service() {
     }
 
     /**
-     * 本次会话最近一张用户发的图：消息里存的是 base64 data URL，
-     * 识图接口要的是本地文件，这里解码落一份临时文件。
+     * 按模型给的 [index] 挑一张图；没给（或越界）就用最近的那张。
      *
-     * 落在会话的 OCR 目录下：随会话一起清理，不会在磁盘上留垃圾。
+     * 顺序与**附件清单**一致（按 id 升序 = 发出的先后），
+     * 模型说「第 2 张图」时指的就是同一个「第 2 张」。
      */
-    private fun latestImageFile(
+    private suspend fun pickImageFile(
         container: com.mistakebook.di.AppContainer,
-        messages: List<com.mistakebook.data.chat.OutgoingMessage>,
+        sessionId: Long,
+        index: Int?,
+        fallback: File?
+    ): File? {
+        if (index == null) return fallback
+        val images = container.chatRepository.imageAttachmentsOf(sessionId)
+            .filter {
+                it.status == com.mistakebook.domain.AttachmentStatus.READY &&
+                    it.kind == com.mistakebook.domain.AttachmentKind.IMAGE
+            }
+            .sortedBy { it.id }
+        val picked = images.getOrNull(index - 1) ?: return fallback
+        val file = File(picked.localPath)
+        return if (file.isFile && file.length() > 0L) file else fallback
+    }
+
+    /**
+     * 本次会话最近一张用户发的图（识图 / OCR 工具的输入）。
+     *
+     * ## 为什么不能从请求上下文里取
+     *
+     * 早先的实现从 `context.messages` 的 `images` 里找 base64 data URL——
+     * 但那些 data URL **只在模型支持识图时才会被填**（见
+     * `ChatRepository.toOutgoing`：不识图的模型不收图片本体）。
+     * 于是「模型不识图 → 图片被丢掉 → 识图工具也拿不到图」，
+     * 工具永远返回「本次对话没有可读取的图片」。
+     * 这正是「不可识图的模型根本接收不到文件」的另一半原因：
+     * 不是模型不肯看，是**客户端压根没把图递给工具**。
+     *
+     * 现在直接查会话的图片附件表：附件文件一直在私有目录里，
+     * 与模型能不能看图无关。
+     */
+    private suspend fun latestImageFile(
+        container: com.mistakebook.di.AppContainer,
         sessionId: Long
     ): File? {
-        val dataUrl = messages.asReversed()
-            .firstOrNull { it.images.isNotEmpty() }
-            ?.images?.firstOrNull()
-            ?: return null
-        val base64 = dataUrl.substringAfter("base64,", "").takeIf { it.isNotBlank() } ?: return null
-        return runCatching {
-            val dir = container.files.chatOcrDir(sessionId).apply { mkdirs() }
-            File(dir, "vision_input.png").apply {
-                writeBytes(java.util.Base64.getDecoder().decode(base64))
-            }
-        }.getOrNull()
+        val attachments = container.chatRepository.imageAttachmentsOf(sessionId)
+        val ready = attachments.filter {
+            it.status == com.mistakebook.domain.AttachmentStatus.READY
+        }
+        // 附件按 id **倒序**返回（最新的在前），所以第一张就是最新发的。
+        val target = ready.firstOrNull() ?: return null
+        val file = File(target.localPath)
+        if (!file.isFile || file.length() == 0L) return null
+        return file
     }
 
     /**
@@ -684,6 +727,7 @@ class ChatGenerationService : Service() {
      */
     private suspend fun executeDescribeImage(
         container: com.mistakebook.di.AppContainer,
+        sessionId: Long,
         settings: com.mistakebook.data.prefs.SettingsSnapshot,
         question: String?,
         imageFile: File?,
@@ -709,7 +753,13 @@ class ChatGenerationService : Service() {
         )
         return when (reply) {
             is com.mistakebook.net.ApiResult.Success ->
-                reply.data.trim().ifBlank { "识图模型没有返回内容。" }
+                reply.data.trim().ifBlank { "识图模型没有返回内容。" }.also { text ->
+                    // 回写附件：这一轮读到的内容下一轮直接可用，
+                    // 不用让模型再调一次识图工具。
+                    if (text.isNotBlank()) {
+                        persistImageText(container, sessionId, imageFile, text)
+                    }
+                }
 
             is com.mistakebook.net.ApiResult.Failure ->
                 "识图失败：${reply.error.serverMessage.ifBlank { "请检查识图模型配置" }}"
@@ -754,6 +804,10 @@ class ChatGenerationService : Service() {
                 if (result.data.isBlank()) {
                     "OCR 完成，但这张图里没有读出文字（可能是纯图形或拍摄模糊）。"
                 } else {
+                    // **回写到附件**：这一轮模型读到了文字，下一轮（以及
+                    // 历史轮次的上下文组装）也要能看到——不然用户隔一句
+                    // 再问「刚才那张图里的第三题」，模型又要重新识别一次。
+                    persistImageText(container, sessionId, imageFile, result.data)
                     // 问题一并带上：让模型知道这段文字是拿来回答什么的
                     val prefix = question?.let { "用户想知道：$it\n\n" } ?: ""
                     "$prefix【图片中的文字（OCR）】\n${result.data}"
@@ -762,6 +816,26 @@ class ChatGenerationService : Service() {
             is com.mistakebook.net.ApiResult.Failure ->
                 "OCR 失败：${result.error.serverMessage.ifBlank { "请检查 MinerU 配置" }}"
         }
+    }
+
+    /**
+     * 把工具读到的图片文字回写到附件的 `textExcerpt`。
+     *
+     * 有了它，下一轮请求组装上下文时（见
+     * `ChatRepository.toOutgoing`）这段文字会自动带上——
+     * 模型不用再调一次工具，附件清单里也会显示「图片文字已提取，见上文」。
+     */
+    private suspend fun persistImageText(
+        container: com.mistakebook.di.AppContainer,
+        sessionId: Long,
+        imageFile: File?,
+        text: String
+    ) {
+        if (imageFile == null || text.isBlank()) return
+        val target = container.chatRepository.imageAttachmentsOf(sessionId)
+            .firstOrNull { it.localPath == imageFile.absolutePath }
+            ?: return
+        runCatching { container.chatRepository.updateAttachmentOcr(target.id, text) }
     }
 
     private suspend fun executeGenerateImage(

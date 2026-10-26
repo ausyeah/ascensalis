@@ -20,8 +20,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -99,7 +99,9 @@ class PomodoroViewModel(
     private val subjectDao: SubjectDao,
     private val timer: PomodoroTimer,
     /** 学科列表：复用错题本那套学科（见 PomodoroTask 的注释）。 */
-    private val subjectsFlow: StateFlow<List<Subject>>
+    private val subjectsFlow: StateFlow<List<Subject>>,
+    /** 打卡海报生图（与词库统计页共用同一条流水线）。 */
+    private val posterImageService: com.mistakebook.poster.PosterImageService
 ) : AndroidViewModel(app) {
 
     private val _ui = MutableStateFlow(PomodoroUiState())
@@ -566,6 +568,36 @@ class PomodoroViewModel(
         if (statsRange.value == range) return
         statsRange.value = range
         viewModelScope.launch { refreshStats() }
+    }
+
+    // ------------------------------------------------------------ 今日打卡海报
+
+    /**
+     * 生成「今日专注」打卡海报。
+     *
+     * @param mode 背景图模式（文字本地画）或整图模式（文字也交给生图模型）。
+     * @param onBitmap 成功回调；[onFailed] 失败回调。
+     */
+    fun generateFocusPoster(
+        mode: com.mistakebook.poster.PosterImageMode,
+        onBitmap: (android.graphics.Bitmap) -> Unit,
+        onFailed: (String) -> Unit = { message.value = it }
+    ) {
+        val state = _ui.value
+        viewModelScope.launch {
+            val content = buildPomodoroPosterContent(state)
+            when (val result = posterImageService.generate(content, mode)) {
+                is com.mistakebook.net.ApiResult.Success -> {
+                    withContext(Dispatchers.Main) { onBitmap(result.data) }
+                }
+
+                is com.mistakebook.net.ApiResult.Failure -> {
+                    val text =
+                        "海报生成失败：${result.error.serverMessage.ifBlank { "请检查生图配置" }}"
+                    withContext(Dispatchers.Main) { onFailed(text) }
+                }
+            }
+        }
     }
 
     // ------------------------------------------------- 单日专注卡（可翻页）

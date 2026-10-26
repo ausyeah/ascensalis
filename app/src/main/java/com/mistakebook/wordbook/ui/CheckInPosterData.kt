@@ -46,3 +46,26 @@ fun buildPosterData(
         masteredCount = state.masteredCount
     )
 }
+
+/**
+ * 装配**通用**海报内容（供本地渲染与生图两种模式共用）。
+ *
+ * 口径与 [buildPosterData] 完全一致——两处不能各算各的，
+ * 不然「界面上的数」和「海报上的数」会对不上。
+ */
+fun buildPosterContent(
+    state: WordbookUiState,
+    now: Long = System.currentTimeMillis()
+): com.mistakebook.poster.PosterContent {
+    val data = buildPosterData(state, now)
+    return com.mistakebook.poster.PosterContent(
+        dateText = data.dateText,
+        headline = "背单词 Day ${data.streakDays}",
+        stats = listOf(
+            com.mistakebook.poster.PosterStat("学过", "${data.studiedToday}", "词"),
+            com.mistakebook.poster.PosterStat("正确率", data.accuracyText(), emphasis = true),
+            com.mistakebook.poster.PosterStat("目标", "${data.dailyGoal}", "词")
+        ),
+        footerText = "登临 · 错题本"
+    )
+}

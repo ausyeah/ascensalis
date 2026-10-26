@@ -8,7 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 识别路线决策纯函数单测（v0.0.44：大模型直连识别）。
+ * 识别路线决策纯函数单测（v0.0.49：四选项 + 自动回落链）。
  *
  * 覆盖 [RecognitionPlan.decide] 全部分支矩阵，以及
  * [PromptTemplates.VISION_SYSTEM_PROMPT] 的替换正确性——
@@ -37,25 +37,25 @@ class RecognitionPlanTest {
         )
     }
 
-    // ---- decide：LLM 模式 ----
+    // ---- decide：当前模型（CURRENT）模式 ----
 
     @Test
-    fun `LLM 模式识图模型直连`() {
+    fun `CURRENT 模式当前模型识图时直连`() {
         assertEquals(
             RecognitionPlan.LlmDirect,
-            RecognitionPlan.decide(RecognitionMode.LLM, mineruConfigured = false, supportsVision = true)
+            RecognitionPlan.decide(RecognitionMode.CURRENT, mineruConfigured = false, supportsVision = true)
         )
         // 配了 MinerU 也不走：用户明确要求跳过。
         assertEquals(
             RecognitionPlan.LlmDirect,
-            RecognitionPlan.decide(RecognitionMode.LLM, mineruConfigured = true, supportsVision = true)
+            RecognitionPlan.decide(RecognitionMode.CURRENT, mineruConfigured = true, supportsVision = true)
         )
     }
 
     @Test
-    fun `LLM 模式模型不识图时报不可用且原因带模型名`() {
+    fun `CURRENT 模式当前模型不识图时报不可用且原因带模型名`() {
         val plan = RecognitionPlan.decide(
-            RecognitionMode.LLM,
+            RecognitionMode.CURRENT,
             mineruConfigured = true,
             supportsVision = false,
             modelName = "gpt-4o-mini"
@@ -67,9 +67,9 @@ class RecognitionPlanTest {
     }
 
     @Test
-    fun `LLM 模式模型名为空时原因不出现空括号`() {
+    fun `CURRENT 模式模型名为空时原因不出现空括号`() {
         val plan = RecognitionPlan.decide(
-            RecognitionMode.LLM,
+            RecognitionMode.CURRENT,
             mineruConfigured = false,
             supportsVision = false,
             modelName = ""
@@ -79,43 +79,124 @@ class RecognitionPlanTest {
         assertFalse(reason.contains("()"))
     }
 
-    // ---- decide：AUTO 模式 ----
+    // ---- decide：识图模型（VISION）模式 ----
 
     @Test
-    fun `AUTO 模式 MinerU 已配置则 MinerU 优先`() {
+    fun `VISION 模式配了识图模型时走识图模型直连`() {
         assertEquals(
-            RecognitionPlan.MineruThenLlm,
-            RecognitionPlan.decide(RecognitionMode.AUTO, mineruConfigured = true, supportsVision = true)
-        )
-        // 模型不能识图也走 MinerU：回落只是失效，主路不变。
-        assertEquals(
-            RecognitionPlan.MineruThenLlm,
-            RecognitionPlan.decide(RecognitionMode.AUTO, mineruConfigured = true, supportsVision = false)
-        )
-    }
-
-    @Test
-    fun `AUTO 模式未配 MinerU 但模型可识图则直连大模型`() {
-        assertEquals(
-            RecognitionPlan.LlmDirect,
-            RecognitionPlan.decide(RecognitionMode.AUTO, mineruConfigured = false, supportsVision = true)
+            RecognitionPlan.VisionDirect,
+            RecognitionPlan.decide(
+                RecognitionMode.VISION,
+                mineruConfigured = false,
+                supportsVision = false,
+                visionConfigured = true
+            )
         )
     }
 
     @Test
-    fun `AUTO 模式两条路都不可用时原因都说清楚`() {
+    fun `VISION 模式没配识图模型时报不可用且提到识图模型`() {
+        val plan = RecognitionPlan.decide(
+            RecognitionMode.VISION,
+            mineruConfigured = true,
+            supportsVision = true,
+            visionConfigured = false
+        )
+        assertTrue(plan is RecognitionPlan.Unavailable)
+        val reason = (plan as RecognitionPlan.Unavailable).reason
+        assertTrue(reason.contains("识图模型"))
+    }
+
+    // ---- decide：AUTO 模式（自动回落链） ----
+
+    @Test
+    fun `AUTO 模式三条路按 MinerU 到当前模型到识图模型排序`() {
+        val plan = RecognitionPlan.decide(
+            RecognitionMode.AUTO,
+            mineruConfigured = true,
+            supportsVision = true,
+            visionConfigured = true
+        )
+        assertTrue(plan is RecognitionPlan.Chain)
+        assertEquals(
+            listOf(
+                RecognitionPlan.Route.MINERU,
+                RecognitionPlan.Route.CURRENT_LLM,
+                RecognitionPlan.Route.VISION_LLM
+            ),
+            (plan as RecognitionPlan.Chain).routes
+        )
+    }
+
+    @Test
+    fun `AUTO 模式没配 MinerU 时链条从当前模型开始`() {
+        val plan = RecognitionPlan.decide(
+            RecognitionMode.AUTO,
+            mineruConfigured = false,
+            supportsVision = true,
+            visionConfigured = true
+        )
+        assertEquals(
+            listOf(RecognitionPlan.Route.CURRENT_LLM, RecognitionPlan.Route.VISION_LLM),
+            (plan as RecognitionPlan.Chain).routes
+        )
+    }
+
+    @Test
+    fun `AUTO 模式当前模型不识图时链条里没有当前模型`() {
+        val plan = RecognitionPlan.decide(
+            RecognitionMode.AUTO,
+            mineruConfigured = true,
+            supportsVision = false,
+            visionConfigured = true
+        )
+        assertEquals(
+            listOf(RecognitionPlan.Route.MINERU, RecognitionPlan.Route.VISION_LLM),
+            (plan as RecognitionPlan.Chain).routes
+        )
+    }
+
+    @Test
+    fun `AUTO 模式只有 MinerU 可用时链条只有 MinerU`() {
+        val plan = RecognitionPlan.decide(
+            RecognitionMode.AUTO,
+            mineruConfigured = true,
+            supportsVision = false,
+            visionConfigured = false
+        )
+        assertEquals(
+            listOf(RecognitionPlan.Route.MINERU),
+            (plan as RecognitionPlan.Chain).routes
+        )
+    }
+
+    @Test
+    fun `AUTO 模式三条路都不可用时原因都说清楚`() {
         val plan = RecognitionPlan.decide(
             RecognitionMode.AUTO,
             mineruConfigured = false,
             supportsVision = false,
+            visionConfigured = false,
             modelName = "text-only-model"
         )
         assertTrue(plan is RecognitionPlan.Unavailable)
         val reason = (plan as RecognitionPlan.Unavailable).reason
-        // 两条路都要点到：MinerU 没配 Key + 模型不识图。
+        // 三条路都要点到：MinerU 没配 Key + 模型不识图 + 没配识图模型。
         assertTrue(reason.contains("MinerU"))
         assertTrue(reason.contains("识图"))
         assertTrue(reason.contains("text-only-model"))
+    }
+
+    // ---- RecognitionMode 键名兼容 ----
+
+    @Test
+    fun `旧键名 llm 映射到 CURRENT 且未知键名回落到 AUTO`() {
+        assertEquals(RecognitionMode.CURRENT, RecognitionMode.fromKey("llm"))
+        assertEquals(RecognitionMode.CURRENT, RecognitionMode.fromKey("current"))
+        assertEquals(RecognitionMode.VISION, RecognitionMode.fromKey("vision"))
+        assertEquals(RecognitionMode.AUTO, RecognitionMode.fromKey("auto"))
+        assertEquals(RecognitionMode.AUTO, RecognitionMode.fromKey("something-new"))
+        assertEquals(RecognitionMode.AUTO, RecognitionMode.fromKey(null))
     }
 
     // ---- PromptTemplates：看图系统提示词 ----

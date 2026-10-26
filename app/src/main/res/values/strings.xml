@@ -263,11 +263,14 @@
     <string name="settings_recognition_title">识别方式</string>
     <string name="settings_recognition_desc">拍照整理错题时，题目从图片变成结构化数据的途径。MinerU 是专业文档解析服务；大模型直连由可识图的对话模型直接看原图输出，不依赖 MinerU。</string>
     <string name="settings_recognition_mineru">仅 MinerU</string>
-    <string name="settings_recognition_llm">大模型</string>
+    <string name="settings_recognition_llm">当前模型</string>
+    <string name="settings_recognition_vision">识图模型</string>
     <string name="settings_recognition_auto">自动</string>
     <string name="settings_recognition_hint_mineru">只用 MinerU 解析图片。没配 Key 或解析失败时按失败处理，不自动改走大模型。适合网络稳定、MinerU 配额充足的场景。</string>
-    <string name="settings_recognition_hint_llm">跳过 MinerU，由可识图模型直接看原图输出结构化题目。需要当前模型支持识图，消耗的是对话模型的额度；识别质量与模型识图能力直接相关。</string>
-    <string name="settings_recognition_hint_auto">默认方式。配了 MinerU Key 就优先走 MinerU；Key 未配置或 MinerU 不可用时，自动改用可识图模型直连，尽量让识别跑通。</string>
+    <string name="settings_recognition_hint_llm">跳过 MinerU，由当前对话模型直接看原图输出结构化题目。需要当前模型支持识图，消耗的是对话模型的额度；识别质量与模型识图能力直接相关。</string>
+    <string name="settings_recognition_hint_vision">跳过 MinerU 与对话模型，专用「识图模型」（设置 → 大模型 → 识图模型）直接看原图。主对话模型再普通也能拍照整理错题。</string>
+    <string name="settings_recognition_hint_auto">默认方式。依次尝试：MinerU → 当前对话模型 → 专用识图模型；某一环失败会自动改走下一环，中途不会直接报错，只有全部不可用才失败。</string>
+    <string name="settings_recognition_warn_vision">还没有配置可用的识图模型。请到设置 → 大模型 → 识图模型里填写地址、Key 与模型名，或把识别方式改成「自动」。</string>
     <string name="settings_recognition_warn_llm">当前模型不支持识图（或尚未配置模型），大模型识别这条路走不通。请到下方切换到识图模型，或把识别方式改回「自动」/「仅 MinerU」。</string>
     <string name="settings_recognition_warn_auto">当前模型不支持识图（或尚未配置模型），MinerU 不可用时将没有兜底。建议切换到识图模型以获得自动回落能力。</string>
 
