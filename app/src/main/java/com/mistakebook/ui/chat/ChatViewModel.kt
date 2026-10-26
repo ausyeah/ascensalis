@@ -1053,6 +1053,24 @@ class ChatViewModel(
     private suspend fun ensureImageOcr(sessionId: Long) {
         try {
             val settings = settingsStore.settings.first()
+
+            // 有识图工具可用、或用户明确「仅大模型识图」时，**不再自动用
+            // MinerU 预处理每张图**：
+            //
+            // 1. 用户在设置里选了「仅大模型」就是不想依赖 MinerU
+            //    （以前这条设置只管拍照识别，对话里照旧先烧一次 MinerU——
+            //    选了等于没选，这是必须修的）；
+            // 2. 配了识图模型时，图由模型**按需**调识图工具去看，
+            //    MinerU 按页计费，不管用不用都跑一遍太贵。
+            //
+            // 这两种情况下 MinerU 仍然可用——只是从「每图必跑」变成
+            // 对话里的一个 ocr_image 工具，模型想读才读。
+            if (settings.visionConfigured ||
+                settings.recognitionMode == com.mistakebook.data.prefs.RecognitionMode.LLM
+            ) {
+                _state.value = _state.value.copy(ocrStage = null)
+                return
+            }
             if (!settings.mineruConfigured) {
                 // 没配 MinerU Key 就别白跑一趟。用常驻通知而不是一次性 toast——
                 // 这个原因不会自己消失，用户回到应用时还得看见它。

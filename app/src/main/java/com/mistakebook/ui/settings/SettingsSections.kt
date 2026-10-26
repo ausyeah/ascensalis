@@ -1078,40 +1078,11 @@ internal fun LlmProfilesSection(
             FirstRunHint(R.string.settings_hint_llm_key)
         }
 
-        // 识图模型：从上面这些接入里指定一套**专门用来看图**的。
-        //
-        // 主模型不识图（DeepSeek-chat、Qwen-plus 这类）时，对话里的图片
-        // 就靠它来读；它还能回答「图里画了什么」这类理解型问题，
-        // 这是 OCR（MinerU）做不到的。指定后对话里会多出一个识图工具，
-        // 由模型自己决定什么时候看图。
-        Spacer(Modifier.height(12.dp))
+        // 识图模型已独立成下方的一个分区：那里的地址 / Key / 模型名
+        // 全部由用户自由填写，不再受「已有对话配置」限制。
+        Spacer(Modifier.height(8.dp))
         Text(
-            text = stringResource(R.string.settings_vision_profile),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(6.dp))
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = state.snapshot.visionProfileId == null,
-                onClick = { viewModel.setVisionProfileId(null) },
-                label = { Text(stringResource(R.string.settings_vision_profile_none)) }
-            )
-            state.snapshot.llmProfiles.forEach { profile ->
-                FilterChip(
-                    selected = state.snapshot.visionProfileId == profile.id,
-                    onClick = { viewModel.setVisionProfileId(profile.id) },
-                    label = { Text(profile.displayName()) }
-                )
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = stringResource(R.string.settings_vision_profile_hint),
+            text = stringResource(R.string.settings_vision_profile_moved),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -1315,6 +1286,169 @@ private fun ImageProfileRow(
                                     apiKey = apiKey.trim(),
                                     model = model.trim(),
                                     requestBodyTemplate = template
+                                )
+                            )
+                            expanded = false
+                        },
+                        enabled = name.isNotBlank() || baseUrl.isNotBlank() ||
+                            apiKey.isNotBlank() || model.isNotBlank()
+                    ) {
+                        Text(stringResource(R.string.settings_save))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_image_profile_delete),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/**
+ * 识图模型（多套，可切换）：**每一个字段都由用户自己填**。
+ *
+ * 与「大模型配置」分开是刻意的：用户要的是「我想用哪个模型识图就填哪个」，
+ * 从已有对话配置里挑一套等于被供应商绑死——识图模型常常是另一家
+ * （对话用 DeepSeek、识图用通义千问 VL 这类组合很常见）。
+ */
+@Composable
+internal fun VisionProfilesSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    var forceExpandId by remember { mutableStateOf<String?>(null) }
+    SettingsGroup(title = stringResource(R.string.settings_vision_profiles)) {
+        Text(
+            text = stringResource(R.string.settings_vision_profiles_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        state.snapshot.visionProfiles.forEach { profile ->
+            VisionProfileRow(
+                profile = profile,
+                selected = profile.id == state.snapshot.activeVisionProfileId,
+                forceExpanded = forceExpandId == profile.id,
+                onSelect = { viewModel.selectVisionProfile(profile.id) },
+                onDelete = { viewModel.deleteVisionProfile(profile.id) },
+                onSave = { draft -> viewModel.saveVisionProfile(draft) }
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        OutlinedButton(
+            onClick = {
+                val fresh = LlmProfile()
+                forceExpandId = fresh.id
+                viewModel.addVisionProfile(fresh)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Text(stringResource(R.string.settings_add_vision_profile))
+        }
+        if (!state.snapshot.visionConfigured) {
+            Spacer(Modifier.height(8.dp))
+            FirstRunHint(R.string.settings_hint_vision_key)
+        }
+    }
+}
+
+/** 一张识图模型卡片：Radio 管激活，展开后是四个字段 + 保存 / 删除。 */
+@Composable
+private fun VisionProfileRow(
+    profile: LlmProfile,
+    selected: Boolean,
+    forceExpanded: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+    onSave: (LlmProfile) -> Unit
+) {
+    var expanded by remember(profile.id) { mutableStateOf(selected || forceExpanded) }
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
+    var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
+    var model by remember(profile.id) { mutableStateOf(profile.model) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(selected = selected, onClick = onSelect)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = profile.displayName(), style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    // 模型名是最关键的一行：用户就是要确认「识图用的是哪个模型」
+                    text = profile.model.ifBlank { "未填写模型名" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (expanded) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.settings_image_profile_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text(stringResource(R.string.settings_base_url)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                PasswordField(
+                    label = stringResource(R.string.settings_api_key),
+                    value = apiKey,
+                    onValueChange = { apiKey = it }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    label = { Text(stringResource(R.string.settings_vision_profile_model)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = stringResource(R.string.settings_vision_profile_model_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Row {
+                    Button(
+                        onClick = {
+                            onSave(
+                                profile.copy(
+                                    name = name.trim(),
+                                    baseUrl = baseUrl.trim(),
+                                    apiKey = apiKey.trim(),
+                                    model = model.trim()
                                 )
                             )
                             expanded = false

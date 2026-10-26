@@ -90,6 +90,8 @@ class SettingsStore(context: Context) {
         // 生图渠道：与对话配置同构——JSON 密文存 key，激活 id 走 DataStore。
         val imageProfiles = loadImageProfiles()
         val activeImageId = prefs[KEY_ACTIVE_IMAGE_PROFILE] ?: imageProfiles.firstOrNull()?.id
+        val visionProfiles = loadVisionProfiles()
+        val activeVisionId = prefs[KEY_ACTIVE_VISION_PROFILE] ?: visionProfiles.firstOrNull()?.id
         return SettingsSnapshot(
             // 占位符不能当成真 Key，否则「已配置」判断会误判为通过
             mineruKey = readSecure(SECURE_MINERU_KEY).ifBlank {
@@ -99,6 +101,8 @@ class SettingsStore(context: Context) {
             activeProfileId = activeId,
             imageProfiles = imageProfiles,
             activeImageProfileId = activeImageId,
+            visionProfiles = visionProfiles,
+            activeVisionProfileId = activeVisionId,
             visionProfileId = prefs[KEY_VISION_PROFILE],
             themeMode = ThemeMode.fromKey(prefs[KEY_THEME_MODE]),
             networkMode = NetworkMode.fromKey(prefs[KEY_NETWORK_MODE]),
@@ -281,6 +285,53 @@ class SettingsStore(context: Context) {
         saveImageProfiles(remaining)
         if (prefs[KEY_ACTIVE_IMAGE_PROFILE] == id) {
             setActiveImageProfileId(remaining.firstOrNull()?.id)
+        }
+    }
+
+    // ===== 识图模型（独立多套，可切换；字段全由用户填，含模型名） =====
+
+    private fun loadVisionProfiles(): List<LlmProfile> {
+        val raw = readSecure(SECURE_VISION_PROFILES)
+        if (raw.isBlank()) return emptyList()
+        return runCatching { json.decodeFromString<List<LlmProfile>>(raw) }
+            .getOrDefault(emptyList())
+    }
+
+    private fun writeVisionProfiles(profiles: List<LlmProfile>) {
+        val normalized = profiles.map { it.normalized() }
+        securePrefs.edit()
+            .putString(SECURE_VISION_PROFILES, json.encodeToString(normalized))
+            .apply()
+    }
+
+    suspend fun saveVisionProfiles(profiles: List<LlmProfile>) {
+        writeVisionProfiles(profiles)
+        secureVersion.value += 1
+    }
+
+    suspend fun upsertVisionProfile(profile: LlmProfile) {
+        val hadActive = appContext.settingsDataStore.data.first()[KEY_ACTIVE_VISION_PROFILE].isNullOrBlank()
+        val current = loadVisionProfiles().toMutableList()
+        val index = current.indexOfFirst { it.id == profile.id }
+        val normalized = profile.normalized()
+        if (index >= 0) current[index] = normalized else current.add(normalized)
+        saveVisionProfiles(current)
+        if (hadActive) setActiveVisionProfileId(normalized.id)
+    }
+
+    suspend fun deleteVisionProfile(id: String) {
+        val prefs = appContext.settingsDataStore.data.first()
+        val remaining = loadVisionProfiles().filterNot { it.id == id }
+        saveVisionProfiles(remaining)
+        if (prefs[KEY_ACTIVE_VISION_PROFILE] == id) {
+            setActiveVisionProfileId(remaining.firstOrNull()?.id)
+        }
+    }
+
+    suspend fun setActiveVisionProfileId(id: String?) {
+        appContext.settingsDataStore.edit { prefs ->
+            if (id == null) prefs.remove(KEY_ACTIVE_VISION_PROFILE)
+            else prefs[KEY_ACTIVE_VISION_PROFILE] = id
         }
     }
 
@@ -543,6 +594,7 @@ class SettingsStore(context: Context) {
         const val SECURE_MINERU_KEY = "mineru_api_key"
         const val SECURE_LLM_PROFILES = "llm_profiles_json"
         const val SECURE_IMAGE_PROFILES = "image_profiles_json"
+        const val SECURE_VISION_PROFILES = "vision_profiles_json"
 
         // KEY_MINERU_MODEL / KEY_OCR_LANGUAGE / KEY_FORCE_OCR 已删：
         // 对应设置项固定为 vlm / ch / 开启，不再可配。旧库里的这些键会被忽略。
@@ -584,6 +636,7 @@ class SettingsStore(context: Context) {
         val KEY_ACTIVE_PROFILE = stringPreferencesKey("active_llm_profile")
         val KEY_ACTIVE_IMAGE_PROFILE = stringPreferencesKey("active_image_profile")
         val KEY_VISION_PROFILE = stringPreferencesKey("vision_profile_id")
+        val KEY_ACTIVE_VISION_PROFILE = stringPreferencesKey("active_vision_profile")
         val KEY_HOME_QUESTION_ORDER = stringPreferencesKey("home_question_order")
     }
 }

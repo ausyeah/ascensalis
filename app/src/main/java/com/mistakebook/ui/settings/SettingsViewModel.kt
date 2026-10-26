@@ -216,6 +216,17 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     /** 指定专门的识图模型（传 null 取消指定，回到默认识图路径）。 */
     fun setVisionProfileId(id: String?) = viewModelScope.launch { store.setVisionProfileId(id) }
 
+    // 识图模型：独立多套，字段全由用户填（含模型名）
+    fun saveVisionProfile(profile: com.mistakebook.data.prefs.LlmProfile) =
+        viewModelScope.launch { store.upsertVisionProfile(profile) }
+
+    fun addVisionProfile(profile: com.mistakebook.data.prefs.LlmProfile) =
+        viewModelScope.launch { store.upsertVisionProfile(profile) }
+
+    fun deleteVisionProfile(id: String) = viewModelScope.launch { store.deleteVisionProfile(id) }
+
+    fun selectVisionProfile(id: String) = viewModelScope.launch { store.setActiveVisionProfileId(id) }
+
     // setMineruModelVersion / setOcrLanguage / setForceOcr 已随设置项移除。
     // 模型版本固定 vlm、语言固定 ch、强制 OCR 固定开启，写在 SettingsSnapshot 里。
 

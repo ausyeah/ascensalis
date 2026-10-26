@@ -282,6 +282,13 @@
     <string name="settings_image_profile_delete">删除该渠道</string>
     <string name="settings_hint_image_key">尚未配置生图渠道。配好地址、Key 与模型名后，单词卡与详情页的图片功能即可使用。</string>
     <string name="settings_vision_profile">识图模型</string>
+    <string name="settings_vision_profile_moved">识图模型改到下方「识图模型」分区单独配置：地址、Key、模型名全部自己填，不受对话配置限制。</string>
+    <string name="settings_vision_profiles">识图模型</string>
+    <string name="settings_vision_profiles_desc">专门用来看图的模型。配好后对话里会多出「看图」工具：主模型看不到图片时由它来读，也能回答「图里画了什么」。模型名按渠道文档填，例如 qwen-vl-max、gpt-4o、glm-4v。</string>
+    <string name="settings_add_vision_profile">新增识图模型</string>
+    <string name="settings_vision_profile_model">模型名（识图）</string>
+    <string name="settings_vision_profile_model_hint">填渠道提供的具体模型名，不是供应商名。例如 qwen-vl-max、gpt-4o-mini、glm-4v-flash。</string>
+    <string name="settings_hint_vision_key">尚未配置识图模型。配好后，不识图的主模型也能通过「看图」工具读取图片。</string>
     <string name="settings_vision_profile_none">不指定</string>
     <string name="settings_vision_profile_hint">指定一套专门用来看图的模型。指定后，对话里会多出一个「看图」工具：主模型看不到图片时由它来读，也能回答「图里画了什么」这类问题。不指定时沿用原来的 MinerU 识别。</string>
     <string name="settings_save">保存</string>

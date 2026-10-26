@@ -194,7 +194,8 @@ class ChatGenerationService : Service() {
         // 没配生图渠道就不给 generate_image。
         val mediaTools = MediaTools.all(
             visionConfigured = settings.visionConfigured,
-            imageConfigured = settings.imageConfigured
+            imageConfigured = settings.imageConfigured,
+            mineruConfigured = settings.mineruConfigured
         )
 
         // 本次会话最近一张用户发的图（识图工具的输入）。
@@ -418,6 +419,15 @@ class ChatGenerationService : Service() {
 
                         MediaTools.DESCRIBE_IMAGE -> executeDescribeImage(
                             container = container,
+                            settings = settings,
+                            question = MediaTools.argument(call.arguments, "question"),
+                            imageFile = sessionImageFile,
+                            stage = { stage -> publishStage(currentText, stage) }
+                        )
+
+                        MediaTools.OCR_IMAGE -> executeOcrImage(
+                            container = container,
+                            sessionId = sessionId,
                             settings = settings,
                             question = MediaTools.argument(call.arguments, "question"),
                             imageFile = sessionImageFile,
@@ -673,6 +683,48 @@ class ChatGenerationService : Service() {
      * 图落盘后记进 [generated]，循环结束会以 Markdown 接到回答末尾，
      * 用户在气泡里直接看到。
      */
+    /**
+     * 执行 `ocr_image`：用 **MinerU** 把图里的文字读出来（就是以前那个
+     * 预处理，只是现在由模型决定要不要读）。
+     *
+     * 结果同样只进上下文（role=tool）。
+     */
+    private suspend fun executeOcrImage(
+        container: com.mistakebook.di.AppContainer,
+        sessionId: Long,
+        settings: com.mistakebook.data.prefs.SettingsSnapshot,
+        question: String?,
+        imageFile: File?,
+        stage: (String) -> Unit
+    ): String {
+        if (!settings.mineruConfigured) {
+            return "OCR 工具不可用：尚未在设置里配置 MinerU Key。"
+        }
+        if (imageFile == null) {
+            return "本次对话没有可读取的图片：用户没有发图，或图片附件已失效。"
+        }
+        stage("正在用 OCR 读取图片文字…")
+        val result = container.chatImageOcr.recognize(
+            sessionId = sessionId,
+            imageFile = imageFile,
+            settings = settings,
+            onStage = { s -> stage("正在用 OCR 读取图片文字：$s") }
+        )
+        return when (result) {
+            is com.mistakebook.net.ApiResult.Success ->
+                if (result.data.isBlank()) {
+                    "OCR 完成，但这张图里没有读出文字（可能是纯图形或拍摄模糊）。"
+                } else {
+                    // 问题一并带上：让模型知道这段文字是拿来回答什么的
+                    val prefix = question?.let { "用户想知道：$it\n\n" } ?: ""
+                    "$prefix【图片中的文字（OCR）】\n${result.data}"
+                }
+
+            is com.mistakebook.net.ApiResult.Failure ->
+                "OCR 失败：${result.error.serverMessage.ifBlank { "请检查 MinerU 配置" }}"
+        }
+    }
+
     private suspend fun executeGenerateImage(
         container: com.mistakebook.di.AppContainer,
         settings: com.mistakebook.data.prefs.SettingsSnapshot,

@@ -32,6 +32,9 @@ object MediaTools {
     const val DESCRIBE_IMAGE = "describe_image"
     const val GENERATE_IMAGE = "generate_image"
 
+    /** 走 OCR 服务（MinerU）的识图工具：读**文字**，不是理解画面。 */
+    const val OCR_IMAGE = "ocr_image"
+
     /** 一次回答里每种媒体工具各允许调几次（防模型反复调）。 */
     const val MAX_CALLS_PER_TOOL = 2
 
@@ -89,14 +92,54 @@ object MediaTools {
     )
 
     /**
+     * MinerU 的 OCR 工具。
+     *
+     * 与 [describeImageTool] 的分工写进描述里：OCR 擅长**逐字还原**
+     * （题目、公式、表格），理解画面（「这示意图表达什么」）要找识图模型。
+     * 两者可以同时给，由模型按任务挑。
+     */
+    fun ocrImageTool(): LlmTool = LlmTool(
+        function = ToolFunction(
+            name = OCR_IMAGE,
+            description = "用 OCR 服务把图片里的文字逐字读出来，包括题目、公式、表格、文档截图。 " +
+                "适合需要**精确文字**的场景，公式会被转成 LaTeX。 " +
+                "想知道「图里画的是什么、表达什么意思」请改用 describe_image。 " +
+                "图里没有文字时不要调用。",
+            parameters = buildJsonObject {
+                put("type", "object")
+                put(
+                    "properties",
+                    buildJsonObject {
+                        put(
+                            "question",
+                            buildJsonObject {
+                                put("type", "string")
+                                put("description", "你想从图里读到什么；只要全文就填「完整转录图中的所有文字」")
+                            }
+                        )
+                    }
+                )
+                put("required", buildJsonArray { add(JsonPrimitive("question")) })
+            }
+        )
+    )
+
+    /**
      * 按当前配置组装要下发给模型的媒体工具。
      *
      * - 识图工具：配了专门的识图模型就给（否则给了也执行不了）；
-     * - 生图工具：配了生图渠道就给。
+     * - 生图工具：配了生图渠道就给；
+     * - OCR 工具：配了 MinerU Key 就给（它就是 MinerU，只是从「每图必跑的
+     *   预处理」变成了模型按需调用的工具）。
      */
-    fun all(visionConfigured: Boolean, imageConfigured: Boolean): List<LlmTool> = buildList {
+    fun all(
+        visionConfigured: Boolean,
+        imageConfigured: Boolean,
+        mineruConfigured: Boolean = false
+    ): List<LlmTool> = buildList {
         if (visionConfigured) add(describeImageTool())
         if (imageConfigured) add(generateImageTool())
+        if (mineruConfigured) add(ocrImageTool())
     }
 
     /**

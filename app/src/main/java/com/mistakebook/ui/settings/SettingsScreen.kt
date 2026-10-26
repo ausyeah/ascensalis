@@ -205,6 +205,12 @@ fun SettingsScreen(
                 viewModel = viewModel
             )
 
+            // 识图模型：独立配置一套专门看图的（地址/Key/模型名全自己填）
+            VisionProfilesSection(
+                state = state,
+                viewModel = viewModel
+            )
+
             // 生图渠道：单词场景图 / 详情页辅助图的出口，与大模型配置同构但独立。
             ImageProfilesSection(
                 state = state,

@@ -58,6 +58,15 @@ data class SettingsSnapshot(
     val activeImageProfileId: String? = null,
 
     /**
+     * 识图模型配置（**独立一套，可自由填模型名**）。
+     *
+     * 与 [imageProfiles] 同构：名称 / 地址 / Key / 模型名都由用户填，
+     * 不受「已有对话配置」的限制——用户要的就是「我想用哪个模型识图就填哪个」。
+     */
+    val visionProfiles: List<LlmProfile> = emptyList(),
+    val activeVisionProfileId: String? = null,
+
+    /**
      * 专门的**识图模型**：指向 [llmProfiles] 里某一套配置的 id。
      *
      * ## 为什么单独要一个
@@ -196,14 +205,21 @@ data class SettingsSnapshot(
     /** 生图渠道是否可用。所有生图入口统一按这个门禁决定「提示去设置」还是真调 API。 */
     val imageConfigured: Boolean get() = activeImageProfile?.isConfigured() == true
 
+    /** 当前激活的识图模型：显式选的优先，没选过时用第一套。 */
+    val activeVisionProfile: LlmProfile?
+        get() = visionProfiles.firstOrNull { it.id == activeVisionProfileId }
+            ?: visionProfiles.firstOrNull()
+
     /**
-     * 指定的识图模型配置。
+     * 指定的识图模型配置：**独立配置优先**，没配时才回落到
+     * 「从对话模型里指定的那一套」（老机制，存量用户的设置）。
      *
      * 指到一套**已被删除**的配置时返回 null（而不是崩或返回第一套）——
      * 删了配置就等于没指定，回到默认路径。
      */
     val visionProfile: LlmProfile?
-        get() = visionProfileId?.let { id -> llmProfiles.firstOrNull { it.id == id } }
+        get() = activeVisionProfile
+            ?: visionProfileId?.let { id -> llmProfiles.firstOrNull { it.id == id } }
 
     /** 识图模型是否可用（指定了且配置完整）。 */
     val visionConfigured: Boolean get() = visionProfile?.isConfigured() == true
