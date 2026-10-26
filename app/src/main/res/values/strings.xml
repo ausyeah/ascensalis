@@ -710,4 +710,7 @@
     <string name="capture_chat_batch_full">一次最多 9 张，本批已满</string>
     <string name="capture_chat_batch_discard_title">丢弃本批照片？</string>
     <string name="capture_chat_batch_discard_body">本批 %1$d 张将丢弃</string>
-    <string name="crop_chat_skip">不裁切，下一张</string></resources>
+    <string name="crop_chat_skip">不裁切，下一张</string>    <string name="capture_enhance_title">拍照增强调节</string>
+    <string name="capture_enhance_preview">增强预览</string>
+    <string name="capture_enhance_computing">正在计算预览…</string>
+    <string name="capture_enhance_confirm">确认，去裁切</string></resources>

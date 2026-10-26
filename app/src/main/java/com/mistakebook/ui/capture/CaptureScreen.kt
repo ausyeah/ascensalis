@@ -282,6 +282,9 @@ fun CaptureScreen(
         container.captureBatch.isFull()
     }
     var showDiscardDialog by remember { mutableStateOf(false) }
+
+    // T5：单张拍完待调节的原图路径；非空时显示增强调节覆盖层。
+    var adjustPath by remember { mutableStateOf<String?>(null) }
     BackHandler(enabled = batchActive) { showDiscardDialog = true }
 
     if (showDiscardDialog) {
@@ -319,6 +322,25 @@ fun CaptureScreen(
                 }
             }
         )
+    }
+
+    // T5：单张增强调节覆盖层（CHAT 单张链路）。确认后进裁切；取消丢弃本次拍摄。
+    if (adjustPath != null) {
+        EnhanceAdjustOverlay(
+            imagePath = adjustPath.orEmpty(),
+            initialStrength = ocrStrength ?: 2,
+            onConfirmed = { adjustedPath ->
+                adjustPath = null
+                onCropped(adjustedPath)
+            },
+            onDiscarded = {
+                // 丢弃：删掉刚拍的临时原图
+                runCatching { java.io.File(adjustPath.orEmpty()).delete() }
+                adjustPath = null
+            }
+        )
+        // 覆盖层盖住整页时不再渲染相机控制（提前 return 不行——Composable 结构，
+        // 用 Box 层级覆盖即可；快门等控件在覆盖层之下不可点）
     }
 
     if (showKeyGate) {
@@ -574,12 +596,17 @@ fun CaptureScreen(
                                         // 「完成」后经 NavHost 进逐张裁切接力，全部裁完回会话。
                                         // 无批次时保持单张原链路：直接 onCropped(path) 进裁切。
                                         if (batchActive || !container.captureBatch.add(path, fromGallery = false)) {
-                                            if (!batchActive) onCropped(path)
-                                            else Toast.makeText(
-                                                context,
-                                                context.getString(R.string.capture_chat_batch_full),
-                                                Toast.LENGTH_SHORT
-                                            ).show()
+                                            if (!batchActive) {
+                                                // T5 拍照增强可调：单张拍完先进调节步（对刚拍的原图
+                                                // 重新 enhanceForOcr，可切「关」回到原像素），确认再进裁切。
+                                                adjustPath = path
+                                            } else {
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.capture_chat_batch_full),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
                                         }
                                     }
                                 },
