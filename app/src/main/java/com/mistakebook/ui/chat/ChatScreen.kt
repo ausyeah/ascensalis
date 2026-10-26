@@ -244,11 +244,23 @@ fun ChatScreen(
     // 裁切页交回的聊天附件（T12）：扫描相机 + 裁切确认后经容器标志交接。
     // 快照状态驱动重组 → LaunchedEffect 重跑；取走即清，防旧图误入下一轮。
     // 进程死亡不持久化（与旧 TakePicture 方案的记忆边界一致）。
+    // 相机/裁切页交回的待发附件：单张（T12）与多张（T2 对话连拍）两条交接口。
+    // 状态驱动 → LaunchedEffect 消费：取逻辑单一，附件准备异步转 placeholder。
     val pendingChatAttachment = container.pendingChatAttachmentPath
+    val pendingChatAttachments = container.pendingChatAttachmentPaths
     LaunchedEffect(pendingChatAttachment) {
         if (!pendingChatAttachment.isNullOrBlank()) {
             container.pendingChatAttachmentPath = null
             viewModel.onAttachmentPicked(android.net.Uri.fromFile(File(pendingChatAttachment)))
+        }
+    }
+    LaunchedEffect(pendingChatAttachments) {
+        val paths = pendingChatAttachments
+        if (!paths.isNullOrEmpty()) {
+            container.pendingChatAttachmentPaths = null
+            paths.forEach { path ->
+                viewModel.onAttachmentPicked(android.net.Uri.fromFile(File(path)))
+            }
         }
     }
 
@@ -771,9 +783,21 @@ private fun MessageBubble(
                 // 附件从来没进过界面**——模型看得到图，用户这边看不见，
                 // 表现成「图片发不出去」。
                 if (images.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        images.forEach { dataUrl ->
-                            BubbleImage(dataUrl = dataUrl)
+                    // 多图（T2 对话连拍）两两一行；单图保持全宽。
+                    if (images.size == 1) {
+                        BubbleImage(dataUrl = images.first())
+                    } else {
+                        images.chunked(2).forEach { rowImages ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                rowImages.forEach { dataUrl ->
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        BubbleImage(dataUrl = dataUrl)
+                                    }
+                                }
+                                if (rowImages.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                     if (message.content.isNotBlank()) Spacer(Modifier.height(8.dp))

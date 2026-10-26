@@ -427,6 +427,22 @@ class AppContainer(context: Context) {
     var pendingChatAttachmentPath: String? by mutableStateOf(null)
 
     /**
+     * 对话连拍（T2）已裁完成果的暂存队列。
+     *
+     * CHAT 用途的批次在 CropScreen 接力时，每裁完一张就把成果路径推进这里
+     * （原图照旧由 CaptureBatch 管理），全部裁完由 NavHost 统一以多附件
+     * 交接回对话页（[pendingChatAttachmentPaths]）。与单张路径的
+     * [pendingChatAttachmentPath] 互不干扰。
+     */
+    val chatBatchCropped = mutableListOf<String>()
+
+    /**
+     * 交给对话页的**多条**待发附件路径（T2 对话连拍的交接口）。
+     * ChatScreen 的 LaunchedEffect 观察它：非空则逐张加入待发附件并清空。
+     */
+    var pendingChatAttachmentPaths: List<String>? by mutableStateOf(null)
+
+    /**
      * 重裁剪产生的新原图路径。
      * 必须是快照状态：普通 @Volatile 字段不会触发 Compose 重组，
      * 编辑页读不到变化，原图看起来就没被替换。

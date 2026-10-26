@@ -549,6 +549,11 @@ fun CropScreen(
                     zoomPan = Offset.Zero
                     scope.launch { persistSession() }
                 },
+                onSkipCurrent = if (chatMode && container.captureBatch.hasPending) {
+                    { onBatchSkip() }
+                } else {
+                    null
+                },
                 onConfirm = {
                     scope.launch {
                         val committed = strokes
@@ -590,9 +595,24 @@ fun CropScreen(
                                 saved.copyTo(target, overwrite = true)
                                 target.absolutePath
                             }
-                            container.pendingChatAttachmentPath = stagingPath
-                            container.chatCropping = false
-                            onChatConfirmed()
+                            if (container.captureBatch.hasPending) {
+                                // T2 对话连拍接力：成果入 chatBatchCropped，原图出队，
+                                // 还有下一张就导航过去；全部裁完由 NavHost 统一交接。
+                                container.chatBatchCropped += stagingPath
+                                container.captureBatch.commitCropped(stagingPath)
+                                val next = container.captureBatch.paths.firstOrNull()
+                                if (next != null) {
+                                    onBatchNext(next)
+                                } else {
+                                    container.chatCropping = false
+                                    onBatchCompleted()
+                                }
+                            } else {
+                                // 单张原链路（T12）：成果直接交接回对话页
+                                container.pendingChatAttachmentPath = stagingPath
+                                container.chatCropping = false
+                                onChatConfirmed()
+                            }
                             return@launch
                         }
                         // 重新识别（先裁切再识别）：详情页入口进来。

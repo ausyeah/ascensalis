@@ -117,6 +117,25 @@ fun MistakeBookNavHost(
             }
         }
     }
+    /**
+     * T2 对话连拍：把已裁成果整体交接回对话页。
+     *
+     * 成果在 [AppContainer.chatBatchCropped]（每裁完一张推进一张），
+     * 这里一次性交给 [AppContainer.pendingChatAttachmentPaths]，
+     * 由 ChatScreen 的 LaunchedEffect 逐张转成待发附件。
+     * 原图与成果文件**都不删**：附件准备流程（preparer）要复制它们，
+     * 删除时机交给附件生命周期的既有逻辑。
+     */
+    fun submitChatBatch() {
+        // drainCropped 取走成果文件且**不删**（附件准备流程要复制它们）；
+        // 未裁原图按契约清空（接力完成时本就应为空，兜底防泄漏）。
+        container.captureBatch.drainCropped()
+        val paths = container.chatBatchCropped.toList()
+        container.chatBatchCropped.clear()
+        if (paths.isNotEmpty()) {
+            container.pendingChatAttachmentPaths = paths
+        }
+    }
     androidx.compose.runtime.LaunchedEffect(filterDueRequest) {
         if (filterDueRequest > 0) {
             navController.navigate(Routes.HOME) {
@@ -208,13 +227,18 @@ fun MistakeBookNavHost(
                     navController.popBackStack()
                 },
                 onStartBatchCrop = {
-                    // F6：点「完成」。有未裁的从第一张开始逐张裁；
-                    // 若从裁切页返回后已全部裁完（paths 空、成果在册），直接提交。
+                    // F6/T2：点「完成」从第一张未裁的原图开始逐张接力裁切。
+                    // QUESTION 批次裁完直接提交识别；CHAT 批次裁完交接回对话页。
                     val batch = container.captureBatch
                     if (batch.paths.isNotEmpty()) {
                         navController.navigate(Routes.crop(batch.paths.first())) {
                             popUpTo(Routes.CAPTURE) { inclusive = true }
                         }
+                    } else if (container.cameraPurpose ==
+                        AppContainer.CameraPurpose.CHAT
+                    ) {
+                        // 无待裁原图：CHAT 批次全部处理完 → 交接回会话
+                        submitChatBatch()
                     } else {
                         submitCaptureBatch()
                     }
@@ -235,8 +259,10 @@ fun MistakeBookNavHost(
             // 天然互斥；若批次偏偏非空，是状态泄漏——清掉防接力卡死
             // （带着幽灵批次会让每张裁切完都导航去「下一张」死循环）。
             val batchHasPending = container.captureBatch.hasPending
+            // T2 对话连拍：chatCropping + 批次是合法组合（会话多图接力裁切）；
+            // 与 recrop/reRecognize 仍互斥（F6 的冲突守卫保留）。
             val batchMode = batchHasPending &&
-                listOf(recrop, reRecognizeQuestionId != null, chatCropping).count { it } == 0
+                !recrop && reRecognizeQuestionId == null
             if (batchHasPending && !batchMode) {
                 Log.w(
                     "MistakeBookNavHost",
@@ -247,7 +273,7 @@ fun MistakeBookNavHost(
             // 三个模式标志互斥（T11）。同时为真视为 bug：按
             // recropOnly > reRecognize > chatCropping 的优先级取第一个，
             // 其余清掉并留日志——静默择一会把产物送进错误的链路。
-            if (listOf(recrop, reRecognizeQuestionId != null, chatCropping).count { it } > 1) {
+            if (listOf(recrop, reRecognizeQuestionId != null).count { it } > 1) {
                 Log.w(
                     "MistakeBookNavHost",
                     "裁切页模式标志冲突: recropOnly=$recrop reRecognize=$reRecognizeQuestionId chatCropping=$chatCropping"
@@ -272,7 +298,14 @@ fun MistakeBookNavHost(
                         popUpTo(Routes.HOME)
                     }
                 },
-                onBatchCompleted = { submitCaptureBatch() },
+                onBatchCompleted = {
+                    // QUESTION 批次 → 识别；CHAT 批次（T2）→ 交接回对话页
+                    if (container.cameraPurpose == AppContainer.CameraPurpose.CHAT) {
+                        submitChatBatch()
+                    } else {
+                        submitCaptureBatch()
+                    }
+                },
                 onBatchSkip = {
                     // 当前张原图丢失：出队跳过，不阻塞其余
                     container.captureBatch.dropCurrent()
@@ -282,8 +315,17 @@ fun MistakeBookNavHost(
                             popUpTo(Routes.HOME)
                         }
                     } else if (container.captureBatch.cropped.isNotEmpty()) {
-                        // 跳完了但前面已有成果：照常提交
-                        submitCaptureBatch()
+                        // 全部跳到只剩已裁成果，直接收尾：QUESTION → 识别，CHAT → 交接
+                        if (container.cameraPurpose == AppContainer.CameraPurpose.CHAT) {
+                            submitChatBatch()
+                        } else {
+                            submitCaptureBatch()
+                        }
+                    } else if (container.cameraPurpose == AppContainer.CameraPurpose.CHAT &&
+                        container.chatBatchCropped.isNotEmpty()
+                    ) {
+                        // T2：本张跳过但前面已有裁好的 → 交接回会话
+                        submitChatBatch()
                     } else {
                         // 一张都没裁成：回相机页重新来
                         navController.navigate(Routes.CAPTURE)

@@ -705,4 +705,9 @@
     <string name="chat_save_to_note">存入题目备注</string>
     <string name="chat_grading_need_image">批改模式需要附上手写过程照片</string>
     <string name="chat_saved_to_note">已存入题目备注</string>
-</resources>
+    <string name="capture_chat_batch_count">本批 %1$d 张</string>
+    <string name="capture_chat_batch_done">完成</string>
+    <string name="capture_chat_batch_full">一次最多 9 张，本批已满</string>
+    <string name="capture_chat_batch_discard_title">丢弃本批照片？</string>
+    <string name="capture_chat_batch_discard_body">本批 %1$d 张将丢弃</string>
+    <string name="crop_chat_skip">不裁切，下一张</string></resources>

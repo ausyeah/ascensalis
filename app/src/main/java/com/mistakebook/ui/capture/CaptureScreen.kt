@@ -214,6 +214,34 @@ fun CaptureScreen(
         }
     }
 
+    // T2 对话连拍：CHAT 相册多选——全部导入批次，攒完统一走「完成」→ 接力裁切。
+    val galleryChatMultiLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(9)
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            importing = true
+            val files = container.imageImporter.importUris(uris)
+            importing = false
+            if (files.isEmpty()) {
+                errorText = context.getString(R.string.gallery_copy_failed, "")
+            } else {
+                var overflow = false
+                files.forEach { file ->
+                    if (!container.captureBatch.add(file.absolutePath, fromGallery = true)) {
+                        overflow = true
+                    }
+                }
+                if (overflow) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.capture_chat_batch_full),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
     // CHAT 用途的单相册入口：一次一张，和连拍上线前行为一致。
     val gallerySingleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -241,18 +269,41 @@ fun CaptureScreen(
 
     // F6：批次存在时拦截系统返回键，弹「本批 N 张将丢弃」确认，
     // 不让一次误触把刚拍的 5 张题悄无声息地丢掉。
+    // v0.0.51 T2：CHAT 用途的对话连拍共用同一套批次与丢弃确认，
+    // 上限独立 9 张（消息附件数受大模型接口约束，低于识别批次的 12）。
+    val isChatPurpose =
+        container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.CHAT
+    val chatBatchLimit = 9
     val batchSize = container.captureBatch.size
-    val batchActive =
-        container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION &&
-            batchSize > 0
+    val batchActive = batchSize > 0
+    val batchFull = if (isChatPurpose) {
+        batchSize >= chatBatchLimit
+    } else {
+        container.captureBatch.isFull()
+    }
     var showDiscardDialog by remember { mutableStateOf(false) }
     BackHandler(enabled = batchActive) { showDiscardDialog = true }
 
     if (showDiscardDialog) {
         AlertDialog(
             onDismissRequest = { showDiscardDialog = false },
-            title = { Text(stringResource(R.string.capture_batch_discard_title)) },
-            text = { Text(stringResource(R.string.capture_batch_discard_body, batchSize)) },
+            title = {
+                Text(
+                    stringResource(
+                        if (isChatPurpose) R.string.capture_chat_batch_discard_title
+                        else R.string.capture_batch_discard_title
+                    )
+                )
+            },
+            text = {
+                Text(
+                    stringResource(
+                        if (isChatPurpose) R.string.capture_chat_batch_discard_body
+                        else R.string.capture_batch_discard_body,
+                        batchSize
+                    )
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     // clear() 会连文件一起删：未裁原图与已裁成果都属于本批，
@@ -407,7 +458,8 @@ fun CaptureScreen(
             }
         }
 
-        // F6：连拍批次悬浮计数 + 「完成」。只有 QUESTION 用途有批次。
+        // F6：连拍批次悬浮计数 + 「完成」。QUESTION 与 CHAT（T2 对话连拍）都有批次；
+        // 计数文案不同（本批 N 张），上限不同（12 / 9）。
         if (batchActive) {
             Row(
                 modifier = Modifier
@@ -420,7 +472,11 @@ fun CaptureScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = stringResource(R.string.capture_batch_count, batchSize),
+                    text = stringResource(
+                        if (isChatPurpose) R.string.capture_chat_batch_count
+                        else R.string.capture_batch_count,
+                        batchSize
+                    ),
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -428,7 +484,12 @@ fun CaptureScreen(
                     onClick = onStartBatchCrop,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
                 ) {
-                    Text(stringResource(R.string.capture_batch_done))
+                    Text(
+                        stringResource(
+                            if (isChatPurpose) R.string.capture_chat_batch_done
+                            else R.string.capture_batch_done
+                        )
+                    )
                 }
             }
         }
@@ -443,12 +504,13 @@ fun CaptureScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             IconButton(onClick = {
-                if (container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION) {
-                    galleryMultiLauncher.launch(
+                if (isChatPurpose) {
+                    // T2 对话连拍：相册也多选入批（上限 9 由批次满员 toast 兜底）
+                    galleryChatMultiLauncher.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 } else {
-                    gallerySingleLauncher.launch(
+                    galleryMultiLauncher.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 }
@@ -469,10 +531,13 @@ fun CaptureScreen(
                         container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION
                     // F6：批次满员时快门不再拍照，toast 引导去裁切/完成。
                     // MinerU 串行解析，12 张已接近耐心极限，更大批量走 PDF 导入。
-                    if (isQuestion && container.captureBatch.isFull()) {
+                    if (batchFull) {
                         Toast.makeText(
                             context,
-                            context.getString(R.string.capture_batch_full),
+                            context.getString(
+                                if (isQuestion) R.string.capture_batch_full
+                                else R.string.capture_chat_batch_full
+                            ),
                             Toast.LENGTH_SHORT
                         ).show()
                     } else {
@@ -505,7 +570,17 @@ fun CaptureScreen(
                                     if (isQuestion) {
                                         container.captureBatch.add(path, fromGallery = false)
                                     } else {
-                                        onCropped(path)
+                                        // T2 对话连拍：CHAT 拍完入批不退出（与 QUESTION 共用批次容器），
+                                        // 「完成」后经 NavHost 进逐张裁切接力，全部裁完回会话。
+                                        // 无批次时保持单张原链路：直接 onCropped(path) 进裁切。
+                                        if (batchActive || !container.captureBatch.add(path, fromGallery = false)) {
+                                            if (!batchActive) onCropped(path)
+                                            else Toast.makeText(
+                                                context,
+                                                context.getString(R.string.capture_chat_batch_full),
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
                                     }
                                 },
                                 onError = {
