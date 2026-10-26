@@ -248,13 +248,9 @@ fun RichText(
 
                 is MarkdownParser.Block.Table -> TableBlock(block)
 
-                is MarkdownParser.Block.Image -> AsyncImage(
-                    model = block.path,
-                    contentDescription = block.alt,
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                is MarkdownParser.Block.Image -> ImageBlock(
+                    path = block.path,
+                    alt = block.alt
                 )
 
                 is MarkdownParser.Block.Math -> if (block.complete) {
@@ -364,6 +360,47 @@ internal fun mathKey(span: InlineSpan.Math): String =
  * 注意是**降级**不是渲染——`$\frac{1}{2}$` 变成 `1/2`，
  * 至少用户看得懂内容，好过看到 `$\frac{1}{2}$` 这串噪声。
  */
+/**
+ * 图片块：**只有能确认可加载时才交给 Coil**。
+ *
+ * 本地绝对路径在文件不存在 / 不可读时直接给占位，不把异常路径丢进解码
+ * 链路。旧版生图结果曾把 `![](/data/user/0/.../p_xxx.png)` 写进正文，
+ * 这类引用是「点开某个会话就闪退」被怀疑的来源——即便它不是根因，
+ * 让渲染对坏路径免疫也不亏。
+ */
+@Composable
+private fun ImageBlock(path: String, alt: String) {
+    val usable = remember(path) {
+        when {
+            path.isBlank() -> false
+            path.startsWith("http", ignoreCase = true) -> true
+            path.startsWith("content://", ignoreCase = true) -> true
+            path.startsWith("file://", ignoreCase = true) -> true
+            else -> java.io.File(path).isFile
+        }
+    }
+    if (!usable) {
+        Text(
+            text = "图片不可用",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                .padding(8.dp)
+        )
+        return
+    }
+    AsyncImage(
+        model = path,
+        contentDescription = alt,
+        contentScale = ContentScale.FillWidth,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    )
+}
+
 @Composable
 private fun TableBlock(block: MarkdownParser.Block.Table) {
     val columnCount = block.rows.maxOf { it.size }.coerceAtLeast(1)

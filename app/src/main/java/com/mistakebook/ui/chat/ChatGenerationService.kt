@@ -462,14 +462,20 @@ class ChatGenerationService : Service() {
                 toolRound++
             }
 
-            // 生图工具产出的图：以 Markdown 图片接到回答末尾。
-            // 不接的话模型说「图已生成」，用户却什么都看不到。
+            // 生图工具产出的图：**存成会话附件**，不写进消息正文。
+            //
+            // 早先是往 content 里追加 `![](绝对路径)`，三个问题：
+            // ① 绝对路径进了正文，每次打开会话都要走一遍 Markdown 解析；
+            // ② 路径指向 filesDir/images/gen 的缓存文件，缓存清理后整条
+            //    会话的图变死链；③ 有用户反馈「生图后这个对话点进去就闪退」。
+            // 走附件：图复制到会话目录（删会话一并清理），渲染走已验证的
+            // 气泡图片路径，正文保持干净。
             if (generatedImages.isNotEmpty()) {
-                rounds.onDelta(
-                    buildString {
-                        generatedImages.forEach { path -> append("\n\n![]($path)") }
+                generatedImages.forEach { path ->
+                    runCatching {
+                        persistGeneratedImage(container, sessionId, assistantId, path)
                     }
-                )
+                }
                 publishPreview()
             }
         } catch (cancelled: CancellationException) {
@@ -613,6 +619,39 @@ class ChatGenerationService : Service() {
      * 出口优先级同旧版：用户选了 DeepSeek 就先试官方搜索（复用其渠道
      * Key），渠道不在或失败则退 Tavily；直接选 Tavily 就只用 Tavily。
      */
+    /**
+     * 把生图结果落到会话附件表：复制进会话目录 + 插一条 IMAGE 附件。
+     *
+     * 走附件而不是写正文的理由见调用处注释。附件路径是成熟的渲染路径
+     * （[com.mistakebook.ui.chat.ChatViewModel.loadBubbleImages] 直接出图），
+     * 且删会话时随目录一起清理。
+     */
+    private suspend fun persistGeneratedImage(
+        container: com.mistakebook.di.AppContainer,
+        sessionId: Long,
+        assistantId: Long,
+        sourcePath: String
+    ) {
+        val src = File(sourcePath)
+        if (!src.isFile || src.length() == 0L) return
+        val dir = container.files.chatDir(sessionId).apply { mkdirs() }
+        val target = File(dir, "gen_${System.currentTimeMillis()}_${src.name}")
+        src.copyTo(target, overwrite = true)
+        container.chatRepository.insertAttachment(
+            com.mistakebook.data.local.entities.ChatAttachment(
+                messageId = assistantId,
+                sessionId = sessionId,
+                kind = com.mistakebook.domain.AttachmentKind.IMAGE,
+                localPath = target.absolutePath,
+                fileName = "示意图.png",
+                mimeType = "image/png",
+                status = com.mistakebook.domain.AttachmentStatus.READY,
+                sizeBytes = target.length(),
+                createdAt = System.currentTimeMillis()
+            )
+        )
+    }
+
     /**
      * 本次会话最近一张用户发的图：消息里存的是 base64 data URL，
      * 识图接口要的是本地文件，这里解码落一份临时文件。

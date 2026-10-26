@@ -274,6 +274,13 @@ class ChatRepository(
 
     suspend fun attachmentById(id: Long): ChatAttachment? = chatDao.findAttachment(id)
 
+    /** 按消息 id 查附件（assistant 消息的图片不写 attachmentIdsJson，直接按 messageId 查）。 */
+    suspend fun attachmentsOf(messageId: Long): List<ChatAttachment> = chatDao.attachmentsOf(messageId)
+
+    /** 整个会话的附件（一次查完，按 messageId 分组给气泡图用）。 */
+    suspend fun attachmentsOfSession(sessionId: Long): List<ChatAttachment> =
+        chatDao.attachmentsOfSession(sessionId)
+
     /**
      * 附件图片 -> base64 data URL。给聊天气泡显示用。
      *

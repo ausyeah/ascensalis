@@ -220,6 +220,15 @@ interface ChatDao {
     suspend fun attachmentsOf(messageId: Long): List<ChatAttachment>
 
     /**
+     * 一次取整个会话的附件，按 messageId 分组用。
+     *
+     * 逐条消息查会在长会话里打出几十次查询——气泡图是每次消息列表变化
+     * 都要重算的，这里必须一次查完。
+     */
+    @Query("SELECT * FROM chat_attachments WHERE sessionId = :sessionId ORDER BY id ASC")
+    suspend fun attachmentsOfSession(sessionId: Long): List<ChatAttachment>
+
+    /**
      * 会话里所有**图片**附件（按 id 倒序，最新的在前）。
      *
      * 用于「模型不识图时补做 OCR」：历史轮次里的图片也得有文字，

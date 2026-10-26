@@ -535,7 +535,10 @@ class ChatViewModel(
      * 走 `ChatImageDataUrls` 的 LRU 缓存，重复重组不会反复 base64。
      */
     private fun loadBubbleImages(messages: List<ChatMessage>) {
-        val targets = messages.filter { it.role == ChatRole.USER && it.attachmentIdsJson.isNotBlank() }
+        // 附属在消息上的图片有两类来源：用户发的（attachmentIdsJson 登记过）
+        // 与助手生成的（生图工具产物，附件表里按 messageId 直接挂着）。
+        // 所以不能只筛 USER 消息，否则生图结果永远不出现在气泡里。
+        val targets = messages.filter { it.attachmentIdsJson.isNotBlank() || it.role != ChatRole.USER }
         if (targets.isEmpty()) {
             if (_state.value.bubbleImages.isNotEmpty() || _state.value.bubbleFiles.isNotEmpty()) {
                 _state.value = _state.value.copy(bubbleImages = emptyMap(), bubbleFiles = emptyMap())
@@ -546,9 +549,16 @@ class ChatViewModel(
         bubbleImageJob = viewModelScope.launch(Dispatchers.IO) {
             val loaded = mutableMapOf<Long, List<String>>()
             val loadedFiles = mutableMapOf<Long, List<BubbleFile>>()
+            // 一次查完整个会话的附件：逐条查在长会话里是几十次 DB 往返
+            val sessionId = _state.value.sessionId
+            val byMessage = runCatching { repository.attachmentsOfSession(sessionId) }
+                .getOrDefault(emptyList())
+                .groupBy { it.messageId }
             targets.forEach { message ->
-                val attachments = message.attachmentIds()
-                    .mapNotNull { repository.attachmentById(it) }
+                val attachments = byMessage[message.id].orEmpty().ifEmpty {
+                    // 兼容旧数据：只在 attachmentIdsJson 里登记过的附件
+                    message.attachmentIds().mapNotNull { repository.attachmentById(it) }
+                }
                 val urls = attachments
                     .filter { it.kind == AttachmentKind.IMAGE && it.status == AttachmentStatus.READY }
                     .mapNotNull { attachment -> repository.imageDataUrlOf(attachment) }

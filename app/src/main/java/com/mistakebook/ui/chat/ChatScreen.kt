@@ -800,7 +800,11 @@ private fun MessageBubble(
                 // 流式时把尾巴上未闭合的公式先藏起来：半截公式一旦进 RichText
                 // 就会先显示源码、拼完再跳成公式。等配对符到齐再整段渲染滑入。
                 val displayAnswer = remember(answer, isStreaming) {
-                    if (isStreaming) trimIncompleteTrailingFormula(answer) else answer
+                    val base = if (isStreaming) trimIncompleteTrailingFormula(answer) else answer
+                    // v0.0.46 的生图结果曾以 `![](绝对路径)` 写进正文，
+                    // 老会话里的这类引用会走到图片解码（用户报点开闪退）。
+                    // 新版已改存附件，这里负责把历史消息里的残留剥干净。
+                    LegacyImageRefs.strip(base)
                 }
                 // 阶段提示：联网搜索要几秒到十几秒，没这行就是又一例「点了没反应」。
                 // 不要求内容为空——工具循环里搜索期间气泡**带着已生成的内容**，
