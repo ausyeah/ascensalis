@@ -167,15 +167,18 @@ fun RichText(
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEach { block ->
             when (block) {
-                is MarkdownParser.Block.Heading -> Text(
+                is MarkdownParser.Block.Heading -> InlineText(
                     text = block.text,
+                    mathCache = mathCache,
+                    targetFontPx = targetFontPx,
                     style = when (block.level) {
                         1 -> MaterialTheme.typography.titleLarge
                         2 -> MaterialTheme.typography.titleMedium
                         else -> MaterialTheme.typography.titleSmall
                     },
                     color = color,
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = 4.dp),
+                    showSourceFallback = !streaming
                 )
 
                 is MarkdownParser.Block.Paragraph -> InlineText(
@@ -307,6 +310,9 @@ private fun collectMathKeys(blocks: List<MarkdownParser.Block>, maxMathChars: In
                 MathWrap.splitForDisplay(block.latex, maxMathChars).forEach { keys += "d:$it" }
             }
             is MarkdownParser.Block.Paragraph -> keys += segmentMathKeys(block.text)
+            // 标题里的行内公式也要渲染（v0.0.51 用例 B2：Heading 之前不走
+            // 行内解析，$…$ 连定界符一起原样显示）；键必须与渲染处一致
+            is MarkdownParser.Block.Heading -> keys += segmentMathKeys(block.text)
             is MarkdownParser.Block.ListItem -> keys += segmentMathKeys(block.text)
             is MarkdownParser.Block.Quote -> keys += segmentMathKeys(block.text)
             // 表格单元格里的行内公式也要渲染：键与 [TableBlock] 里取的完全一致

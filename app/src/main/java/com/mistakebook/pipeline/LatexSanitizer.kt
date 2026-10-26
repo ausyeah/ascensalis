@@ -80,6 +80,65 @@ object LatexSanitizer {
     private val MULTI_SPACE = Regex("\\s{2,}")
 
     /**
+     * 裸 LaTeX 救援（v0.0.51 用例 B1）：模型整段输出 LaTeX 却忘了 `$$` 包裹。
+     *
+     * 挂在 Markdown 解析的独立段落入口：对「整段就是一条独立公式、
+     * 但没带定界符」的文本自动包上 `$$…$$`。
+     *
+     * 启发式**必须保守**——把正常中文误包成公式比显示源码更糟：
+     * - 长度合理，且不以叙述标点收尾（公式行不会用「。：，」结尾）；
+     * - LaTeX 令牌（`\命令`、`&`、`\\`、上下标）密度达标；
+     * - 含大段中文叙述（>6 个连续汉字，通常只有正文才有）不包；
+     * - `\begin{…}` / `\end{…}` 成对出现是强信号，直接接受。
+     *
+     * 返回 null 表示「不像裸公式」，调用方按原样渲染。
+     */
+    fun rescueUndelimited(text: String): String? {
+        val line = text.trim()
+        if (line.length < 6 || line.length > 400) return null
+        // 已带任何一种公式定界符的不归这里管
+        if (line.contains("$$") || line.contains("\\[")) return null
+        // 正文的行会以叙述标点收尾；公式行不会
+        if (line.endsWith("。") || line.endsWith("，") || line.endsWith("？") ||
+            line.endsWith("！") || line.endsWith("；") || line.endsWith(":") ||
+            line.endsWith("：") || line.endsWith(".") || line.endsWith(",") ||
+            line.endsWith("?") || line.endsWith("!") || line.endsWith(";")
+        ) {
+            return null
+        }
+        val commands = COMMAND_DENSITY.findAll(line).toList()
+        // 令牌：\命令、& 对齐、\\ 换行、上下标
+        val structuralTokens = line.count { it == '&' } +
+            Regex("""\\\\""").findAll(line).count() * 2 +
+            Regex("""[_^]\{?""").findAll(line).count()
+        val tokenCount = commands.size + structuralTokens
+        if (tokenCount < 3) return null
+        // 长中文叙述只出现在正文里；公式里的中文应包在 \text{} 内、且很短
+        val cjkRun = CJK_RUN.findAll(line).maxOfOrNull { it.value.length } ?: 0
+        if (cjkRun > 6) return null
+        // 环境结构是强信号：\begin{…} 与 \end{…} 成对出现即接受
+        val beginCount = Regex("""\\begin\{""").findAll(line).count()
+        val endCount = Regex("""\\end\{""").findAll(line).count()
+        if (beginCount in 1..endCount) return "$$" + line + "$$"
+        // 其余按「\命令开头」或「命令密度」判定
+        val densityOk = commands.size >= 2 && tokenCount >= 4
+        return if (startsWithLatexCommand(line) || densityOk) "$$" + line + "$$" else null
+    }
+
+    /** 整行是否以一个 `\command` 开头（命令名至少一个字母）。 */
+    private fun startsWithLatexCommand(line: String): Boolean {
+        if (!line.startsWith("\\")) return false
+        var i = 1
+        while (i < line.length && line[i].isLetter()) i++
+        return i > 1
+    }
+
+    /** `\命令`（只匹配命令名，用于密度统计）。 */
+    private val COMMAND_DENSITY = Regex("""\\[a-zA-Z]+""")
+
+    /** 连续中文片段（不含全角标点——标点在公式里也可能出现在 \text 内）。 */
+    private val CJK_RUN = Regex("""[\u4E00-\u9FFF]+""")
+    /**
      * 清理行内公式里最常见的致命问题：未配对的 `$`。
      *
      * 上游 [JsonExtractor] 已保证 `$` 成对，这里只兜底极端情况。

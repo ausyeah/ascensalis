@@ -156,14 +156,19 @@ object MathWrap {
     /**
      * 贪心断行：窗口内找**最后一个**顶层断点切开，运算符留在行尾。
      *
-     * 找不到断点（一整条没有顶层运算符的长公式，如超长的连乘）就硬切窗口。
+     * 找不到顶层断点（一整条没有顶层运算符的长公式，如超长的连乘）时，
+     * 退而求其次在窗口内**最后一个命令边界/空白处**切开——绝不在命令中间硬切：
+     * `\cos` 硬切成 `\c` + `os` 后，`\c` 不是 KaTeX 命令，整段降级成乱码文本，
+     * 用户看到的就是「公式右半边凭空消失/变成怪字」（v0.0.51 用例 A）。
      */
     private fun greedySplit(latex: String, maxChars: Int): List<String> {
         val out = mutableListOf<String>()
         var start = 0
         while (latex.length - start > maxChars) {
             val windowEnd = start + maxChars
-            val cut = findBreak(latex, start, windowEnd) ?: windowEnd
+            val cut = findBreak(latex, start, windowEnd)
+                ?: findSoftBreak(latex, start, windowEnd)
+                ?: windowEnd
             val line = latex.substring(start, cut).trim()
             if (line.isNotEmpty()) out += line
             start = cut
@@ -173,6 +178,70 @@ object MathWrap {
             if (tail.isNotEmpty()) out += tail
         }
         return out.ifEmpty { listOf(latex.trim()) }
+    }
+
+    /**
+     * 窗口内**最后一个安全的软切点**：空白处或命令结束边界。
+     *
+     * 在命令名内部切开会产生非法残命令（`\cos` → `\c` + `os`），
+     * 在 `{`/`}` 之间切开会拆坏参数结构。所以软切点只认：
+     * - 空白字符之后；
+     * - 一个完整 `\command`（含紧跟的花括号参数）结束之后。
+     * 找不到返回 null，调用方兜底硬切——宁超宽不破碎，超宽由渲染端缩字号兜住。
+     */
+    private fun findSoftBreak(latex: String, from: Int, windowEnd: Int): Int? {
+        // 允许比窗口超出最多一个命令的回吐，与 findBreak 的 MAX_OVERSHOOT 同理
+        val searchEnd = (windowEnd + MAX_OVERSHOOT).coerceAtMost(latex.length)
+        var best: Int? = null
+        var i = from
+        while (i < searchEnd) {
+            val c = latex[i]
+            if (c == '\\') {
+                var j = i + 1
+                while (j < latex.length && latex[j].isLetter()) j++
+                if (j == i + 1) {
+                    // `\ `、`\{` 之类单字符控制符号：符号本身之后是安全切点
+                    i = j + 1
+                    if (j > from + 4) best = j
+                    continue
+                }
+                // 吃掉紧跟的花括号参数（最多两层，够 \frac{a}{b}）
+                var guard = 0
+                while (guard < 2) {
+                    var k = j
+                    while (k < latex.length && latex[k].isWhitespace()) k++
+                    if (k < latex.length && latex[k] == '{') {
+                        val close = findMatchingBraceAt(latex, k)
+                        if (close < 0) { j = latex.length; break }
+                        j = close + 1
+                        guard++
+                    } else break
+                }
+                if (j <= searchEnd && j > from + 4) best = j
+                i = j
+                continue
+            }
+            if (c == ' ' && i > from + 4) best = i + 1
+            i++
+        }
+        return best
+    }
+
+    /** 找 start 处 `{` 的配对 `}`，找不到返回 -1。 */
+    private fun findMatchingBraceAt(text: String, start: Int): Int {
+        var depth = 0
+        var i = start
+        while (i < text.length) {
+            when (text[i]) {
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) return i
+                }
+            }
+            i++
+        }
+        return -1
     }
 
     /**

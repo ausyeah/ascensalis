@@ -138,9 +138,27 @@ object MarkdownParser {
         // `\left{`、`&` 于是漏进普通文本，整块渲染不出来。
         var bracketMath: StringBuilder? = null
 
-        fun flushParagraph() {
+        /**
+         * 裸 LaTeX 救援（v0.0.51 用例 B1）：整段输出 LaTeX 却没有 `$$` 包裹。
+         *
+         * 判定交给 [com.mistakebook.pipeline.LatexSanitizer.rescueUndelimited]，
+         * 只在「独立成段」的文本上调用——段内混有正文的由启发式的
+         * 中文/标点反例拦下。救援失败（null）按原样走普通段落。
+         * 所有 flush 点统一走这里，消息中部的裸公式段也能救到。
+         */
+        fun flushParagraphWithRescue() {
             if (paragraph.isNotBlank()) {
-                blocks += paragraphBlock(paragraph.toString().trim())
+                val raw = paragraph.toString().trim()
+                val rescued = runCatching {
+                    com.mistakebook.pipeline.LatexSanitizer.rescueUndelimited(raw)
+                }.getOrNull()
+                if (rescued != null) {
+                    val latex = rescued.trim().removePrefix("$$").removeSuffix("$$").trim()
+                    blocks += Block.Math(latex, true)
+                    paragraph.clear()
+                    return
+                }
+                blocks += paragraphBlock(raw)
             }
             paragraph.clear()
         }
@@ -197,7 +215,7 @@ object MarkdownParser {
                         codeLanguage = ""
                         inCode = false
                     } else {
-                        flushParagraph()
+                        flushParagraphWithRescue()
                         // 开围栏那行的剩余内容就是语言标记：
                         // ```svg / ```python / ```（空）
                         codeLanguage = line.trimStart()
@@ -212,16 +230,16 @@ object MarkdownParser {
 
                 inCode -> code.appendLine(line)
 
-                line.isBlank() -> flushParagraph()
+                line.isBlank() -> flushParagraphWithRescue()
 
                 // 独占一行的 `$$`：进入公式块，攒到下一个独占的 `$$` 为止
                 line.trim() == "\$\$" -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     displayMath = StringBuilder()
                 }
 
                 line.trimStart().startsWith("$$") -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val closeAt = line.indexOf("$$", 2)
                     if (closeAt > 2) {
                         val latex = line.trim().removePrefix("$$").substring(0, closeAt - 2).trim()
@@ -237,7 +255,7 @@ object MarkdownParser {
                 // 模型（尤其 DeepSeek/o 系）输出独立公式时发 `\[..\]` 是常态，
                 // 只认 `$$` 会让整块公式以源码形式躺在段落里。
                 line.trimStart().startsWith("\\[") -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val closeAt = line.indexOf("\\]", 2)
                     if (closeAt > 2) {
                         val latex = line.trim().substring(2, closeAt).trim()
@@ -255,28 +273,28 @@ object MarkdownParser {
                 }
 
                 line.matches(RULE_REGEX) -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     blocks += Block.Rule
                 }
 
                 line.trimStart().startsWith("#") -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val level = line.takeWhile { it == '#' }.length.coerceIn(1, 6)
                     blocks += Block.Heading(level, line.trimStart().drop(level).trim())
                 }
 
                 line.trimStart().startsWith(">") -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     blocks += Block.Quote(line.trimStart().removePrefix(">").trim())
                 }
 
                 isPipeTableRow(line) -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     parsePipeTable(lines, line, blocks)
                 }
 
                 isImageLine(line) -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val match = IMAGE_LINE_REGEX.find(line)
                     if (match != null) {
                         blocks += Block.Image(match.groupValues[2].trim(), match.groupValues[1])
@@ -284,7 +302,7 @@ object MarkdownParser {
                 }
 
                 isListItem(line) -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val marker = line.trimStart().takeWhile { !it.isWhitespace() }
                     blocks += Block.ListItem(
                         marker = marker,
@@ -298,7 +316,7 @@ object MarkdownParser {
                 }
             }
         }
-        flushParagraph()
+        flushParagraphWithRescue()
         // 没闭合的 `$$`：照样产出块。
         //
         // 流式输出时正文尾端正停在 `$$x = ` 这种半截状态，之后每个新 chunk
