@@ -101,7 +101,13 @@ class PomodoroViewModel(
     /** 学科列表：复用错题本那套学科（见 PomodoroTask 的注释）。 */
     private val subjectsFlow: StateFlow<List<Subject>>,
     /** 打卡海报生图（与词库统计页共用同一条流水线）。 */
-    private val posterImageService: com.mistakebook.poster.PosterImageService
+    private val posterImageService: com.mistakebook.poster.PosterImageService,
+    /**
+     * 海报生图的**后台任务状态**。
+     *
+     * 挂在 appScope 上（与应用同生命周期），用户离开页面也不会丢。
+     */
+    private val posterWorkMonitorRef: com.mistakebook.poster.PosterWorkMonitor
 ) : AndroidViewModel(app) {
 
     private val _ui = MutableStateFlow(PomodoroUiState())
@@ -576,28 +582,35 @@ class PomodoroViewModel(
      * 生成「今日专注」打卡海报。
      *
      * @param mode 背景图模式（文字本地画）或整图模式（文字也交给生图模型）。
-     * @param onBitmap 成功回调；[onFailed] 失败回调。
+     *
+     * ## 生图走**后台任务**（v0.0.50）
+     *
+     * 早先直接在 `viewModelScope` 里生成，用户离开页面协程就被取消，
+     * 请求断在半路。现在改为 WorkManager 任务，离开页面照跑；
+     * 进度与结果由挂在 appScope 上的 [com.mistakebook.poster.PosterWorkMonitor] 广播。
      */
-    fun generateFocusPoster(
-        mode: com.mistakebook.poster.PosterImageMode,
-        onBitmap: (android.graphics.Bitmap) -> Unit,
-        onFailed: (String) -> Unit = { message.value = it }
-    ) {
+    fun generateFocusPoster(mode: com.mistakebook.poster.PosterImageMode) {
         val state = _ui.value
-        viewModelScope.launch {
-            val content = buildPomodoroPosterContent(state)
-            when (val result = posterImageService.generate(content, mode)) {
-                is com.mistakebook.net.ApiResult.Success -> {
-                    withContext(Dispatchers.Main) { onBitmap(result.data) }
-                }
+        val content = buildPomodoroPosterContent(state)
+        com.mistakebook.poster.PosterScheduler.enqueue(
+            context = getApplication<android.app.Application>(),
+            source = com.mistakebook.di.SOURCE_POMODORO,
+            content = content,
+            mode = mode
+        )
+    }
 
-                is com.mistakebook.net.ApiResult.Failure -> {
-                    val text =
-                        "海报生成失败：${result.error.serverMessage.ifBlank { "请检查生图配置" }}"
-                    withContext(Dispatchers.Main) { onFailed(text) }
-                }
-            }
-        }
+    /** 海报生图的后台任务状态（由 [com.mistakebook.poster.PosterWorkMonitor] 广播）。 */
+    val posterWorkState: kotlinx.coroutines.flow.StateFlow<com.mistakebook.poster.PosterWorkState>
+        get() = posterWorkMonitorRef.state
+
+    /** 海报生图后台任务的监视器（界面用它订阅状态）。 */
+    val posterWorkMonitor: com.mistakebook.poster.PosterWorkMonitor
+        get() = posterWorkMonitorRef
+
+    /** 后台任务失败时给界面一条提示。 */
+    fun showPosterError(text: String) {
+        message.value = text
     }
 
     // ------------------------------------------------- 单日专注卡（可翻页）

@@ -150,7 +150,8 @@ fun PomodoroScreen(container: AppContainer) {
             subjectDao = c.subjectDao,
             timer = c.pomodoroTimer,
             subjectsFlow = c.subjectsFlow,
-            posterImageService = c.posterImageService
+            posterImageService = c.posterImageService,
+            posterWorkMonitorRef = c.pomodoroPosterMonitor
         )
     }
     val state by viewModel.ui.collectAsStateWithLifecycle()
@@ -226,9 +227,11 @@ fun PomodoroScreen(container: AppContainer) {
                     onShiftDay = viewModel::shiftSingleDay,
                     onResetStats = viewModel::resetStats,
                     onManualEntry = { viewModel.openManualEntry() },
-                    onGeneratePoster = { mode, onBitmap, onFailed ->
-                        viewModel.generateFocusPoster(mode, onBitmap, onFailed)
+                    onGeneratePoster = { mode ->
+                        viewModel.generateFocusPoster(mode)
                     },
+                    posterWorkMonitor = viewModel.posterWorkMonitor,
+                    onPosterFailed = { message -> viewModel.showPosterError(message) },
                     onImportCsv = {
                         csvLauncher.launch(
                             arrayOf(
@@ -1468,12 +1471,15 @@ internal fun StatsTab(
      *
      * 与词库统计页的「打卡海报」共用同一条流水线（本地渲染 / 背景图生图 /
      * 整图生图），只是数据口径不同。
+     *
+     * 生图走**后台任务**（WorkManager）：这里只负责「发起」，
+     * 进度与结果由 [posterWorkMonitor] 广播（见 [com.mistakebook.poster.rememberPosterWorkHandler]）。
      */
-    onGeneratePoster: (
-        mode: com.mistakebook.poster.PosterImageMode,
-        onBitmap: (android.graphics.Bitmap) -> Unit,
-        onFailed: (String) -> Unit
-    ) -> Unit = { _, _, _ -> }
+    onGeneratePoster: (mode: com.mistakebook.poster.PosterImageMode) -> Unit = { },
+    /** 海报生图后台任务的监视器（界面用它订阅状态）。 */
+    posterWorkMonitor: com.mistakebook.poster.PosterWorkMonitor? = null,
+    /** 后台任务失败时的提示回调。 */
+    onPosterFailed: (String) -> Unit = { }
 ) {
     var confirmReset by remember { mutableStateOf(false) }
     // 翻页位置留在 LazyColumn 的 state 里：切去计时页再回来，
@@ -1776,8 +1782,6 @@ internal fun StatsTab(
         item {
             val context = LocalContext.current
             val scope = rememberCoroutineScope()
-            var generating by remember { mutableStateOf(false) }
-            var generatingMode by remember { mutableStateOf<String?>(null) }
 
             suspend fun saveAndShare(bitmap: android.graphics.Bitmap) {
                 val uri = withContext(Dispatchers.IO) {
@@ -1792,11 +1796,20 @@ internal fun StatsTab(
                 }
             }
 
+            // 生图走**后台任务**：离开页面照跑，回来能取回结果。
+            val posterWork = posterWorkMonitor?.let { monitor ->
+                com.mistakebook.poster.rememberPosterWorkHandler(
+                    monitor = monitor,
+                    onBitmap = { bitmap -> scope.launch { saveAndShare(bitmap) } },
+                    onFailed = { message -> onPosterFailed(message) }
+                )
+            }
+            val generating = posterWork?.value is com.mistakebook.poster.PosterWorkState.Running
+
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = {
                         if (generating) return@OutlinedButton
-                        generating = true
                         scope.launch {
                             val bitmap = withContext(Dispatchers.Default) {
                                 com.mistakebook.poster.PosterRenderer.render(
@@ -1804,7 +1817,6 @@ internal fun StatsTab(
                                 )
                             }
                             saveAndShare(bitmap)
-                            generating = false
                         }
                     },
                     enabled = !generating,
@@ -1813,41 +1825,19 @@ internal fun StatsTab(
                         .height(50.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    if (generating) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("生成中…")
-                    } else {
-                        Icon(
-                            Icons.Outlined.Share,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("生成今日专注打卡")
-                    }
+                    Icon(
+                        Icons.Outlined.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("生成今日专注打卡")
                 }
 
                 OutlinedButton(
                     onClick = {
                         if (generating) return@OutlinedButton
-                        generating = true
-                        generatingMode = "background"
-                        onGeneratePoster(
-                            com.mistakebook.poster.PosterImageMode.BACKGROUND,
-                            { bitmap ->
-                                scope.launch { saveAndShare(bitmap) }
-                                generating = false
-                                generatingMode = null
-                            },
-                            { message ->
-                                generating = false
-                                generatingMode = null
-                            }
-                        )
+                        onGeneratePoster(com.mistakebook.poster.PosterImageMode.BACKGROUND)
                     },
                     enabled = !generating,
                     modifier = Modifier
@@ -1855,7 +1845,7 @@ internal fun StatsTab(
                         .height(50.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    if (generatingMode == "background") {
+                    if (generating) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp
@@ -1871,20 +1861,7 @@ internal fun StatsTab(
                 OutlinedButton(
                     onClick = {
                         if (generating) return@OutlinedButton
-                        generating = true
-                        generatingMode = "full"
-                        onGeneratePoster(
-                            com.mistakebook.poster.PosterImageMode.FULL,
-                            { bitmap ->
-                                scope.launch { saveAndShare(bitmap) }
-                                generating = false
-                                generatingMode = null
-                            },
-                            { message ->
-                                generating = false
-                                generatingMode = null
-                            }
-                        )
+                        onGeneratePoster(com.mistakebook.poster.PosterImageMode.FULL)
                     },
                     enabled = !generating,
                     modifier = Modifier
@@ -1892,7 +1869,7 @@ internal fun StatsTab(
                         .height(50.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    if (generatingMode == "full") {
+                    if (generating) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp
@@ -1903,6 +1880,14 @@ internal fun StatsTab(
                         Spacer(Modifier.width(8.dp))
                         Text("生图打卡")
                     }
+                }
+
+                if (generating) {
+                    Text(
+                        text = "生图在后台继续运行，离开这个页面也不会中断。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

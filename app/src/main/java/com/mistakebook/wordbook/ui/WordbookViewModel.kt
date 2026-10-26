@@ -1528,28 +1528,35 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
      *
      * @param onBitmap 成功后回调（界面拿去存相册 + 分享）。
      * @param onFailed 失败时回调（界面撤掉 loading 并提示）。
-     */
-    fun generateCheckInPoster(
-        mode: com.mistakebook.poster.PosterImageMode,
-        onBitmap: (android.graphics.Bitmap) -> Unit,
-        onFailed: (String) -> Unit = { showMessage(it) }
-    ) {
+     *
+     * ## 生图走**后台任务**（v0.0.50）
+     *
+     * 早先这里直接在 `viewModelScope` 里调 `posterImageService.generate`，
+     * 用户只要离开这个页面，协程随 ViewModel 一起被取消——请求断在半路，
+     * 额度烧了、海报没有。
+     *
+     * 现在改为 [com.mistakebook.poster.PosterScheduler] 提交 WorkManager 任务：
+     * 离开页面照跑，进程被杀后系统会重新拉起接着跑。
+     * 进度与结果由 [com.mistakebook.poster.PosterWorkMonitor]（挂在 appScope 上）
+     * 广播，界面订阅它即可。
+     */    fun generateCheckInPoster(mode: com.mistakebook.poster.PosterImageMode) {
         val state = _uiState.value
-        viewModelScope.launch {
-            val content = buildPosterContent(state)
-            when (val result = container.posterImageService.generate(content, mode)) {
-                is com.mistakebook.net.ApiResult.Success -> {
-                    withContext(Dispatchers.Main) { onBitmap(result.data) }
-                }
-
-                is com.mistakebook.net.ApiResult.Failure -> {
-                    val message =
-                        "海报生成失败：${result.error.serverMessage.ifBlank { "请检查生图配置" }}"
-                    withContext(Dispatchers.Main) { onFailed(message) }
-                }
-            }
-        }
+        val content = buildPosterContent(state)
+        com.mistakebook.poster.PosterScheduler.enqueue(
+            context = container.appContext,
+            source = com.mistakebook.di.SOURCE_WORDBOOK,
+            content = content,
+            mode = mode
+        )
     }
+
+    /** 海报生图的后台任务状态（由 [com.mistakebook.poster.PosterWorkMonitor] 广播）。 */
+    val posterWorkState: kotlinx.coroutines.flow.StateFlow<com.mistakebook.poster.PosterWorkState>
+        get() = container.wordbookPosterMonitor.state
+
+    /** 海报生图后台任务的监视器（界面用它订阅状态）。 */
+    val posterWorkMonitor: com.mistakebook.poster.PosterWorkMonitor
+        get() = container.wordbookPosterMonitor
 
     private fun getStartOfDayMillis(): Long {
         val calendar = Calendar.getInstance()

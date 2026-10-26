@@ -28,8 +28,15 @@ class ChatPromptsTest {
         assertTrue(s.contains("tabular"))
         // 中文标注的正道写法
         assertTrue(s.contains("\\text{…}"))
-        // 表格单元格禁 LaTeX 的既有约束不能丢
-        assertTrue(s.contains("表格单元格内禁止使用 LaTeX"))
+        // 表格单元格内已解禁行内公式（渲染器支持），块级公式仍禁止
+        assertTrue(s.contains("表格单元格内**可以**写行内公式"))
+        assertTrue(s.contains("公式块（$$…$$）不要放进表格"))
+        // 实测支持的命令要明确说「可以用」，避免模型无谓回避
+        assertTrue(s.contains("\\boxed"))
+        assertTrue(s.contains("\\Big"))
+        assertTrue(s.contains("\\dfrac"))
+        // 花括号定界符必须写全
+        assertTrue(s.contains("\\left\\{"))
         // 公式失败的后果要说清楚，让模型明白这不是建议
         assertTrue(s.contains("红色源码"))
     }

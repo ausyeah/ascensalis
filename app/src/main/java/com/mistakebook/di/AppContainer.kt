@@ -39,6 +39,10 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 /**
  * 手写依赖容器：单 Activity + Repository 架构下足够使用，避免引入 DI 框架依赖。
  */
+/** 生图任务的来源标识（同时用作 WorkManager 工作名的后缀）。 */
+const val SOURCE_WORDBOOK = "wordbook"
+const val SOURCE_POMODORO = "pomodoro"
+
 class AppContainer(context: Context) {
 
     val appContext = context.applicationContext
@@ -243,6 +247,27 @@ class AppContainer(context: Context) {
     val posterImageService: com.mistakebook.poster.PosterImageService by lazy {
         com.mistakebook.poster.PosterImageService(imageGenClient, imageDiskCache, settingsStore)
     }
+
+    /**
+     * 词库页的海报生图**后台任务状态**。
+     *
+     * 挂在 [appScope] 上（与应用同生命周期），这样用户离开页面后
+     * ViewModel 被销毁、状态也不会丢——回到页面还能看到任务已经完成。
+     */
+    val wordbookPosterMonitor: com.mistakebook.poster.PosterWorkMonitor by lazy {
+        com.mistakebook.poster.PosterWorkMonitor(appContext, appScope, SOURCE_WORDBOOK)
+    }
+
+    /**
+     * 番茄钟页的海报生图后台任务状态。
+     *
+     * 与 [wordbookPosterMonitor] 分开是因为两者用**不同的 WorkManager 工作名**
+     * （否则在词库页点一次生图会把番茄钟的任务 REPLACE 掉）。
+     */
+    val pomodoroPosterMonitor: com.mistakebook.poster.PosterWorkMonitor by lazy {
+        com.mistakebook.poster.PosterWorkMonitor(appContext, appScope, SOURCE_POMODORO)
+    }
+
 
     /**
      * 对话流式客户端。

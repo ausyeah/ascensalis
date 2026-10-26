@@ -1,5 +1,7 @@
 package com.mistakebook.poster
 
+import kotlinx.serialization.Serializable
+
 /**
  * 海报内容（**无 Android 依赖，可 JVM 单测**）。
  *
@@ -9,7 +11,11 @@ package com.mistakebook.poster
  *
  * 两者只是**数据不同**：标题、日期、几行统计、页脚。
  * 渲染、生图、分享全部共用。
+ *
+ * @Serializable 是给后台任务用的：海报生图走 WorkManager，
+ * 内容要能编码进 WorkData 传给 Worker（见 [PosterWorker]）。
  */
+@Serializable
 data class PosterContent(
     /** 顶部小字日期，如「2026年10月26日」。 */
     val dateText: String,
@@ -26,6 +32,7 @@ data class PosterContent(
  *
  * @param emphasis 数值用强调色（绿）。默认用主色靛蓝。
  */
+@Serializable
 data class PosterStat(
     val label: String,
     val value: String,

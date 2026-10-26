@@ -246,7 +246,10 @@ fun RichText(
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
 
-                is MarkdownParser.Block.Table -> TableBlock(block)
+                is MarkdownParser.Block.Table -> TableBlock(
+                    block = block,
+                    mathCache = mathCache
+                )
 
                 is MarkdownParser.Block.Image -> ImageBlock(
                     path = block.path,
@@ -306,6 +309,11 @@ private fun collectMathKeys(blocks: List<MarkdownParser.Block>, maxMathChars: In
             is MarkdownParser.Block.Paragraph -> keys += segmentMathKeys(block.text)
             is MarkdownParser.Block.ListItem -> keys += segmentMathKeys(block.text)
             is MarkdownParser.Block.Quote -> keys += segmentMathKeys(block.text)
+            // 表格单元格里的行内公式也要渲染：键与 [TableBlock] 里取的完全一致
+            // （都用 [parseInline] 切出来的 [InlineSpan.Math]）。
+            is MarkdownParser.Block.Table -> block.rows.forEach { row ->
+                row.forEach { cell -> keys += segmentMathKeys(cell) }
+            }
             else -> Unit
         }
     }
@@ -402,8 +410,15 @@ private fun ImageBlock(path: String, alt: String) {
 }
 
 @Composable
-private fun TableBlock(block: MarkdownParser.Block.Table) {
+private fun TableBlock(
+    block: MarkdownParser.Block.Table,
+    mathCache: Map<String, com.mistakebook.math.RenderedMath?>
+) {
     val columnCount = block.rows.maxOf { it.size }.coerceAtLeast(1)
+    // 单元格字号比正文小，公式目标字号也要跟着小，
+    // 否则表格里的公式会比正文还大，喧宾夺主。
+    val density = LocalDensity.current
+    val cellFontPx = with(density) { MaterialTheme.typography.bodySmall.fontSize.toPx() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -412,11 +427,11 @@ private fun TableBlock(block: MarkdownParser.Block.Table) {
         block.rows.forEachIndexed { rowIndex, row ->
             Row(modifier = Modifier.fillMaxWidth()) {
                 for (column in 0 until columnCount) {
-                    Text(
-                        text = tableCellToPlainText(row.getOrElse(column) { "" }),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = if (rowIndex == 0) FontWeight.Medium else null,
-                        color = MaterialTheme.colorScheme.onSurface,
+                    TableCell(
+                        raw = row.getOrElse(column) { "" },
+                        mathCache = mathCache,
+                        targetFontPx = cellFontPx,
+                        header = rowIndex == 0,
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 6.dp, vertical = 5.dp)
@@ -429,6 +444,60 @@ private fun TableBlock(block: MarkdownParser.Block.Table) {
         }
     }
 }
+
+/**
+ * 一个表格单元格。
+ *
+ * ## 为什么单元格里的公式要**真的渲染**
+ *
+ * 早先这里用纯 [Text] + [tableCellToPlainText]（把 `$x$` 降级成 `x`、
+ * `\frac{1}{2}` 降级成 `1/2`）。看上去「至少能看懂」，但用户要的是公式本身——
+ * 分数、上下标、根号一降级就全丢了，表格也就失去了它该有的信息量。
+ *
+ * 现在走 [InlineRow] 的完整行内渲染路径：文字照常，公式出位图。
+ * 单元格窄，公式会被 [com.mistakebook.math.MathLayout.fit] 等比压到格子宽度内——
+ * 比降级成源码强得多。
+ *
+ * 键的来源与 [collectMathKeys] 完全一致（都用 [parseInline] 切出的
+ * [InlineSpan.Math] 经 [mathKey] 生成），所以渲染处拿到的键一定被请求过。
+ */
+@Composable
+private fun TableCell(
+    raw: String,
+    mathCache: Map<String, com.mistakebook.math.RenderedMath?>,
+    targetFontPx: Float,
+    header: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val spans = remember(raw) { tableCellSpans(raw) }
+    InlineRow(
+        spans = spans,
+        mathCache = mathCache,
+        targetFontPx = targetFontPx,
+        style = MaterialTheme.typography.bodySmall.copy(
+            fontWeight = if (header) FontWeight.Medium else null
+        ),
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier
+    )
+}
+
+/**
+ * 表格单元格的行内片段。
+ *
+ * 用 [parseInline] 切出「文字 / 公式 / 图片」，公式原样保留（交给 KaTeX），
+ * 文字部分再过一遍 [tableCellToPlainText]（剥掉残留的 LaTeX 命令反斜杠、
+ * 把 `\frac{1}{2}` 变成 `1/2`）。
+ *
+ * 纯函数，可单测。
+ */
+internal fun tableCellSpans(raw: String): List<InlineSpan> =
+    parseInline(raw).map { span ->
+        when (span) {
+            is InlineSpan.Text -> span.copy(text = tableCellToPlainText(span.text))
+            else -> span
+        }
+    }
 
 /**
  * 表格单元格文本：剥掉 Markdown 强调与行内公式标记，并去掉 LaTeX 反斜杠命令。
@@ -939,6 +1008,45 @@ fun parseInline(input: String): List<InlineSpan> {
     }
 
     /**
+     * 从 cursor + [startRel] 起找**配对的**单个 `$`，返回其相对 cursor 的下标；找不到返回 -1。
+     *
+     * ## 为什么不能简单地找「下一个 `$`」
+     *
+     * 模型经常写出这种形态（真机截图里的原话）：
+     * ```
+     * 由 $V_y = 10 V_x$ 求 $a$
+     * ```
+     * 而**外层又被 `$…$` 包住**时（行内公式的常见形态）：
+     * ```
+     * $\text{由 $V_y = 10 V_x$ 求 }a$
+     * ```
+     * 如果按「下一个 `$` 就是闭合符」来切，公式会被切成
+     * `text{由 ` + `V_y = 10 V_x` + ` 求 }a` 三段——
+     * 第一段是残缺的 `\text{`，KaTeX 直接失败，
+     * 界面上就变成「黑体里冒出一串带字面 `$` 的东西」。
+     *
+     * ## 正确做法
+     *
+     * 遇到 `\text{` 时**跳到它配对的 `}`** 再继续找，
+     * 这样 `\text{…}` 内部的 `$`（KaTeX 在 \text 里是合法的嵌套数学）不会被误当作闭合符。
+     */
+    fun indexOfDollarCloseFrom(startRel: Int): Int {
+        var i = cursor + startRel
+        while (i < input.length) {
+            when {
+                input[i] == '$' -> return i - cursor
+                input.startsWith("\\text{", i) -> {
+                    val close = findMatchingBrace(input, i + "\\text{".length)
+                    if (close < 0) return -1
+                    i = close + 1
+                }
+                else -> i++
+            }
+        }
+        return -1
+    }
+
+    /**
      * 从 cursor + [startRel] 起找第一个 [token]，返回其**相对 cursor** 的下标；找不到返回 -1。
      *
      * 与 [indexOfPairFrom] 同族，供 `\(` `\)` / `\[` `\]` 这类两个字符的定界符用。
@@ -1016,7 +1124,9 @@ fun parseInline(input: String): List<InlineSpan> {
             }
 
             startsWithAt("$") -> {
-                val end = indexOfFrom('$', 1)
+                // 找**配对的闭合 `$`**：见 [indexOfDollarCloseFrom] 的说明——
+                // `\text{…}` 内部的 `$` 不能当闭合符，否则公式会被切碎。
+                val end = indexOfDollarCloseFrom(1)
                 if (end > 1) {
                     flush()
                     spans += InlineSpan.Math(slice(1, end).trim())
@@ -1056,6 +1166,27 @@ fun parseInline(input: String): List<InlineSpan> {
     }
     flush()
     return spans
+}
+
+/**
+ * 找与 [start]（指向 `{` 之后）处开括号配对的 `}`；找不到返回 -1。
+ *
+ * 顶层函数：既被 [parseInline] 用，也被单元格解析复用。
+ */
+private fun findMatchingBrace(text: String, start: Int): Int {
+    var depth = 1
+    var i = start
+    while (i < text.length) {
+        when (text[i]) {
+            '{' -> depth++
+            '}' -> {
+                depth--
+                if (depth == 0) return i
+            }
+        }
+        i++
+    }
+    return -1
 }
 
 /**

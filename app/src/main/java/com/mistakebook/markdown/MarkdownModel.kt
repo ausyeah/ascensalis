@@ -130,6 +130,14 @@ object MarkdownParser {
         // 而 LLM 输出 `$$\n\begin{aligned}...\n\end{aligned}\n$$` 是常规写法，必然踩中。
         var displayMath: StringBuilder? = null
 
+        // 跨行 `\[ ... \]` 的状态。
+        //
+        // 早先只支持「`\[` 与 `\]` 同一行」；多行 display 公式（模型写
+        // `\[\n\begin{aligned}...\n\end{aligned}\n\]` 是常规写法）会掉进
+        // else 分支按正文走，被拆成好几个 paragraph——块级公式的
+        // `\left{`、`&` 于是漏进普通文本，整块渲染不出来。
+        var bracketMath: StringBuilder? = null
+
         fun flushParagraph() {
             if (paragraph.isNotBlank()) {
                 blocks += paragraphBlock(paragraph.toString().trim())
@@ -140,8 +148,24 @@ object MarkdownParser {
         lines.forEach { rawLine ->
             val line = rawLine.trimEnd()
             val openMath = displayMath
+            val openBracket = bracketMath
 
             when {
+                // 正在 `\[ ... \]` 公式块里：找闭合的 `\]`
+                openBracket != null -> {
+                    val closeAt = line.indexOf("\\]")
+                    if (closeAt < 0) {
+                        openBracket.appendLine(line)
+                    } else {
+                        openBracket.append(line.substring(0, closeAt))
+                        val latex = openBracket.toString().trim()
+                        if (latex.isNotEmpty()) blocks += Block.Math(latex, true)
+                        bracketMath = null
+                        val rest = line.substring(closeAt + 2)
+                        if (rest.isNotBlank()) paragraph.append(rest)
+                    }
+                }
+
                 // 正在公式块里：先找闭合的 `$$`，找到就把剩下半行也收进来
                 openMath != null -> {
                     val closeAt = line.indexOf("$$")
@@ -220,9 +244,14 @@ object MarkdownParser {
                         if (latex.isNotEmpty()) blocks += Block.Math(latex, true)
                         val rest = line.substring(closeAt + 2).trim()
                         if (rest.isNotBlank()) paragraph.append(rest)
+                    } else {
+                        // 未闭合：进入跨行状态机，攒到下一个 `\]` 为止。
+                        // 多行 display 公式（`\[\n\begin{aligned}…\n\]`）是常规写法，
+                        // 早先这里「落进 else 按正文走」，结果整块公式被拆散成
+                        // 若干 paragraph，块级结构（\left{、&）漏进普通文本，
+                        // 整块渲染不出来。
+                        bracketMath = StringBuilder(line.trim().removePrefix("\\["))
                     }
-                    // 未闭合：不建状态机，落进 else 按正文走——parseInline 里
-                    // 同样认 `\[`，闭合后自然升级成公式；流式藏尾见 ChatStreaming。
                 }
 
                 line.matches(RULE_REGEX) -> {
@@ -277,6 +306,11 @@ object MarkdownParser {
         // 永远不显示，生成结束才突然冒出来——而如果模型真没写闭合符，
         // 它就永远不显示。两种都不可接受：有内容就渲染。
         displayMath?.let { open ->
+            val latex = open.toString().trim()
+            if (latex.isNotEmpty()) blocks += Block.Math(latex, display = true, complete = false)
+        }
+        // 同理：未闭合的 `\[ …`（流式尾端 / 模型漏写闭合符）。
+        bracketMath?.let { open ->
             val latex = open.toString().trim()
             if (latex.isNotEmpty()) blocks += Block.Math(latex, display = true, complete = false)
         }
