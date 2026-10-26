@@ -120,6 +120,7 @@ import com.mistakebook.domain.ChatRole
 import com.mistakebook.domain.MessageStatus
 import com.mistakebook.ui.common.ApiKeyRequiredDialog
 import com.mistakebook.ui.common.RichText
+import com.mistakebook.ui.common.rememberStreamTextDebounced
 import com.mistakebook.ui.common.containerViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlin.math.PI
@@ -799,13 +800,17 @@ private fun MessageBubble(
                 }
                 // 流式时把尾巴上未闭合的公式先藏起来：半截公式一旦进 RichText
                 // 就会先显示源码、拼完再跳成公式。等配对符到齐再整段渲染滑入。
-                val displayAnswer = remember(answer, isStreaming) {
-                    val base = if (isStreaming) trimIncompleteTrailingFormula(answer) else answer
-                    // v0.0.46 的生图结果曾以 `![](绝对路径)` 写进正文，
-                    // 老会话里的这类引用会走到图片解码（用户报点开闪退）。
-                    // 新版已改存附件，这里负责把历史消息里的残留剥干净。
-                    LegacyImageRefs.strip(base)
-                }
+                val displayAnswer = rememberStreamTextDebounced(
+                    key = message.id,
+                    // 防抖只作用于流式中间帧；trim/清洗语义不变
+                    text = run {
+                        val base = if (isStreaming) trimIncompleteTrailingFormula(answer) else answer
+                        // v0.0.46 生图旧版本曾把 `![](本地路径)` 写进正文，
+                        // 老会话残留会被清洗（无引用的图片路径直接删）
+                        LegacyImageRefs.strip(base)
+                    },
+                    streaming = isStreaming
+                )
                 // 阶段提示：联网搜索要几秒到十几秒，没这行就是又一例「点了没反应」。
                 // 不要求内容为空——工具循环里搜索期间气泡**带着已生成的内容**，
                 // 阶段行显示在内容上方，用户知道「还在搜，但没断」。
@@ -828,7 +833,9 @@ private fun MessageBubble(
                     ThinkingBlock(
                         text = thinking,
                         streaming = isStreaming,
-                        mathRenderer = mathRenderer
+                        mathRenderer = mathRenderer,
+                        // 思考块与正文同属一条消息：共用消息 id 隔离防抖
+                        debounceKey = message.id
                     )
                     if (answer.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
@@ -1122,7 +1129,8 @@ private fun StatusRow(
 private fun ThinkingBlock(
     text: String,
     streaming: Boolean,
-    mathRenderer: com.mistakebook.math.MathRenderer
+    mathRenderer: com.mistakebook.math.MathRenderer,
+    debounceKey: Any? = null
 ) {
     // 初始展开态直接取 streaming：历史消息（streaming=false）首次组合就是
     // 收起态，不会先把整段思考渲染一遍再折叠——那笔开销在滚动到每条
@@ -1950,3 +1958,10 @@ private fun Context.findActivity(): Activity? {
     }
     return null
 }
+
+/**
+ * 流式期间裁掉未闭合的行内/块级公式尾巴；静态文本原样返回。
+ * 纯函数抽出便于与防抖组合。
+ */
+private fun trimIncomplete(text: String, streaming: Boolean): String =
+    if (streaming) trimIncompleteTrailingFormula(text) else text

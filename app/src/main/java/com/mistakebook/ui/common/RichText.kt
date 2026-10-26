@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -58,6 +59,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import android.graphics.BitmapFactory
 import androidx.collection.LruCache
 import com.mistakebook.R
 import com.mistakebook.math.MathRenderer
@@ -105,6 +107,8 @@ fun RichText(
     streaming: Boolean = false
 ) {
     // 走缓存：item 滑出视口销毁后滑回来不再重解（列表滑动卡顿的主因之一）。
+    // 流式期间调用方（MessageBubble）已按 100ms 防抖喂入文本（见 streamTextDebounced），
+    // 这里保持同步 parseCached：滑回视口的 item 直接命中缓存，主线程零重解析。
     val blocks = remember(text) { MarkdownParser.parseCached(text) }
     val density = LocalDensity.current
     val targetFontPx = with(density) { style.fontSize.toPx() }
@@ -405,12 +409,25 @@ private fun ImageBlock(path: String, alt: String) {
         )
         return
     }
+    // 显式解析尺寸（T3）：不固定尺寸的图片在加载完成后高度从 0 跳到实际值，
+    // 流式期间会把整列 measure 抖一遍。先按 16:9 估高占位、加载后稳定，
+    // Coil 的 FillWidth + 明确高度约束让 measure 一次到位。
+    val previewHeight = remember(path) {
+        runCatching {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, opts)
+            if (opts.outWidth > 0 && opts.outHeight > 0) {
+                opts.outHeight.toFloat() / opts.outWidth
+            } else null
+        }.getOrNull() ?: (9f / 16f)
+    }.coerceIn(0.4f, 2.5f)
     AsyncImage(
         model = path,
         contentDescription = alt,
         contentScale = ContentScale.FillWidth,
         modifier = Modifier
             .fillMaxWidth()
+            .aspectRatio(previewHeight)
             .background(MaterialTheme.colorScheme.surfaceVariant)
     )
 }
@@ -1233,3 +1250,34 @@ private const val MAX_RENDER_ATTEMPTS = 3
 
 /** 重试间隔（毫秒）。 */
 private const val RETRY_DELAY_MS = 250L
+
+/**
+ * 流式文本防抖（v0.0.51 T3）：把调用方每 220ms 一次的文本增长合并成
+ * 至少 [STREAM_DEBOUNCE_MS] 一次的重组输入。
+ *
+ * - `text` 快速变化时重组被合并，尾帧取最新值；
+ * - `streaming` 为 false（生成结束 / 静态文本）时立即透传，
+ *   最终文本无延迟落地；
+ * - 按 key（消息 id）独立持有：只有流式中的那条气泡参与重组，
+ *   历史气泡的 key 不变、state 保留、零重组。
+ *
+ * 解析本身仍在 RichText 的 LRU 缓存上做（parseCached），
+ * 防抖让「每 220ms 一次的整篇 parse」降到「每 100ms 至多一次」。
+ */
+@Composable
+fun rememberStreamTextDebounced(key: Any?, text: String, streaming: Boolean): String {
+    var state by remember(key) { mutableStateOf(text) }
+    if (!streaming) {
+        // 终态同步落地：state 也要对齐，避免下次同 key 流式时闪旧文本
+        if (state != text) state = text
+        return text
+    }
+    LaunchedEffect(key, text) {
+        delay(STREAM_DEBOUNCE_MS)
+        state = text
+    }
+    return state
+}
+
+/** 流式文本防抖间隔（毫秒）。与生成端 220ms 节流错开，合并近一半的中间帧。 */
+private const val STREAM_DEBOUNCE_MS = 100L
