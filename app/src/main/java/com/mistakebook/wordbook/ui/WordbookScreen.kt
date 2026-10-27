@@ -933,13 +933,6 @@ internal fun StudyView(
                 }
             }
 
-            // 场景图（F-IMG-1）：答题卡下方的视觉锚点。
-            // 出过图的词切回来直接显示（磁盘缓存），没出过图给一颗按钮。
-            if (currentWord != null) {
-                item {
-                    WordSceneImage(state = state, viewModel = viewModel)
-                }
-            }
 
             // 模式分支交互
             if (state.studyMode == StudyMode.QUIZ || state.studyMode == StudyMode.SENSE) {
@@ -1112,6 +1105,14 @@ internal fun StudyView(
                         }
                     }
                 }
+
+            // 场景图（F-IMG-1/T7）：入口下沉到页面最底部——
+            // 单词列表下方低调呈现，不占首屏；生成后仍是一张可保存的图。
+            if (currentWord != null) {
+                item {
+                    WordSceneImage(state = state, viewModel = viewModel)
+                }
+            }
             }
         }
     }
