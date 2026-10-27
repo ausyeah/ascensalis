@@ -44,6 +44,7 @@ object Routes {
     const val PDF_IMPORT = "pdfImport"
     const val QUESTION_EDIT = "questionEdit"
     const val NOTEBOOKS = "notebooks"
+    const val LIBRARY = "library"
 
     /** 独立复习页（T1）：走完今日到期队列。无参数。 */
     const val REVIEW = "review"
@@ -200,7 +201,18 @@ fun MistakeBookNavHost(
         }
 
         composable(Routes.SETTINGS) {
-            SettingsScreen(container = container, onBack = { navController.popBackStack() })
+            SettingsScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+                onOpenLibrary = { navController.navigate(Routes.LIBRARY) }
+            )
+        }
+
+        composable(Routes.LIBRARY) {
+            com.mistakebook.ui.library.LibraryScreen(
+                filesDir = container.files.rootDir,
+                onBack = { navController.popBackStack() }
+            )
         }
 
         composable(Routes.CAPTURE) {

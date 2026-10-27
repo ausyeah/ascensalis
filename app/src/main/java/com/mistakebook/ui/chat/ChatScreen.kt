@@ -51,6 +51,7 @@ import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
@@ -227,6 +228,7 @@ fun ChatScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var showAttachSheet by remember { mutableStateOf(false) }
+    var showLibraryPicker by remember { mutableStateOf(false) }
     var showModelSheet by remember { mutableStateOf(false) }
 
     // 选文件：OpenDocument 拿的是可长期读取的 Uri（不依赖临时授权），
@@ -371,6 +373,17 @@ fun ChatScreen(
         )
     }
 
+    // T6 降级：资料库文件选择弹层（列出 files/library/ 下的文本文件，多选注入）
+    if (showLibraryPicker) {
+        LibraryPickerDialog(
+            filesDir = container.files.rootDir,
+            selectedNames = state.libraryInjectionNames,
+            onPick = { file -> viewModel.addLibraryInjection(file) },
+            onRemove = { file -> viewModel.removeLibraryInjection(file) },
+            onDismiss = { showLibraryPicker = false }
+        )
+    }
+
     if (showAttachSheet) {
         AttachmentSourceSheet(
             onPickImage = { imagePicker.launch(IMAGE_MIME_TYPES) },
@@ -382,6 +395,8 @@ fun ChatScreen(
                 onLaunchScanCamera()
             },
             onPickFile = { filePicker.launch(DOCUMENT_MIME_TYPES) },
+            // T6 降级：资料库文件选择 → 加入待注入列表（发送时前置为当轮上下文）
+            onPickLibrary = { showLibraryPicker = true },
             onDismiss = { showAttachSheet = false }
         )
     }
@@ -506,6 +521,11 @@ fun ChatScreen(
                 streaming = state.isStreaming,
                 attachments = state.pendingAttachments,
                 modelName = state.currentModel,
+                libraryInjectionNames = state.libraryInjectionNames,
+                libraryFiles = remember { com.mistakebook.data.library.LibraryStore.list(
+                    com.mistakebook.data.library.LibraryStore.ensureDir(container.files.rootDir)
+                ) },
+                onRemoveLibraryInjection = viewModel::removeLibraryInjection,
                 onTextChange = viewModel::onInputChange,
                 onSend = viewModel::send,
                 onStop = viewModel::stop,
@@ -1323,6 +1343,10 @@ private fun ChatInputBar(
     streaming: Boolean,
     attachments: List<PendingAttachment>,
     modelName: String,
+    /** T6 降级：待注入的资料库文件名与文件列表（chips 移除用）。 */
+    libraryInjectionNames: List<String> = emptyList(),
+    libraryFiles: List<java.io.File> = emptyList(),
+    onRemoveLibraryInjection: (java.io.File) -> Unit = {},
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
@@ -1346,6 +1370,20 @@ private fun ChatInputBar(
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
+            if (libraryInjectionNames.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    libraryInjectionNames.forEach { name ->
+                        LibraryInjectionChip(
+                            fileName = name,
+                            onRemove = {
+                                libraryFiles.firstOrNull { it.name == name }
+                                    ?.let(onRemoveLibraryInjection)
+                            }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
             if (attachments.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     attachments.forEach { attachment ->
@@ -1735,6 +1773,7 @@ private fun AttachmentSourceSheet(
     onPickImage: () -> Unit,
     onTakePhoto: () -> Unit,
     onPickFile: () -> Unit,
+    onPickLibrary: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -1762,6 +1801,14 @@ private fun AttachmentSourceSheet(
                 modifier = Modifier.clickable {
                     onDismiss()
                     onPickFile()
+                }
+            )
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.chat_attach_library)) },
+                leadingContent = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
+                modifier = Modifier.clickable {
+                    onDismiss()
+                    onPickLibrary()
                 }
             )
         }

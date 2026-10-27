@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
+import com.mistakebook.ui.library.LibraryEntrySection
 import com.mistakebook.di.AppContainer
 import com.mistakebook.review.ReviewScheduler
 import com.mistakebook.ui.common.containerViewModel
@@ -45,6 +46,8 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     container: AppContainer,
     onBack: () -> Unit,
+    /** 资料库管理页入口（T6）：设置页分区点进去。 */
+    onOpenLibrary: () -> Unit = {},
     /**
      * 内嵌模式（门户第 4 页）：不画自己的顶栏与返回箭头——
      * 门户顶部 Tab 行就是它的导航，从任何一页都能一步切回来。
@@ -227,6 +230,10 @@ fun SettingsScreen(
                 state = state,
                 viewModel = viewModel
             )
+
+            // ---- 资料库（T6）----
+            SettingsSectionHeader(stringResource(R.string.settings_library_section))
+            LibraryEntrySection(onOpen = onOpenLibrary)
 
             // ---- 数据管理 ----
             SettingsSectionHeader("数据管理")

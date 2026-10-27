@@ -713,4 +713,20 @@
     <string name="crop_chat_skip">不裁切，下一张</string>    <string name="capture_enhance_title">拍照增强调节</string>
     <string name="capture_enhance_preview">增强预览</string>
     <string name="capture_enhance_computing">正在计算预览…</string>
-    <string name="capture_enhance_confirm">确认，去裁切</string></resources>
+    <string name="capture_enhance_confirm">确认，去裁切</string>    <string name="library_title">资料库</string>
+    <string name="library_desc">存放在 App 内的文本资料（.md / .txt / .json / .csv）。对话时可让 AI 参考或整理存入。</string>
+    <string name="library_empty">还没有资料。右下角导入或新建。</string>
+    <string name="library_import">导入文件</string>
+    <string name="library_import_failed">导入失败：文件名不支持或读取失败（一期仅支持 .md / .txt / .json / .csv）</string>
+    <string name="library_new">新建文档</string>
+    <string name="library_new_name">文件名</string>
+    <string name="library_new_name_hint">支持 .md / .txt / .json / .csv</string>
+    <string name="library_new_content">内容</string>
+    <string name="library_rename">重命名</string>
+    <string name="library_delete">删除</string>
+    <string name="library_delete_confirm_title">删除文件？</string>
+    <string name="library_delete_confirm_body">「%1$s」将被删除，无法恢复。</string>
+    <string name="library_bad_name">文件名无效：只能用单一文件名，扩展名须为 .md / .txt / .json / .csv，且不与现有文件重名</string>
+    <string name="library_truncated">内容超过 50KB，已截断显示（保存会丢失被截断部分）</string>
+    <string name="settings_library_section">资料库</string>    <string name="chat_attach_library">@资料库</string>
+</resources>

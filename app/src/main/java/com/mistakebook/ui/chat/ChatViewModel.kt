@@ -144,6 +144,8 @@ data class ChatUiState(
 
     /** 还没发送的待发附件。 */
     val pendingAttachments: List<PendingAttachment> = emptyList(),
+    /** T6 闄嶇骇锛氬凡閫夊緟娉ㄥ叆鐨勮祫鏂欏簱鏂囦欢鍚嶏紙鍙戦€佹椂鍓嶇疆涓哄綋杞笂涓嬫枃锛夈€?*/
+    val libraryInjectionNames: List<String> = emptyList(),
 
     val isStreaming: Boolean = false,
 
@@ -302,6 +304,10 @@ class ChatViewModel(
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUiState())
+
+    /** T6 降级注入：@资料库 选中的文件，发送时把内容前置进当轮上下文后清空。 */
+    private val pendingLibraryFiles = mutableListOf<File>()
+
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private val _events = Channel<ChatEvent>(Channel.BUFFERED)
@@ -815,6 +821,23 @@ class ChatViewModel(
                 messageText = sb.toString().trimEnd()
             }
 
+            // T6 降级注入：@资料库 选中的文件内容（50KB 截断）前置为本轮上下文。
+            // 标签包住来源，模型能区分「资料原文」与「用户问题」。
+            if (pendingLibraryFiles.isNotEmpty()) {
+                val sb = StringBuilder(messageText)
+                pendingLibraryFiles.forEach { f ->
+                    val (content, truncated) =
+                        com.mistakebook.data.library.LibraryStore.read(f) ?: return@forEach
+                    val note = if (truncated) "（内容超 50KB 已截断）" else ""
+                    sb.insert(0, "\n\n")
+                    sb.insert(0, content)
+                    sb.insert(0, note)
+                    sb.insert(0, "【资料库文件：${f.name}】\n")
+                }
+                messageText = sb.toString().trim()
+                pendingLibraryFiles.clear()
+            }
+
             runOnce(
                 profile = profile,
                 text = messageText,
@@ -1187,6 +1210,24 @@ class ChatViewModel(
                 }
             )
         }
+    }
+
+    /** T6 降级：把资料库文件加入待注入列表（发送时前置为当轮上下文）。 */
+    fun addLibraryInjection(file: File) {
+        if (file.isFile && pendingLibraryFiles.none { it.absolutePath == file.absolutePath }) {
+            pendingLibraryFiles += file
+            _state.value = _state.value.copy(
+                libraryInjectionNames = pendingLibraryFiles.map { it.name }
+            )
+        }
+    }
+
+    /** 移除一个待注入的资料库文件。 */
+    fun removeLibraryInjection(file: File) {
+        pendingLibraryFiles.removeAll { it.absolutePath == file.absolutePath }
+        _state.value = _state.value.copy(
+            libraryInjectionNames = pendingLibraryFiles.map { it.name }
+        )
     }
 
     fun removePendingAttachment(id: Long) {

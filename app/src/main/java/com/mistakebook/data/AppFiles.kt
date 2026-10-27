@@ -13,6 +13,9 @@ class AppFiles(context: Context) {
 
     private val filesRoot: File = context.filesDir
 
+    /** 私有根目录（资料库等直接挂在 files/ 下的功能用）。 */
+    val rootDir: File get() = filesRoot
+
     val cropDir: File = File(filesRoot, "crops")
 
     val importDir: File = File(filesRoot, "imports")
