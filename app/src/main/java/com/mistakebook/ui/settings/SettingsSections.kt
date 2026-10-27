@@ -549,10 +549,35 @@ internal fun ProfileRow(
      * 而是要能**勾选若干个**作为「本配置可用模型」，
      * 对话页据此提供模型切换；没勾选的不出现。
      */
-    fetchedModels: List<String> = emptyList()
+    fetchedModels: List<String> = emptyList(),
+
+    /**
+     * 是否展开。
+     *
+     * 传 null 表示「卡片自己管展开态」（旧行为，多张卡可同时展开）；
+     * 传 true/false 表示**受控**——由外层统一决定谁能展开，
+     * 实现「一个配置展开时，其他的要关闭」的互斥。
+     */
+    expanded: Boolean? = null,
+
+    /** 受控模式下的展开/收起切换回调。 */
+    onToggleExpand: (() -> Unit)? = null,
+
+    /** 保存后收起（受控模式下通知外层把展开权收回去）。 */
+    onCollapsed: (() -> Unit)? = null
 ) {
     // 展开态跟着配置 id 走：点标题栏展开/收起， RadioButton 仍负责「当前使用」
-    var expanded by remember(profile.id) { mutableStateOf(selected) }
+    //
+    // 受控模式（expanded != null）下展开权归外层统一调度：
+    // 同一时刻只有一张卡片能展开，点开另一张会自动收起这一张。
+    var localExpanded by remember(profile.id) { mutableStateOf(selected) }
+    val isExpanded = expanded ?: localExpanded
+    val toggleExpand: () -> Unit = {
+        if (onToggleExpand != null) onToggleExpand() else localExpanded = !localExpanded
+    }
+    val collapse: () -> Unit = {
+        if (onCollapsed != null) onCollapsed() else localExpanded = false
+    }
     var name by remember(profile.id) { mutableStateOf(profile.name) }
     var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
     var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
@@ -605,7 +630,7 @@ internal fun ProfileRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded }
+                    .clickable { toggleExpand() }
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -624,7 +649,7 @@ internal fun ProfileRow(
                     }
                 }
                 Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -635,7 +660,7 @@ internal fun ProfileRow(
                     )
                 }
             }
-            if (expanded) {
+            if (isExpanded) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it; onDraftChanged() },
@@ -1086,11 +1111,26 @@ internal fun LlmProfilesSection(
     viewModel: SettingsViewModel,
     onAddProfileClick: () -> Unit
 ) {
+    // **互斥展开**：同一时刻只允许一张配置卡展开。
+    //
+    // 用户诉求：「一个配置展开时，其他的要关闭」。
+    // 早先每张卡各自 `remember(profile.id)` 存展开态，结果三张卡能同时展开，
+    // 一屏塞满输入框，配置之间对不上号。
+    //
+    // 展开权统一放在 Section 层：这里记「当前展开的是哪一个 id」，
+    // 卡片只负责上报「我要展开 / 我要收起」。
+    var expandedProfileId by remember { mutableStateOf<String?>(null) }
     SettingsGroup(title = stringResource(R.string.settings_llm_profiles)) {
         state.snapshot.llmProfiles.forEach { profile ->
             ProfileRow(
                 profile = profile,
                 selected = profile.id == state.snapshot.activeProfileId,
+                expanded = expandedProfileId == profile.id,
+                onToggleExpand = {
+                    expandedProfileId =
+                        if (expandedProfileId == profile.id) null else profile.id
+                },
+                onCollapsed = { expandedProfileId = null },
                 onSelect = { viewModel.selectProfile(profile.id) },
                 onDelete = { viewModel.deleteProfile(profile.id) },
                 onSave = { draft -> viewModel.saveProfile(draft) },
@@ -1190,6 +1230,8 @@ internal fun ImageProfilesSection(
     // 「新增渠道」后强制展开刚建的空渠道：用户点了新增就是要填它，
     // 不该再手动点开。空渠道 id 只在本次组合有效，记住它即可。
     var forceExpandId by remember { mutableStateOf<String?>(null) }
+    // 同上：生图渠道之间互斥展开
+    var expandedImageId by remember { mutableStateOf<String?>(null) }
     SettingsGroup(title = stringResource(R.string.settings_image_profiles)) {
         Text(
             text = stringResource(R.string.settings_image_profiles_desc),
@@ -1202,6 +1244,12 @@ internal fun ImageProfilesSection(
                 profile = profile,
                 selected = profile.id == state.snapshot.activeImageProfileId,
                 forceExpanded = forceExpandId == profile.id,
+                expanded = expandedImageId == profile.id,
+                onToggleExpand = {
+                    expandedImageId =
+                        if (expandedImageId == profile.id) null else profile.id
+                },
+                onCollapsed = { expandedImageId = null },
                 onSelect = { viewModel.selectImageProfile(profile.id) },
                 onDelete = { viewModel.deleteImageProfile(profile.id) },
                 onSave = { draft -> viewModel.saveImageProfile(draft) }
@@ -1212,6 +1260,7 @@ internal fun ImageProfilesSection(
             onClick = {
                 val fresh = com.mistakebook.data.prefs.ImageProfile()
                 forceExpandId = fresh.id
+                expandedImageId = fresh.id
                 viewModel.addImageProfile(fresh)
             },
             modifier = Modifier.fillMaxWidth()
@@ -1237,12 +1286,25 @@ private fun ImageProfileRow(
     forceExpanded: Boolean,
     onSelect: () -> Unit,
     onDelete: () -> Unit,
-    onSave: (com.mistakebook.data.prefs.ImageProfile) -> Unit
+    onSave: (com.mistakebook.data.prefs.ImageProfile) -> Unit,
+    /** 受控展开态（见 [ProfileRow] 的同名参数）：null = 卡片自己管。 */
+    expanded: Boolean? = null,
+    onToggleExpand: (() -> Unit)? = null,
+    onCollapsed: (() -> Unit)? = null
 ) {
     // 展开态跟着配置 id 走；forceExpanded 只在新渠道创建那一刻为真，
     // 用户手动收起后不被它强行拽回来（初始值只用一次）。
-    var expanded by remember(profile.id) {
+    //
+    // 受控模式下展开权归外层统一调度，实现「一个展开、其余关闭」。
+    var localExpanded by remember(profile.id) {
         mutableStateOf(selected || forceExpanded)
+    }
+    val isExpanded = expanded ?: localExpanded
+    val toggleExpand: () -> Unit = {
+        if (onToggleExpand != null) onToggleExpand() else localExpanded = !localExpanded
+    }
+    val collapse: () -> Unit = {
+        if (onCollapsed != null) onCollapsed() else localExpanded = false
     }
     var name by remember(profile.id) { mutableStateOf(profile.name) }
     var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
@@ -1254,7 +1316,7 @@ private fun ImageProfileRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
+                .clickable { toggleExpand() }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1271,12 +1333,12 @@ private fun ImageProfileRow(
                 )
             }
             Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (expanded) {
+        if (isExpanded) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                 OutlinedTextField(
                     value = name,
@@ -1333,7 +1395,7 @@ private fun ImageProfileRow(
                                     requestBodyTemplate = template
                                 )
                             )
-                            expanded = false
+                            collapse()
                         },
                         enabled = name.isNotBlank() || baseUrl.isNotBlank() ||
                             apiKey.isNotBlank() || model.isNotBlank()
@@ -1372,6 +1434,8 @@ internal fun VisionProfilesSection(
     viewModel: SettingsViewModel
 ) {
     var forceExpandId by remember { mutableStateOf<String?>(null) }
+    // 同上：识图模型之间互斥展开
+    var expandedVisionId by remember { mutableStateOf<String?>(null) }
     SettingsGroup(title = stringResource(R.string.settings_vision_profiles)) {
         Text(
             text = stringResource(R.string.settings_vision_profiles_desc),
@@ -1384,6 +1448,12 @@ internal fun VisionProfilesSection(
                 profile = profile,
                 selected = profile.id == state.snapshot.activeVisionProfileId,
                 forceExpanded = forceExpandId == profile.id,
+                expanded = expandedVisionId == profile.id,
+                onToggleExpand = {
+                    expandedVisionId =
+                        if (expandedVisionId == profile.id) null else profile.id
+                },
+                onCollapsed = { expandedVisionId = null },
                 onSelect = { viewModel.selectVisionProfile(profile.id) },
                 onDelete = { viewModel.deleteVisionProfile(profile.id) },
                 onSave = { draft -> viewModel.saveVisionProfile(draft) }
@@ -1394,6 +1464,7 @@ internal fun VisionProfilesSection(
             onClick = {
                 val fresh = LlmProfile()
                 forceExpandId = fresh.id
+                expandedVisionId = fresh.id
                 viewModel.addVisionProfile(fresh)
             },
             modifier = Modifier.fillMaxWidth()
@@ -1416,9 +1487,20 @@ private fun VisionProfileRow(
     forceExpanded: Boolean,
     onSelect: () -> Unit,
     onDelete: () -> Unit,
-    onSave: (LlmProfile) -> Unit
+    onSave: (LlmProfile) -> Unit,
+    /** 受控展开态（见 [ProfileRow] 的同名参数）：null = 卡片自己管。 */
+    expanded: Boolean? = null,
+    onToggleExpand: (() -> Unit)? = null,
+    onCollapsed: (() -> Unit)? = null
 ) {
-    var expanded by remember(profile.id) { mutableStateOf(selected || forceExpanded) }
+    var localExpanded by remember(profile.id) { mutableStateOf(selected || forceExpanded) }
+    val isExpanded = expanded ?: localExpanded
+    val toggleExpand: () -> Unit = {
+        if (onToggleExpand != null) onToggleExpand() else localExpanded = !localExpanded
+    }
+    val collapse: () -> Unit = {
+        if (onCollapsed != null) onCollapsed() else localExpanded = false
+    }
     var name by remember(profile.id) { mutableStateOf(profile.name) }
     var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
     var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
@@ -1428,7 +1510,7 @@ private fun VisionProfileRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
+                .clickable { toggleExpand() }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1443,12 +1525,12 @@ private fun VisionProfileRow(
                 )
             }
             Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (expanded) {
+        if (isExpanded) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                 OutlinedTextField(
                     value = name,
@@ -1496,7 +1578,7 @@ private fun VisionProfileRow(
                                     model = model.trim()
                                 )
                             )
-                            expanded = false
+                            collapse()
                         },
                         enabled = name.isNotBlank() || baseUrl.isNotBlank() ||
                             apiKey.isNotBlank() || model.isNotBlank()

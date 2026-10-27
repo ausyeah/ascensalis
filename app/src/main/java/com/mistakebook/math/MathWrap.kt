@@ -106,12 +106,120 @@ object MathWrap {
                         // 由 MathLayout.fit 对这一行收缩，保结构优先于保字号。
                         out += wrapEnv(begin, body)
                     }
-                    if (out.isNotEmpty()) return out
+                    if (out.isNotEmpty()) return out.map { balanceDelimiters(it) }
                 }
             }
         }
         return greedySplit(trimmed, maxChars)
     }
+
+    /**
+     * 让每个片段的 `\left` / `\right` **自洽**。
+     *
+     * ## 为什么必须做这一步（v0.0.53 真机截图的根因）
+     *
+     * 拆行把一条公式切成几段后，`\left\{` 与 `\right\}` 可能落在**不同片段**里。
+     * KaTeX 对配对定界符的要求是「同一个表达式内必须成对」——
+     * 缺 `\right` 报 `Expected '\right', got 'EOF'`，多 `\right` 报
+     * `Expected 'EOF', got '\right'`，**两种都让整段公式渲染失败**，
+     * 界面上退回显示 LaTeX 源码（用户截图：公式整块以源码形式出现）。
+     *
+     * 举例（真机原文）：
+     * ```
+     * \left\{(r,\theta) \mid 0 \leq r \leq \sec\theta, 0 \leq \theta \leq \dfrac{\pi}{4}\right\}
+     * ```
+     * 按 `\leq` 断行后得到三段：
+     * ```
+     * \left\{(r,\theta) \mid 0 \leq r \leq      ← 缺 \right
+     * \sec\theta, 0 \leq \theta \leq
+     * \dfrac{\pi}{4}\right\}                     ← 多 \right
+     * ```
+     * 第一段与第三段双双报错 → 整条公式退化。
+     *
+     * 修法：把落单的 `\left` / `\right` **降级成普通定界符字面量**
+     * （`\left\{` → `\{`、`\right\}` → `\}`）。
+     * 视觉上括号还在，只是不再要求配对，KaTeX 就不再报错。
+     */
+    internal fun balanceDelimiters(segment: String): String {
+        if (segment.isEmpty()) return segment
+        val badLeft = unmatchedLeftPositions(segment)
+        val badRight = unmatchedRightPositions(segment)
+        if (badLeft.isEmpty() && badRight.isEmpty()) return segment
+
+        // 落单的 `\left` / `\right` 一律降级成普通定界符字面量：
+        // `\left\{` → `\{`、`\right\}` → `\}`。
+        // 视觉上括号还在，只是不再要求配对，KaTeX 就不再报错。
+        //
+        // 注意**不能只比数量**：出现次数相等也可能配对错位
+        // （如 `\left\{ a \right\} b \right\}` —— 左右各一个，但第二个
+        // `\right` 落单），所以必须按出现顺序做栈式配对。
+        val drop = HashSet<Int>()
+        badLeft.forEach { idx ->
+            drop += idx
+            // `\left.` 是隐形定界符，连后面的点一起删
+            if (segment.startsWith("\\left.", idx)) drop += (idx + 5)
+        }
+        badRight.forEach { idx ->
+            drop += idx
+            if (segment.startsWith("\\right.", idx)) drop += (idx + 6)
+        }
+        val sb = StringBuilder(segment.length)
+        segment.forEachIndexed { i, c ->
+            if (i !in drop) sb.append(c)
+        }
+        return sb.toString()
+    }
+
+    /**
+     * 找出**没有配对 `\right`** 的 `\left` 起始下标。
+     */
+    private fun unmatchedLeftPositions(segment: String): List<Int> =
+        scanDelimiters(segment).unmatchedLeft
+
+    /**
+     * 找出**没有配对 `\left`** 的 `\right` 起始下标。
+     */
+    private fun unmatchedRightPositions(segment: String): List<Int> =
+        scanDelimiters(segment).unmatchedRight
+
+    /** 扫描结果：落单的 `\left` / `\right` 起始下标。 */
+    private data class DelimScan(
+        val unmatchedLeft: List<Int>,
+        val unmatchedRight: List<Int>
+    )
+
+    /**
+     * 按出现顺序做**栈式配对**，找出所有落单的 `\left` / `\right`。
+     *
+     * 规则与 LaTeX 一致：嵌套的 `\left` 压栈，`\right` 弹出最近的一个
+     * 未匹配的 `\left`；若栈空则该 `\right` 落单；扫完后栈里剩下的
+     * `\left` 也落单。
+     *
+     * 必须真正配对而不是比数量——`\left\{ a \right\} b \right\}` 左右
+     * 各出现一次，但第二个 `\right` 落单，只比数量会漏掉它。
+     */
+    private fun scanDelimiters(segment: String): DelimScan {
+        val stack = ArrayDeque<Int>()
+        val unmatchedRight = mutableListOf<Int>()
+        var i = 0
+        while (i < segment.length) {
+            when {
+                segment.startsWith("\\left", i) && !isCommandLetter(segment, i + 5) -> {
+                    stack.addLast(i); i += 5
+                }
+                segment.startsWith("\\right", i) && !isCommandLetter(segment, i + 6) -> {
+                    if (stack.isNotEmpty()) stack.removeLast() else unmatchedRight += i
+                    i += 6
+                }
+                else -> i++
+            }
+        }
+        return DelimScan(stack.toList(), unmatchedRight)
+    }
+
+    /** 位置 [i] 处的字符是否是字母（用于判断 `\leftx` 是不是命令 `\left`）。 */
+    private fun isCommandLetter(s: String, i: Int): Boolean =
+        i < s.length && s[i].isLetter()
 
     /** `\begin{env}` + 行体 + `\end{env}`。 */
     private fun wrapEnv(env: String, body: String): String =
@@ -177,7 +285,9 @@ object MathWrap {
             val tail = latex.substring(start).trim()
             if (tail.isNotEmpty()) out += tail
         }
-        return out.ifEmpty { listOf(latex.trim()) }
+        if (out.isEmpty()) return listOf(latex.trim())
+        // 每段都要 `\left` / `\right` 自洽，否则 KaTeX 直接报错、整条公式退化成源码。
+        return out.map { balanceDelimiters(it) }
     }
 
     /**
@@ -193,6 +303,10 @@ object MathWrap {
         // 允许比窗口超出最多一个命令的回吐，与 findBreak 的 MAX_OVERSHOOT 同理
         val searchEnd = (windowEnd + MAX_OVERSHOOT).coerceAtMost(latex.length)
         var best: Int? = null
+        var bestTop: Int? = null
+        // `\left` / `\right` 深度：优先在配对定界符**外部**断行（更自然），
+        // 内部断行也不是不行——[balanceDelimiters] 会把配平补回来。
+        var delimDepth = 0
         var i = from
         while (i < searchEnd) {
             val c = latex[i]
@@ -202,8 +316,16 @@ object MathWrap {
                 if (j == i + 1) {
                     // `\ `、`\{` 之类单字符控制符号：符号本身之后是安全切点
                     i = j + 1
-                    if (j > from + 4) best = j
+                    if (j > from + 4) {
+                        best = j
+                        if (delimDepth == 0) bestTop = j
+                    }
                     continue
+                }
+                // `\left` / `\right` 深度跟踪
+                when (latex.substring(i + 1, j)) {
+                    "left" -> delimDepth++
+                    "right" -> delimDepth = (delimDepth - 1).coerceAtLeast(0)
                 }
                 // 吃掉紧跟的花括号参数（最多两层，够 \frac{a}{b}）
                 var guard = 0
@@ -217,14 +339,20 @@ object MathWrap {
                         guard++
                     } else break
                 }
-                if (j <= searchEnd && j > from + 4) best = j
+                if (j <= searchEnd && j > from + 4) {
+                    best = j
+                    if (delimDepth == 0) bestTop = j
+                }
                 i = j
                 continue
             }
-            if (c == ' ' && i > from + 4) best = i + 1
+            if (c == ' ' && i > from + 4) {
+                best = i + 1
+                if (delimDepth == 0) bestTop = i + 1
+            }
             i++
         }
-        return best
+        return bestTop ?: best
     }
 
     /** 找 start 处 `{` 的配对 `}`，找不到返回 -1。 */
@@ -255,6 +383,10 @@ object MathWrap {
     private fun findBreak(latex: String, from: Int, windowEnd: Int): Int? {
         var depth = 0
         var best: Int? = null
+        var bestTop: Int? = null
+        // `\left` / `\right` 深度：优先在配对定界符**外部**断行。
+        // 落在定界符内部的断点也不是不行——[balanceDelimiters] 会把配平补回来。
+        var delimDepth = 0
         var i = from
         while (i < latex.length) {
             val c = latex[i]
@@ -263,13 +395,20 @@ object MathWrap {
                 if (latex[i + 1] == '\\') {
                     if (depth == 0 && i + 2 <= windowEnd + MAX_OVERSHOOT && i >= from) {
                         best = i + 2
+                        if (delimDepth == 0) bestTop = i + 2
                     }
                     i += 2
                     continue
                 }
-                if (depth == 0 && i < windowEnd) {
-                    val cmdEnd = matchCommand(latex, i)
-                    if (cmdEnd != null) best = cmdEnd
+                // `\left` / `\right` 深度跟踪
+                val cmdEnd = matchCommand(latex, i)
+                when (commandName(latex, i)) {
+                    "left" -> delimDepth++
+                    "right" -> delimDepth = (delimDepth - 1).coerceAtLeast(0)
+                }
+                if (depth == 0 && i < windowEnd && cmdEnd != null) {
+                    best = cmdEnd
+                    if (delimDepth == 0) bestTop = cmdEnd
                 }
                 i += 2
                 continue
@@ -280,12 +419,22 @@ object MathWrap {
             }
             if (depth == 0 && c in BREAK_CHARS && i < windowEnd) {
                 best = i + 1
+                if (delimDepth == 0) bestTop = i + 1
             }
             i++
         }
-        if (best != null && best > windowEnd + MAX_OVERSHOOT) return null
-        if (best != null && best <= from + 4) return null // 切出太碎的行不如不切
-        return best
+        val chosen = (listOfNotNull(bestTop, best).firstOrNull { it <= windowEnd + MAX_OVERSHOOT })
+            ?: return null
+        if (chosen <= from + 4) return null // 切出太碎的行不如不切
+        return chosen
+    }
+
+    /** 取 [i] 处的命令名（不含反斜杠）；不是命令返回空串。 */
+    private fun commandName(latex: String, i: Int): String {
+        var j = i + 1
+        while (j < latex.length && latex[j].isLetter()) j++
+        if (j == i + 1) return ""
+        return latex.substring(i + 1, j)
     }
 
     /**
