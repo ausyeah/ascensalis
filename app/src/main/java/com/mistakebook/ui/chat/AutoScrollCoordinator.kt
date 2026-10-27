@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
 
 /** Scroll ownership for a reverse-layout chat list. */
@@ -43,22 +44,26 @@ class AutoScrollCoordinator {
 /**
  * 触底跟随判定状态机（纯逻辑，可单测）。
  *
- * ## 为什么容差必须非对称 + 迟滞
+ * ## 间隙的正确语义（v0.0.52 修正，Paparazzi 实测）
  *
- * 旧版用 `|gap| <= 12dp` 的对称大容差：用户上滑一小段（小于 12dp）几何上仍判
- * 「在底部」，流式输出继续跟随、把人拽回底边——真机反馈「想停停不下来」。
- * 12dp 的历史原因是底部 contentPadding 让完全贴底时 gap 为负，容差不放大就
- * 恢复不了；但正确解法是**折算掉 padding**（见 [bottomGapOfViewport]），
- * 而不是放大容差。
+ * 旧版把 `(viewportEndOffset - afterContentPadding) - (itemOffset + itemSize)`
+ * 当作「最新一条底边与内容区底边的间隙」——那是**正序布局**的算法。反向布局下
+ * `item.offset` 本身就是「内容区底边 - item 底边」（实测：贴底时 item 0 的
+ * offset = 0，被往下滚出 d px 时 offset = -d），旧公式在贴底时算出的是
+ * 「视口高 - item 高」这种量级（≈2000px），于是：
  *
- * 现在的判据分两个方向：
- * - **离开**（跟随 → 暂停）：gap > [leaveTolerancePx] 立即判不在底部，
- *   单帧生效——用户上滑超过 3dp 就要停，响应要快；
- * - **恢复**（暂停 → 跟随）：|gap| <= [resumeTolerancePx] 且**连续
- *   [RESUME_FRAMES] 帧**成立才恢复——公式位图到位、消息插入等布局抖动
- *   造成的一两帧几何回摆，不得把人拽回底部。
+ * - 贴底时 gap ≈ 2000 > 离开容差 → 第一帧就判「不在底部」→ **触底不跟随**；
+ * - 用户滚到列表接近最顶时，旧公式偶然落进恢复容差 → 恢复跟随并把人拽回底部
+ *   ——**不触底有的时候又在跟随**。
  *
- * @param gap 最新一条消息底边与内容区底边的间隙（px），见 [bottomGapOfViewport]；
+ * 现在 [newestGapOf] 直接返回 item 0 的 offset：贴底 = 0，滚离 = 负，
+ * index 0 不在可见集 = null。判据因此变成以 0 为中心的小带：
+ * - **离开**（跟随 → 暂停）：gap 跌出 `[-resumeTol, +leaveTol]` 单帧生效；
+ * - **恢复**（暂停 → 跟随）：gap 落回 `[-resumeTol, +resumeTol]` 且连续
+ *   [RESUME_FRAMES] 帧成立（公式位图到位等布局抖动造成的一两帧回摆，
+ *   不得把人拽回底部）。
+ *
+ * @param gap 最新一条消息底边与内容区底边的间隙（px），见 [newestGapOf]；
  *   `null` 表示最新一条根本不在可见集里（用户在看历史），必然不在底部。
  */
 internal class BottomFollowStateMachine(
@@ -79,7 +84,7 @@ internal class BottomFollowStateMachine(
     fun onGap(gap: Int?): Boolean {
         val candidate = when {
             gap == null -> false
-            atBottom -> gap <= leaveTolerancePx
+            atBottom -> gap in -resumeTolerancePx..leaveTolerancePx
             else -> gap in -resumeTolerancePx..resumeTolerancePx
         }
         if (candidate == atBottom) {
@@ -108,16 +113,20 @@ internal class BottomFollowStateMachine(
  * ## 谁在滚动
  *
  * 「是否跟随」由**几何位置 + 迟滞状态机**驱动，不依赖松手时机：
- * - 上滑离开底部超过 [LEAVE_TOLERANCE_DP] → 立即暂停（用户在上面看历史，
- *   新内容不得拽走）；
- * - 回到底部（|gap| <= [RESUME_TOLERANCE_DP] 连续两帧）→ 才恢复跟随。
+ * - 用户滚离底部（锚点序号变大 / 同一锚点被切得更多）→ 立即暂停；
+ * - 用户回到底部（|gap| ≤ 2dp 连续两帧）→ 才恢复跟随。
  *
  * `isDragged`（按住）只是**提前**暂停的输入：手一按就停，响应更快；
  * 即使拖动手势被气泡内子元素（公式图、图片）消费导致 `isDragged` 不翻，
- * 位置驱动那一路也会在离开底部 3dp 时立刻接手暂停。
+ * 位置驱动那一路也会在离开底部时立刻接手暂停。
  *
- * 暂停期间新内容增长不得掀动用户视口：流式气泡把锚点 item 撑高时，
- * 按增长量补偿滚动偏移（见下方 LaunchedEffect）。
+ * **布局瞬态不暂停**：新消息插入的瞬间，最新一条还在视口下方、不在可见集里
+ * （gap = null）。若据此暂停，跟随会被插入动作本身掐断——发送新消息后不再
+ * 自动回底。所以位置驱动那一路只在「用户正在滚动且正在滚离」时暂停；
+ * 自己发起的回底动画（锚点序号递减）不算滚离。
+ *
+ * 暂停期间新内容增长不得掀动用户视口：按「锚点 item 顶边」补偿滚动位置
+ * （见下方 LaunchedEffect，保持首可见项稳定，泛化到任意滚动位置）。
  */
 @Composable
 fun rememberAutoScrollEffect(
@@ -137,68 +146,96 @@ fun rememberAutoScrollEffect(
         if (isDragged) coordinator.pause()
     }
 
-    // 位置驱动 + 迟滞：离开底部立即暂停，回到底部连续两帧才恢复。
-    // pause()/resume() 会同步维护 showJumpButton。
+    // 位置驱动 + 迟滞：回到底部连续两帧才恢复；只有用户主动滚离才暂停。
     LaunchedEffect(state, policy) {
-        snapshotFlow { newestGapOf(state.layoutInfo) }
-            .collect { gap ->
-                if (policy.onGap(gap)) coordinator.resume() else coordinator.pause()
-            }
-    }
-
-    // 暂停期间的内容增长补偿。
-    //
-    // 反向布局下用户上滑后，锚点 item（firstVisibleItemIndex == 0）就是正在
-    // 流式增长的气泡：它每长高一点，顶边就上移一点，把用户正看的历史内容
-    // 往上顶——体感同样是「还在跟随」。按增长量把滚动偏移补回去，顶边不动。
-    // 新消息**插入**（index 前移）由反向布局自身的锚定机制保证不动视口，
-    // 不需要这里管。用户主动滚动（isScrollInProgress）期间不补偿，
-    // 松手后的新位置就是新的基准。
-    LaunchedEffect(state, coordinator) {
-        var lastNewestSize = -1
+        var lastAnchorIndex = -1
+        var lastAnchorOffset = 0
         snapshotFlow {
-            val newest = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == 0 }
-            Triple(coordinator.following, state.isScrollInProgress, newest?.size ?: -1)
-        }.collect { (following, scrolling, newestSize) ->
-            if (!following && !scrolling &&
-                lastNewestSize > 0 && newestSize > lastNewestSize &&
-                state.firstVisibleItemIndex == 0
-            ) {
-                val delta = newestSize - lastNewestSize
-                state.scrollToItem(0, state.firstVisibleItemScrollOffset + delta)
+            val gap = newestGapOf(state.layoutInfo)
+            Triple(gap, policy.onGap(gap), state.isScrollInProgress)
+        }.collect { (_, atBottom, scrolling) ->
+            val anchorIndex = state.firstVisibleItemIndex
+            val anchorOffset = state.firstVisibleItemScrollOffset
+            // 「正在滚离底部」：锚点序号变大（翻过更新的消息），或同一个锚点
+            // 被切掉更多（state offset 变大 = item 底边越低出内容区底边）。
+            // 回底动画与用户往回滚都是序号递减/offset 递减，不算滚离。
+            val movingAway = anchorIndex > lastAnchorIndex ||
+                (anchorIndex == lastAnchorIndex && anchorOffset > lastAnchorOffset)
+            lastAnchorIndex = anchorIndex
+            lastAnchorOffset = anchorOffset
+            when {
+                atBottom -> coordinator.resume()
+                scrolling && movingAway -> coordinator.pause()
             }
-            lastNewestSize = newestSize
         }
     }
 
-    // 只在「最新一条的 key 变了」时滚。流式期间 key 不变：
+    // 暂停期间的内容增长补偿（保持锚点 item 的顶边屏幕位置不动）。
+    //
+    // 反向布局下，底边的新内容长高（流式气泡、新消息插入后的首条）会把锚点
+    // 连同它上面的内容一起往上顶——体感同样是「还在跟随」。这里以「最底部
+    // 可见 item 的顶边 Y」为锚：跟随时/滚动中持续重设基准；暂停且静止时
+    // 若顶边被顶动了，就 scrollToItem 把它拨回原位。
+    //
+    // 锚点按 key 找（不按 index）：新消息插入会让 index 整体前移，key 稳定。
+    // 补偿量换算：scrollToItem 的第二参数量 = -锚点 item.offset，
+    // 而 item.offset = viewportEnd - item 顶边Y - item.size，代入即得。
+    LaunchedEffect(state, coordinator) {
+        var anchorKey: Any? = null
+        var anchorTopY = 0f
+        snapshotFlow {
+            val info = state.layoutInfo
+            val bottomMost = info.visibleItemsInfo.firstOrNull()
+            Triple(coordinator.following, state.isScrollInProgress, info to bottomMost)
+        }.collect { (following, scrolling, pair) ->
+            val (info, bottomMost) = pair
+            val topOf = { item: androidx.compose.foundation.lazy.LazyListItemInfo ->
+                info.viewportEndOffset - item.offset - item.size
+            }
+            // 跟随时/滚动中：以当前位置为新的锚点基准（key 非空，无需判空）
+            if (following || scrolling || bottomMost == null) {
+                anchorKey = bottomMost?.key
+                anchorTopY = bottomMost?.let { topOf(it).toFloat() } ?: 0f
+                return@collect
+            }
+            if (anchorKey == null) {
+                anchorKey = bottomMost.key
+                anchorTopY = topOf(bottomMost).toFloat()
+                return@collect
+            }
+            val anchored = info.visibleItemsInfo.firstOrNull { it.key == anchorKey }
+            if (anchored == null) {
+                // 锚点被滚出视口：放弃补偿（用户在自由阅读别处）
+                anchorKey = null
+                return@collect
+            }
+            val currentTop = topOf(anchored)
+            if (currentTop.toFloat() != anchorTopY) {
+                val target = (anchorTopY + anchored.size - info.viewportEndOffset).roundToInt()
+                state.scrollToItem(anchored.index, target)
+            }
+        }
+    }
+
+    // 只在「最新一条的 key 变了」或「跟随状态翻转」时滚。流式期间 key 不变：
     // 气泡长高由反向布局自己锚在底边，不需要反复重启滚动动画。
     LaunchedEffect(latestItemKey, coordinator.following) {
         if (coordinator.following && latestItemKey != null) {
             snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }
-            // 双保险（v0.0.35）：动画启动**前**再验一次仍在底部。
-            //
-            // following 的翻转经 snapshotFlow 异步落地，effect 重启（key 变化）
-            // 与位置驱动的 pause() 之间存在竞态窗口——窗口里发起的
-            // animateScrollToItem 会把正往上翻历史的人一把拽回底部。
-            // 动画前按当前几何复核一次：用与「保持跟随」同向的判据
-            // （gap <= leaveTol，负值 = padding 内/取整误差 = 贴底）。
-            // 复核不能只问「index 0 在不在底部」：新消息插入的**瞬间**它还在
-            // 视口下方、不在可见集里，按旧判据会误判「不在底部」而干脆不滚——
-            // 正是「发送新消息不自动跳到底部」的根因。反向布局下插入一条新
-            // 消息时旧末条仍锚在视口底边（gap≈0），所以只要视觉最底部的可见
-            // item 贴着底边，就说明插入前用户确实在底部，应该跟随。
+            // 双保险（v0.0.35，v0.0.52 按实测语义重写）：动画启动**前**再验
+            // 一次仍在底部。反向布局语义（Paparazzi 实测，见 [newestGapOf]）：
+            // item.offset = 内容区底边 - item 底边，贴底 = 0。所以：
+            // - 最新一条可见且贴底 → 在底部；
+            // - 最新一条还在视口下方（新消息插入瞬间）时，最底部可见 item 贴底
+            //   （offset ≈ 0）同样说明插入前用户就在底部，应该跟随。
+            // 用户滚离后最底部可见 item 的 offset 是负的（被切），不会误判。
             val info = state.layoutInfo
-            val newestVisible = info.visibleItemsInfo.any { it.index == 0 }
+            val newest = info.visibleItemsInfo.firstOrNull { it.index == 0 }
             val bottomMost = info.visibleItemsInfo.firstOrNull()
-            val flushAtBottom = bottomMost != null &&
-                bottomGapOfViewport(
-                    itemOffset = bottomMost.offset,
-                    itemSize = bottomMost.size,
-                    viewportEndOffset = info.viewportEndOffset,
-                    afterContentPadding = info.afterContentPadding
-                ) <= leaveTolerancePx
-            if (coordinator.following && (newestVisible || flushAtBottom)) {
+            val band = -resumeTolerancePx..leaveTolerancePx
+            val atBottomNow = newest != null && newest.offset in band
+            val flushAtBottom = bottomMost != null && bottomMost.offset in band
+            if (coordinator.following && (atBottomNow || flushAtBottom)) {
                 state.animateScrollToItem(0)
             }
         }
@@ -208,37 +245,25 @@ fun rememberAutoScrollEffect(
 }
 
 /**
- * 最新一条消息底边与「内容区底边」的间隙（px）。纯函数，可单测。
+ * 最新一条消息（index 0）底边与「内容区底边」的间隙（px）。纯函数，可单测。
  *
- * ## 为什么必须折算 afterContentPadding
+ * ## 语义来自 Paparazzi 实测（Pixel5 / 8dp 竖向内边距 / 50dp item）
  *
- * `viewportEndOffset` 是否把 `contentPadding` 算进去，两种约定都可能出现在
- * 真机上：完全停在底部时 `gap` 可能是 0，也可能是**负值**（底部 8dp 内边距
- * 被算进视口）。不折算的话，「贴底」的真实判据区间是 [-8dp, +取整误差]，
- * 对称容差时代靠把容差放大到 12dp 掩盖——代价是上滑 12dp 内都判在底部。
- * 现在先减去 [LazyListLayoutInfo.afterContentPadding] 把内容区底边对齐，
- * 容差就可以收紧到 2–3dp。
- */
-internal fun bottomGapOfViewport(
-    itemOffset: Int,
-    itemSize: Int,
-    viewportEndOffset: Int,
-    afterContentPadding: Int
-): Int = (viewportEndOffset - afterContentPadding) - (itemOffset + itemSize)
-
-/**
- * 取最新一条消息（index 0）与内容区底边的间隙。
+ * - 反向布局下 `contentPadding` **不镜像**：`beforeContentPadding` 在顶部、
+ *   `afterContentPadding` 在底部；`viewportEndOffset` = 屏高 - afterPadding，
+ *   即内容区底边；
+ * - `LazyListItemInfo.offset` = 内容区底边 - item 底边屏幕坐标。贴底时
+ *   item 0 的 offset = 0；用户把它往下滚出 d px（看历史）时 offset = -d。
+ *
+ * 所以间隙就是 offset 本身，**不需要**再折 `afterContentPadding`——
+ * 旧版按正序布局的公式折了一次，贴底时算出 ≈ 视口高，是 T1 回归的根因。
+ *
  * 列表为空视为贴底（0）；index 0 不在可见集里返回 null（必然不在底部）。
  */
-private fun newestGapOf(info: LazyListLayoutInfo): Int? {
+internal fun newestGapOf(info: LazyListLayoutInfo): Int? {
     if (info.totalItemsCount == 0) return 0
     val newest = info.visibleItemsInfo.firstOrNull { it.index == 0 } ?: return null
-    return bottomGapOfViewport(
-        itemOffset = newest.offset,
-        itemSize = newest.size,
-        viewportEndOffset = info.viewportEndOffset,
-        afterContentPadding = info.afterContentPadding
-    )
+    return newest.offset
 }
 
 /** 上滑离开底部超过这个距离立即判「不在底部」（2–4dp 取中，响应优先）。 */
