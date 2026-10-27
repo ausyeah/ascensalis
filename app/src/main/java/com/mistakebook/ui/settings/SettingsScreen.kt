@@ -141,135 +141,178 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            // 分组顺序：外观 → 使用偏好 → 识别与大模型（配置）→ 数据管理。
-            // 配置类是「首次装机配一次就再也不碰」的东西，垫底；
-            // 外观是打开设置最常改的，放最上面。
+            // T8 重构：全部分组默认收起（CollapsibleSettingsGroup 手风琴卡片），
+            // 一屏看全目录；组内内容原样复用既有 Section 组件，功能零改动。
+            // 顺序：AI 服务 → 学习 → 资料库 → 用量与账户 → 网络（高级）→ 数据与关于。
+            // 各组现有设置项清单（重构后一项不丢）：
+            //   AI 服务: 主题、识别方式、MinerU Key、MinerU 参数、大模型配置（手风琴
+            //     互斥：大模型/识图/生图/联网搜索）、推理档位
+            //   学习: 番茄钟、复习提醒、打印默认
+            //   资料库: 入口行
+            //   用量与账户: LLM 用量、MinerU 用量
+            //   网络与代理（高级）: 网络代理
+            //   数据与关于: 数据管理（备份/恢复）、单词书数据重置
 
-            // ---- 外观 ----
-            SettingsSectionHeader("外观")
-            ThemeModeSection(
-                state = state,
-                viewModel = viewModel
-            )
+            // ---- AI 服务（手风琴互斥：同一时刻只展开一张配置卡）----
+            CollapsibleSettingsGroup(
+                title = "主题外观",
+                exclusiveScope = "ai"
+            ) {
+                ThemeModeSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
 
-            // ---- 使用偏好 ----
-            SettingsSectionHeader("使用偏好")
-            // 网络代理紧跟主题：都是「打开设置最常改」的全局行为
-            NetworkProxySection(
-                state = state,
-                viewModel = viewModel
-            )
+            CollapsibleSettingsGroup(
+                title = "识别方式",
+                exclusiveScope = "ai"
+            ) {
+                RecognitionModeSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
 
-            PrintDefaultsSection(
-                state = state,
-                viewModel = viewModel
-            )
+            CollapsibleSettingsGroup(
+                title = "MinerU 配置",
+                exclusiveScope = "ai"
+            ) {
+                MineruKeySection(
+                    state = state,
+                    viewModel = viewModel
+                )
+                Spacer(Modifier.height(12.dp))
+                MineruParamsSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
 
-            ReviewReminderSection(
-                state = state,
-                viewModel = viewModel,
-                onPickTimeClick = { showTimePicker = true }
-            )
+            CollapsibleSettingsGroup(
+                title = "大模型配置",
+                exclusiveScope = "ai"
+            ) {
+                LlmProfilesSection(
+                    state = state,
+                    viewModel = viewModel,
+                    onAddProfileClick = { showAddProfile = true }
+                )
+                Spacer(Modifier.height(12.dp))
+                ReasoningEffortSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
 
-            PomodoroSection(
-                state = state,
-                viewModel = viewModel
-            )
+            CollapsibleSettingsGroup(
+                title = "识图模型",
+                exclusiveScope = "ai"
+            ) {
+                VisionProfilesSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
 
-            // ---- 识别与大模型（配置）----
-            SettingsSectionHeader("识别与大模型")
+            CollapsibleSettingsGroup(
+                title = "生图渠道",
+                exclusiveScope = "ai"
+            ) {
+                ImageProfilesSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
 
-            MineruKeySection(
-                state = state,
-                viewModel = viewModel
-            )
+            CollapsibleSettingsGroup(
+                title = "联网搜索",
+                exclusiveScope = "ai"
+            ) {
+                SearchProviderSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
 
-            // MinerU 用量紧跟 MinerU 配置：换 Key 后顺手清零对比。
-            MineruUsageSection(container = container)
+            // ---- 学习 ----
+            CollapsibleSettingsGroup(title = "学习") {
+                PomodoroSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+                Spacer(Modifier.height(12.dp))
+                ReviewReminderSection(
+                    state = state,
+                    viewModel = viewModel,
+                    onPickTimeClick = { showTimePicker = true }
+                )
+            }
 
-            // 识别方式路口：仅 MinerU / 大模型直连 / 自动（MinerU 优先，不可用落大模型）。
-            RecognitionModeSection(
-                state = state,
-                viewModel = viewModel
-            )
-
-            LlmProfilesSection(
-                state = state,
-                viewModel = viewModel,
-                onAddProfileClick = { showAddProfile = true }
-            )
-
-            // 大模型用量紧跟大模型配置：请求次数 / 输入 / 输出 / 缓存命中。
-            LlmUsageSection(container = container)
-
-            // 思考强度紧跟大模型配置：整理错题时拉满思考，日常问答可调低省时间。
-            ReasoningEffortSection(
-                state = state,
-                viewModel = viewModel
-            )
-
-            // 识图模型：独立配置一套专门看图的（地址/Key/模型名全自己填）
-            VisionProfilesSection(
-                state = state,
-                viewModel = viewModel
-            )
-
-            // 生图渠道：单词场景图 / 详情页辅助图的出口，与大模型配置同构但独立。
-            ImageProfilesSection(
-                state = state,
-                viewModel = viewModel
-            )
-
-            // 联网搜索：开关与出口选择在模型面板，Key 等配置在这里（v0.0.43）。
-            SearchProviderSection(
-                state = state,
-                viewModel = viewModel
-            )
-
-            MineruParamsSection(
-                state = state,
-                viewModel = viewModel
-            )
+            CollapsibleSettingsGroup(title = "打印默认") {
+                PrintDefaultsSection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
 
             // ---- 资料库（T6）----
-            SettingsSectionHeader(stringResource(R.string.settings_library_section))
-            LibraryEntrySection(onOpen = onOpenLibrary)
+            CollapsibleSettingsGroup(title = stringResource(R.string.settings_library_section)) {
+                LibraryEntrySection(onOpen = onOpenLibrary)
+            }
 
-            // ---- 数据管理 ----
-            SettingsSectionHeader("数据管理")
+            // ---- 用量与账户 ----
+            CollapsibleSettingsGroup(title = "用量统计") {
+                LlmUsageSection(container = container)
+                Spacer(Modifier.height(12.dp))
+                MineruUsageSection(container = container)
+            }
 
-            DataManageSection(
-                container = container,
-                viewModel = viewModel,
-                onExportClick = {
-                    scope.launch {
-                        val result = container.backupManager.export()
-                        result.onSuccess { path ->
-                            snackbarHostState.showSnackbar(
-                                context.getString(R.string.settings_backup_exported) + "：" + path
-                            )
-                        }
-                        result.onFailure { error ->
-                            snackbarHostState.showSnackbar(
-                                context.getString(
-                                    R.string.settings_backup_failed,
-                                    error.message.orEmpty()
+            // ---- 网络与代理（高级）----
+            CollapsibleSettingsGroup(title = "网络与代理（高级）") {
+                NetworkProxySection(
+                    state = state,
+                    viewModel = viewModel
+                )
+            }
+
+            // ---- 数据与关于 ----
+            CollapsibleSettingsGroup(title = "数据与备份") {
+                DataManageSection(
+                    container = container,
+                    viewModel = viewModel,
+                    onExportClick = {
+                        scope.launch {
+                            val result = container.backupManager.export()
+                            result.onSuccess { path ->
+                                snackbarHostState.showSnackbar(
+                                    context.getString(R.string.settings_backup_exported) + "：" + path
                                 )
-                            )
+                            }
+                            result.onFailure { error ->
+                                snackbarHostState.showSnackbar(
+                                    context.getString(
+                                        R.string.settings_backup_failed,
+                                        error.message.orEmpty()
+                                    )
+                                )
+                            }
                         }
-                    }
-                },
-                onRestoreClick = { showRestoreConfirm = true }
-            )
+                    },
+                    onRestoreClick = { showRestoreConfirm = true }
+                )
+            }
 
-            // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
-            // 都要留给题目），统一收到设置里，与数据管理相邻。
-            WordbookDataSection(
-                container = container,
-                onResetDone = { message ->
-                    scope.launch { snackbarHostState.showSnackbar(message) }
-                }
-            )
+            CollapsibleSettingsGroup(title = "单词书数据") {
+                // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
+                // 都要留给题目），统一收到设置里，与数据管理相邻。
+                WordbookDataSection(
+                    container = container,
+                    onResetDone = { message ->
+                        scope.launch { snackbarHostState.showSnackbar(message) }
+                    }
+                )
+            }
 
             Spacer(Modifier.height(24.dp))
         }
