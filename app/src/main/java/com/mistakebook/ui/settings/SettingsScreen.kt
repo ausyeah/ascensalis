@@ -34,6 +34,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.ui.library.LibraryEntrySection
+import com.mistakebook.ui.badge.BadgeEntrySection
 import com.mistakebook.di.AppContainer
 import com.mistakebook.review.ReviewScheduler
 import com.mistakebook.ui.common.containerViewModel
@@ -48,6 +49,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     /** 资料库管理页入口（T6）：设置页分区点进去。 */
     onOpenLibrary: () -> Unit = {},
+    /** 成就墙入口（T10）。 */
+    onOpenBadgeWall: () -> Unit = {},
     /**
      * 内嵌模式（门户第 4 页）：不画自己的顶栏与返回箭头——
      * 门户顶部 Tab 行就是它的导航，从任何一页都能一步切回来。
@@ -237,6 +240,14 @@ fun SettingsScreen(
 
             // ---- 学习 ----
             CollapsibleSettingsGroup(title = "学习") {
+                // 成就墙入口放设置「学习」组（而非首页图标行）：
+                // 首页图标行每一寸都要留给刷题主流程入口（用户每天进来
+                // 是为了做题，不是为了看徽章），成就墙是阶段性回访目标，
+                // 与番茄钟/复习提醒同属「学习」分组更合理。
+                LibraryEntrySection(onOpen = onOpenLibrary)
+                Spacer(Modifier.height(12.dp))
+                BadgeEntrySection(onOpen = onOpenBadgeWall)
+                Spacer(Modifier.height(12.dp))
                 PomodoroSection(
                     state = state,
                     viewModel = viewModel

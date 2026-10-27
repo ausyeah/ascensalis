@@ -72,6 +72,9 @@ class QuestionRepository(
     suspend fun dueQuestions(today: LocalDate, limit: Int = 50): List<Question> =
         questionDao.dueForReview(today.toEpochDay(), limit)
 
+    /** 徽章统计（T10）：全部未删除错题（一次读全量，聚合在仓库层做）。 */
+    suspend fun allActiveQuestions(): List<Question> = questionDao.allActive()
+
     suspend fun countBySubject(subjectId: Long): Int = questionDao.countBySubject(subjectId)
 
     suspend fun countByReason(reason: ErrorReason): Int = questionDao.countByReason(reason.name)

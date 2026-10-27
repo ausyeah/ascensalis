@@ -730,4 +730,10 @@
     <string name="library_truncated">内容超过 50KB，已截断显示（保存会丢失被截断部分）</string>
     <string name="settings_library_section">资料库</string>    <string name="chat_attach_library">@资料库</string>
     <string name="widget_no_exam">暂无考试</string>
-</resources>
+    <string name="badge_title">成就墙</string>
+    <string name="badge_loading">正在统计…</string>
+    <string name="badge_unlocked_on">%1$s 解锁</string>
+    <string name="badge_progress">%1$d / %2$d</string>
+    <string name="badge_locked">未达成</string>
+    <string name="settings_badge_entry">成就墙</string>
+    <string name="badge_new_toast">解锁新成就：%1$s</string></resources>

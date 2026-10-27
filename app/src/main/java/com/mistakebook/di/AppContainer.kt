@@ -189,6 +189,23 @@ class AppContainer(context: Context) {
         wordbookDatabase.wordbookDao()
     }
 
+    /** 徽章解锁记录（T10）。 */
+    val reviewLogDao: com.mistakebook.data.local.ReviewLogDao by lazy {
+        database.reviewLogDao()
+    }
+
+    val badgeDao: com.mistakebook.data.local.BadgeDao by lazy {
+        database.badgeDao()
+    }
+
+    /** 徽章判定仓库：App 启动 + 复习/录入后触发轻量判定。 */
+    val badgeRepository: com.mistakebook.data.library.BadgeRepository by lazy {
+        com.mistakebook.data.library.BadgeRepository(this)
+    }
+
+    /** 徽章统计聚合（成就墙进度展示用）。 */
+    val badgeStatsProvider: com.mistakebook.data.library.BadgeRepository get() = badgeRepository
+
     /**
      * 单词数据纪元信号：设置页重置单词数据时 +1。
      *

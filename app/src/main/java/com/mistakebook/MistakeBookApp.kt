@@ -25,6 +25,10 @@ class MistakeBookApp : Application() {
         container.appScope.launch {
             container.captureTaskRepository.failUnfinished(RecognitionEngineInterruptedMessage)
         }
+        // T10 徽章判定：启动时跑一轮轻量判定，把新解锁徽章持久化
+        container.appScope.launch {
+            runCatching { container.badgeRepository.evaluateAndStore() }
+        }
     }
 
     private fun createReviewChannel() {

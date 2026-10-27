@@ -45,6 +45,7 @@ object Routes {
     const val QUESTION_EDIT = "questionEdit"
     const val NOTEBOOKS = "notebooks"
     const val LIBRARY = "library"
+    const val BADGE_WALL = "badgeWall"
 
     /** 独立复习页（T1）：走完今日到期队列。无参数。 */
     const val REVIEW = "review"
@@ -204,7 +205,8 @@ fun MistakeBookNavHost(
             SettingsScreen(
                 container = container,
                 onBack = { navController.popBackStack() },
-                onOpenLibrary = { navController.navigate(Routes.LIBRARY) }
+                onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
+                onOpenBadgeWall = { navController.navigate(Routes.BADGE_WALL) }
             )
         }
 
@@ -213,6 +215,10 @@ fun MistakeBookNavHost(
                 filesDir = container.files.rootDir,
                 onBack = { navController.popBackStack() }
             )
+        }
+
+        composable(Routes.BADGE_WALL) {
+            com.mistakebook.ui.badge.BadgeWallScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Routes.CAPTURE) {
