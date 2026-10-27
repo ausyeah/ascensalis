@@ -13,12 +13,15 @@ import com.mistakebook.data.repos.QuestionRepository
 import com.mistakebook.data.repos.SubjectRepository
 import com.mistakebook.data.repos.TagRepository
 import com.mistakebook.net.HttpFactory
+import com.mistakebook.net.ImageGenClient
 import com.mistakebook.net.llm.LlmApi
 import com.mistakebook.net.mineru.MineruApi
 import com.mistakebook.pipeline.LlmClient
 import com.mistakebook.pipeline.MineruClient
 import com.mistakebook.pipeline.RecognitionEngine
 import com.mistakebook.pipeline.RecognitionSubmitter
+import com.mistakebook.pipeline.SceneImageGenerator
+import com.mistakebook.util.ImageDiskCache
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -36,6 +39,10 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 /**
  * 手写依赖容器：单 Activity + Repository 架构下足够使用，避免引入 DI 框架依赖。
  */
+/** 生图任务的来源标识（同时用作 WorkManager 工作名的后缀）。 */
+const val SOURCE_WORDBOOK = "wordbook"
+const val SOURCE_POMODORO = "pomodoro"
+
 class AppContainer(context: Context) {
 
     val appContext = context.applicationContext
@@ -182,6 +189,23 @@ class AppContainer(context: Context) {
         wordbookDatabase.wordbookDao()
     }
 
+    /** 徽章解锁记录（T10）。 */
+    val reviewLogDao: com.mistakebook.data.local.ReviewLogDao by lazy {
+        database.reviewLogDao()
+    }
+
+    val badgeDao: com.mistakebook.data.local.BadgeDao by lazy {
+        database.badgeDao()
+    }
+
+    /** 徽章判定仓库：App 启动 + 复习/录入后触发轻量判定。 */
+    val badgeRepository: com.mistakebook.data.library.BadgeRepository by lazy {
+        com.mistakebook.data.library.BadgeRepository(this)
+    }
+
+    /** 徽章统计聚合（成就墙进度展示用）。 */
+    val badgeStatsProvider: com.mistakebook.data.library.BadgeRepository get() = badgeRepository
+
     /**
      * 单词数据纪元信号：设置页重置单词数据时 +1。
      *
@@ -218,6 +242,49 @@ class AppContainer(context: Context) {
     }
 
     val llmClient: LlmClient by lazy { LlmClient(llmApi) }
+
+    /** 生图客户端（渠道由设置里配置，见 [com.mistakebook.data.prefs.ImageProfile]）。 */
+    val imageGenClient: ImageGenClient by lazy { ImageGenClient() }
+
+    /** 生图结果磁盘 LRU 缓存（filesDir/images/gen，上限 200 张，不进备份）。 */
+    val imageDiskCache: ImageDiskCache by lazy { ImageDiskCache(files.genImageDir) }
+
+    /**
+     * 两步生图编排：LLM 出场景 prompt → 生图 API 出图（单词场景图 / 详情页辅助图共用）。
+     */
+    val sceneImageGenerator: SceneImageGenerator by lazy {
+        SceneImageGenerator(llmClient, imageGenClient, imageDiskCache, settingsStore)
+    }
+
+    /**
+     * 海报生图：打卡海报（词库统计页 / 番茄钟统计页）共用。
+     *
+     * 两种模式：只生背景（文字本地画，数字准确）或整图交给生图模型。
+     */
+    val posterImageService: com.mistakebook.poster.PosterImageService by lazy {
+        com.mistakebook.poster.PosterImageService(imageGenClient, imageDiskCache, settingsStore)
+    }
+
+    /**
+     * 词库页的海报生图**后台任务状态**。
+     *
+     * 挂在 [appScope] 上（与应用同生命周期），这样用户离开页面后
+     * ViewModel 被销毁、状态也不会丢——回到页面还能看到任务已经完成。
+     */
+    val wordbookPosterMonitor: com.mistakebook.poster.PosterWorkMonitor by lazy {
+        com.mistakebook.poster.PosterWorkMonitor(appContext, appScope, SOURCE_WORDBOOK)
+    }
+
+    /**
+     * 番茄钟页的海报生图后台任务状态。
+     *
+     * 与 [wordbookPosterMonitor] 分开是因为两者用**不同的 WorkManager 工作名**
+     * （否则在词库页点一次生图会把番茄钟的任务 REPLACE 掉）。
+     */
+    val pomodoroPosterMonitor: com.mistakebook.poster.PosterWorkMonitor by lazy {
+        com.mistakebook.poster.PosterWorkMonitor(appContext, appScope, SOURCE_POMODORO)
+    }
+
 
     /**
      * 对话流式客户端。
@@ -355,6 +422,13 @@ class AppContainer(context: Context) {
     var cameraPurpose: CameraPurpose = CameraPurpose.QUESTION
 
     /**
+     * 连拍批次（F6）：相机页攒题、裁切页逐张接力、完成后统一提交。
+     * 放这里而不是 remember 里，是为了跨导航目标与旋横屏存活——
+     * 同 [recropping] 的容器标志惯例。详见 [CaptureBatch] 的注释。
+     */
+    val captureBatch = CaptureBatch()
+
+    /**
      * 裁切页的「聊天附件」模式（T11/T12）：与 [recropping]、
      * [reRecognizeQuestionId] 互斥。置位时裁切确认不走识别提交，
      * 产物复制进聊天附件暂存后经 [pendingChatAttachmentPath] 交回对话页。
@@ -368,6 +442,22 @@ class AppContainer(context: Context) {
      * 交接（同 recroppedImagePath 的教训）。进程死亡不持久化。
      */
     var pendingChatAttachmentPath: String? by mutableStateOf(null)
+
+    /**
+     * 对话连拍（T2）已裁完成果的暂存队列。
+     *
+     * CHAT 用途的批次在 CropScreen 接力时，每裁完一张就把成果路径推进这里
+     * （原图照旧由 CaptureBatch 管理），全部裁完由 NavHost 统一以多附件
+     * 交接回对话页（[pendingChatAttachmentPaths]）。与单张路径的
+     * [pendingChatAttachmentPath] 互不干扰。
+     */
+    val chatBatchCropped = mutableListOf<String>()
+
+    /**
+     * 交给对话页的**多条**待发附件路径（T2 对话连拍的交接口）。
+     * ChatScreen 的 LaunchedEffect 观察它：非空则逐张加入待发附件并清空。
+     */
+    var pendingChatAttachmentPaths: List<String>? by mutableStateOf(null)
 
     /**
      * 重裁剪产生的新原图路径。

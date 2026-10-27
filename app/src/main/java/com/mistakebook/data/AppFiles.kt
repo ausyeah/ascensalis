@@ -13,9 +13,21 @@ class AppFiles(context: Context) {
 
     private val filesRoot: File = context.filesDir
 
+    /** 私有根目录（资料库等直接挂在 files/ 下的功能用）。 */
+    val rootDir: File get() = filesRoot
+
     val cropDir: File = File(filesRoot, "crops")
 
     val importDir: File = File(filesRoot, "imports")
+
+    /**
+     * 生图结果目录（filesDir/images/gen）。
+     *
+     * 生成产物不是用户数据：**不进备份**（BackupManager 白名单制，
+     * 这里天然不在列），容量由 [com.mistakebook.util.ImageDiskCache]
+     * 的 LRU 上限兜底。
+     */
+    val genImageDir: File = File(filesRoot, "images/gen")
 
     val exportDir: File = File(filesRoot, "exports")
 

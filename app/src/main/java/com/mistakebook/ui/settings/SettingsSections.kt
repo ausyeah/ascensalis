@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
@@ -82,8 +83,10 @@ import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.data.prefs.LlmKeyEntry
 import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.chat.ChatSearchProvider
 import com.mistakebook.data.prefs.NetworkMode
 import com.mistakebook.data.prefs.ReasoningEffort
+import com.mistakebook.data.prefs.RecognitionMode
 import com.mistakebook.data.prefs.ThemeMode
 import com.mistakebook.data.prefs.UsageSnapshot
 import com.mistakebook.data.prefs.formatCount
@@ -938,6 +941,145 @@ internal fun MineruKeySection(
     }
 }
 
+/**
+ * 识别方式：仅 MinerU / 识图模型 / 当前模型 / 自动（自动回落链）。
+ *
+ * 放在 MinerU 配置之后、大模型配置之前——这里是两条路的「路口」，
+ * 两条路各自的配置刚展示完，用户在这里决定拍照后走哪条。
+ *
+ * 四个选项（v0.0.49 补齐「识图模型」与「当前模型」两个）：
+ * - 仅 MinerU：只用 MinerU 解析。
+ * - 识图模型：只用**用户单独配置的识图模型**看原图（主对话模型识不识图都行）。
+ * - 当前模型：用**当前会话/默认的大模型**看原图。
+ * - 自动：按「MinerU → 当前模型 → 识图模型」的顺序回落，任一环节失败不中断。
+ */
+@Composable
+internal fun RecognitionModeSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    val snapshot = state.snapshot
+    val mode = snapshot.recognitionMode
+    val profile = state.activeProfile
+    // 大模型这条路通不通：没配任何模型，或当前模型不能识图，都算不通。
+    val llmPathBlocked = profile == null || !profile.supportsVision
+    val visionReady = snapshot.visionConfigured
+    SettingsGroup(title = stringResource(R.string.settings_recognition_title)) {
+        Text(
+            text = stringResource(R.string.settings_recognition_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        // 四个选项分两行放：一行四个会挤到标签只剩半个字。
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = mode == RecognitionMode.MINERU,
+                    onClick = { viewModel.setRecognitionMode(RecognitionMode.MINERU) },
+                    label = { Text(stringResource(R.string.settings_recognition_mineru)) },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = mode == RecognitionMode.VISION,
+                    onClick = { viewModel.setRecognitionMode(RecognitionMode.VISION) },
+                    label = { Text(stringResource(R.string.settings_recognition_vision)) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = mode == RecognitionMode.CURRENT,
+                    onClick = { viewModel.setRecognitionMode(RecognitionMode.CURRENT) },
+                    label = { Text(stringResource(R.string.settings_recognition_llm)) },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = mode == RecognitionMode.AUTO,
+                    onClick = { viewModel.setRecognitionMode(RecognitionMode.AUTO) },
+                    label = { Text(stringResource(R.string.settings_recognition_auto)) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = when (mode) {
+                RecognitionMode.MINERU ->
+                    stringResource(R.string.settings_recognition_hint_mineru)
+                RecognitionMode.VISION ->
+                    stringResource(R.string.settings_recognition_hint_vision)
+                RecognitionMode.CURRENT ->
+                    stringResource(R.string.settings_recognition_hint_llm)
+                RecognitionMode.AUTO ->
+                    stringResource(R.string.settings_recognition_hint_auto)
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        // 「当前模型」这条路必须醒目警告：它不通时整条识别直接失败。
+        if (mode == RecognitionMode.CURRENT && llmPathBlocked) {
+            Spacer(Modifier.height(10.dp))
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.settings_recognition_warn_llm),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
+        // 「识图模型」没配时也要提示——否则用户选了才发现这条路是空的。
+        if (mode == RecognitionMode.VISION && !visionReady) {
+            Spacer(Modifier.height(10.dp))
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.settings_recognition_warn_vision),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 internal fun LlmProfilesSection(
     state: SettingsUiState,
@@ -980,6 +1122,15 @@ internal fun LlmProfilesSection(
             Spacer(Modifier.height(8.dp))
             FirstRunHint(R.string.settings_hint_llm_key)
         }
+
+        // 识图模型已独立成下方的一个分区：那里的地址 / Key / 模型名
+        // 全部由用户自由填写，不再受「已有对话配置」限制。
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.settings_vision_profile_moved),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -1020,6 +1171,353 @@ private fun ExtraKeyRow(
                 Icons.Default.Close,
                 contentDescription = stringResource(R.string.settings_remove_key)
             )
+        }
+    }
+}
+
+/**
+ * 生图渠道（多套，可切换）：单词场景图、详情页辅助图都走这里配置的渠道。
+ *
+ * 交互仿 [LlmProfilesSection] 的展开式卡片，但字段更少——生图 API
+ * 没有统一端点，请求体差异用「模板」兜底（见 [ImageProfile.requestBodyTemplate]），
+ * 所以没有拉模型列表、key 池那套。
+ */
+@Composable
+internal fun ImageProfilesSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    // 「新增渠道」后强制展开刚建的空渠道：用户点了新增就是要填它，
+    // 不该再手动点开。空渠道 id 只在本次组合有效，记住它即可。
+    var forceExpandId by remember { mutableStateOf<String?>(null) }
+    SettingsGroup(title = stringResource(R.string.settings_image_profiles)) {
+        Text(
+            text = stringResource(R.string.settings_image_profiles_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        state.snapshot.imageProfiles.forEach { profile ->
+            ImageProfileRow(
+                profile = profile,
+                selected = profile.id == state.snapshot.activeImageProfileId,
+                forceExpanded = forceExpandId == profile.id,
+                onSelect = { viewModel.selectImageProfile(profile.id) },
+                onDelete = { viewModel.deleteImageProfile(profile.id) },
+                onSave = { draft -> viewModel.saveImageProfile(draft) }
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        OutlinedButton(
+            onClick = {
+                val fresh = com.mistakebook.data.prefs.ImageProfile()
+                forceExpandId = fresh.id
+                viewModel.addImageProfile(fresh)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Text(stringResource(R.string.settings_add_image_profile))
+        }
+        if (!state.snapshot.imageConfigured) {
+            Spacer(Modifier.height(8.dp))
+            FirstRunHint(R.string.settings_hint_image_key)
+        }
+    }
+}
+
+/**
+ * 一张生图渠道卡片：RadioButton 管激活，标题栏管展开/收起，
+ * 展开后是五个字段的编辑表单 + 保存 / 删除。
+ */
+@Composable
+private fun ImageProfileRow(
+    profile: com.mistakebook.data.prefs.ImageProfile,
+    selected: Boolean,
+    forceExpanded: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+    onSave: (com.mistakebook.data.prefs.ImageProfile) -> Unit
+) {
+    // 展开态跟着配置 id 走；forceExpanded 只在新渠道创建那一刻为真，
+    // 用户手动收起后不被它强行拽回来（初始值只用一次）。
+    var expanded by remember(profile.id) {
+        mutableStateOf(selected || forceExpanded)
+    }
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
+    var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
+    var model by remember(profile.id) { mutableStateOf(profile.model) }
+    var template by remember(profile.id) { mutableStateOf(profile.requestBodyTemplate) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(selected = selected, onClick = onSelect)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = profile.displayName(),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = profile.baseUrl.ifBlank { "未填写地址" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (expanded) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.settings_image_profile_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text(stringResource(R.string.settings_base_url)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                PasswordField(
+                    label = stringResource(R.string.settings_api_key),
+                    value = apiKey,
+                    onValueChange = { apiKey = it }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    label = { Text(stringResource(R.string.settings_image_profile_model)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = template,
+                    onValueChange = { template = it },
+                    label = { Text(stringResource(R.string.settings_image_profile_template)) },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = stringResource(R.string.settings_image_profile_template_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Row {
+                    Button(
+                        onClick = {
+                            onSave(
+                                profile.copy(
+                                    name = name.trim(),
+                                    baseUrl = baseUrl.trim(),
+                                    apiKey = apiKey.trim(),
+                                    model = model.trim(),
+                                    requestBodyTemplate = template
+                                )
+                            )
+                            expanded = false
+                        },
+                        enabled = name.isNotBlank() || baseUrl.isNotBlank() ||
+                            apiKey.isNotBlank() || model.isNotBlank()
+                    ) {
+                        Text(stringResource(R.string.settings_save))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_image_profile_delete),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/**
+ * 识图模型（多套，可切换）：**每一个字段都由用户自己填**。
+ *
+ * 与「大模型配置」分开是刻意的：用户要的是「我想用哪个模型识图就填哪个」，
+ * 从已有对话配置里挑一套等于被供应商绑死——识图模型常常是另一家
+ * （对话用 DeepSeek、识图用通义千问 VL 这类组合很常见）。
+ */
+@Composable
+internal fun VisionProfilesSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    var forceExpandId by remember { mutableStateOf<String?>(null) }
+    SettingsGroup(title = stringResource(R.string.settings_vision_profiles)) {
+        Text(
+            text = stringResource(R.string.settings_vision_profiles_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        state.snapshot.visionProfiles.forEach { profile ->
+            VisionProfileRow(
+                profile = profile,
+                selected = profile.id == state.snapshot.activeVisionProfileId,
+                forceExpanded = forceExpandId == profile.id,
+                onSelect = { viewModel.selectVisionProfile(profile.id) },
+                onDelete = { viewModel.deleteVisionProfile(profile.id) },
+                onSave = { draft -> viewModel.saveVisionProfile(draft) }
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        OutlinedButton(
+            onClick = {
+                val fresh = LlmProfile()
+                forceExpandId = fresh.id
+                viewModel.addVisionProfile(fresh)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Text(stringResource(R.string.settings_add_vision_profile))
+        }
+        if (!state.snapshot.visionConfigured) {
+            Spacer(Modifier.height(8.dp))
+            FirstRunHint(R.string.settings_hint_vision_key)
+        }
+    }
+}
+
+/** 一张识图模型卡片：Radio 管激活，展开后是四个字段 + 保存 / 删除。 */
+@Composable
+private fun VisionProfileRow(
+    profile: LlmProfile,
+    selected: Boolean,
+    forceExpanded: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+    onSave: (LlmProfile) -> Unit
+) {
+    var expanded by remember(profile.id) { mutableStateOf(selected || forceExpanded) }
+    var name by remember(profile.id) { mutableStateOf(profile.name) }
+    var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
+    var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
+    var model by remember(profile.id) { mutableStateOf(profile.model) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(selected = selected, onClick = onSelect)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = profile.displayName(), style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    // 模型名是最关键的一行：用户就是要确认「识图用的是哪个模型」
+                    text = profile.model.ifBlank { "未填写模型名" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (expanded) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.settings_image_profile_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text(stringResource(R.string.settings_base_url)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                PasswordField(
+                    label = stringResource(R.string.settings_api_key),
+                    value = apiKey,
+                    onValueChange = { apiKey = it }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    label = { Text(stringResource(R.string.settings_vision_profile_model)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = stringResource(R.string.settings_vision_profile_model_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Row {
+                    Button(
+                        onClick = {
+                            onSave(
+                                profile.copy(
+                                    name = name.trim(),
+                                    baseUrl = baseUrl.trim(),
+                                    apiKey = apiKey.trim(),
+                                    model = model.trim()
+                                )
+                            )
+                            expanded = false
+                        },
+                        enabled = name.isNotBlank() || baseUrl.isNotBlank() ||
+                            apiKey.isNotBlank() || model.isNotBlank()
+                    ) {
+                        Text(stringResource(R.string.settings_save))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_image_profile_delete),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
         }
     }
 }
@@ -1400,6 +1898,91 @@ internal fun ReasoningEffortSection(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+/**
+ * 联网搜索分区（v0.0.43）。
+ *
+ * v0.0.43 起 API 配置从「模型面板」挪到这里：会话里只留「选择 + 开启」，
+ * Key 这类「配一次就再也不碰」的东西统一进设置页。搜索本身已改为
+ * function calling（模型自主决策），本分区只决定**给它挂哪个出口**。
+ */
+@Composable
+internal fun SearchProviderSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    val snapshot = state.snapshot
+    SettingsGroup(title = stringResource(R.string.settings_search_title)) {
+        Text(
+            text = stringResource(R.string.settings_search_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        SwitchRow(
+            label = stringResource(R.string.settings_search_enabled),
+            checked = snapshot.chatSearchEnabled,
+            onChange = viewModel::setChatSearchEnabled
+        )
+        if (snapshot.chatSearchEnabled) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = stringResource(R.string.settings_search_provider),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = snapshot.chatSearchProvider == ChatSearchProvider.DEEPSEEK,
+                    onClick = { viewModel.setChatSearchProvider(ChatSearchProvider.DEEPSEEK) },
+                    label = { Text("DeepSeek") },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = snapshot.chatSearchProvider == ChatSearchProvider.TAVILY,
+                    onClick = { viewModel.setChatSearchProvider(ChatSearchProvider.TAVILY) },
+                    label = { Text("Tavily") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (snapshot.chatSearchProvider == ChatSearchProvider.DEEPSEEK) {
+                    stringResource(R.string.settings_search_deepseek_hint)
+                } else {
+                    stringResource(R.string.settings_search_tavily_hint)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            // DeepSeek 出口也配独立 Key：与 Tavily 对等的可配置形态。
+            // 留空时执行层自动回退到已配置的 DeepSeek 模型 Key（pickSearchKey），
+            // 所以这里是「增强配置」而非「必填」——用别家大模型对话时
+            // 单独填一把，搜索服务照常走 DeepSeek 官方 Search API。
+            if (snapshot.chatSearchProvider == ChatSearchProvider.DEEPSEEK) {
+                Spacer(Modifier.height(10.dp))
+                PasswordField(
+                    label = stringResource(R.string.settings_search_deepseek_key),
+                    value = snapshot.deepseekSearchApiKey,
+                    onValueChange = viewModel::setDeepseekSearchApiKey
+                )
+            }
+            if (snapshot.chatSearchProvider == ChatSearchProvider.TAVILY) {
+                Spacer(Modifier.height(10.dp))
+                PasswordField(
+                    label = stringResource(R.string.settings_search_tavily_key),
+                    value = snapshot.tavilyApiKey,
+                    onValueChange = viewModel::setTavilyApiKey
+                )
+            }
+        }
     }
 }
 

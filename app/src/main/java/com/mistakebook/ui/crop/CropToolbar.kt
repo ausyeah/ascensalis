@@ -35,7 +35,9 @@ internal fun CropToolbar(
     onClear: () -> Unit,
     onRotate: () -> Unit,
     onReset: () -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: () -> Unit,
+    /** T2 对话连拍：非空时显示「不裁切，下一张」跳过入口（本张用原图）。 */
+    onSkipCurrent: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -117,6 +119,15 @@ internal fun CropToolbar(
                 ) {
                     Text(stringResource(R.string.crop_rotate), color = Color.White)
                 }
+            }
+        }
+
+        if (onSkipCurrent != null) {
+            TextButton(
+                onClick = onSkipCurrent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.crop_chat_skip), color = Color.White.copy(alpha = 0.8f))
             }
         }
     }

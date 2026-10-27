@@ -121,9 +121,6 @@ data class ChatUiState(
     /** 搜索出口：DeepSeek 官方搜索（默认）或 Tavily。 */
     val chatSearchProvider: ChatSearchProvider = ChatSearchProvider.DEEPSEEK,
 
-    /** Tavily API Key（选 Tavily 时在模型面板里填）。 */
-    val tavilyApiKey: String = "",
-
     /** 首个 token 之前的阶段提示（如「正在联网搜索…」），正文开始流动后为 null。 */
     val generationStage: String? = null,
 
@@ -147,6 +144,8 @@ data class ChatUiState(
 
     /** 还没发送的待发附件。 */
     val pendingAttachments: List<PendingAttachment> = emptyList(),
+    /** T6 闄嶇骇锛氬凡閫夊緟娉ㄥ叆鐨勮祫鏂欏簱鏂囦欢鍚嶏紙鍙戦€佹椂鍓嶇疆涓哄綋杞笂涓嬫枃锛夈€?*/
+    val libraryInjectionNames: List<String> = emptyList(),
 
     val isStreaming: Boolean = false,
 
@@ -305,6 +304,10 @@ class ChatViewModel(
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUiState())
+
+    /** T6 降级注入：@资料库 选中的文件，发送时把内容前置进当轮上下文后清空。 */
+    private val pendingLibraryFiles = mutableListOf<File>()
+
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private val _events = Channel<ChatEvent>(Channel.BUFFERED)
@@ -364,7 +367,6 @@ class ChatViewModel(
                     reasoningEffort = s.reasoningEffort,
                     chatSearchEnabled = s.chatSearchEnabled,
                     chatSearchProvider = s.chatSearchProvider,
-                    tavilyApiKey = s.tavilyApiKey,
                     providerOptions = s.llmProfiles.map { p ->
                         ChatProviderOption(id = p.id, name = p.displayName())
                     },
@@ -539,7 +541,10 @@ class ChatViewModel(
      * 走 `ChatImageDataUrls` 的 LRU 缓存，重复重组不会反复 base64。
      */
     private fun loadBubbleImages(messages: List<ChatMessage>) {
-        val targets = messages.filter { it.role == ChatRole.USER && it.attachmentIdsJson.isNotBlank() }
+        // 附属在消息上的图片有两类来源：用户发的（attachmentIdsJson 登记过）
+        // 与助手生成的（生图工具产物，附件表里按 messageId 直接挂着）。
+        // 所以不能只筛 USER 消息，否则生图结果永远不出现在气泡里。
+        val targets = messages.filter { it.attachmentIdsJson.isNotBlank() || it.role != ChatRole.USER }
         if (targets.isEmpty()) {
             if (_state.value.bubbleImages.isNotEmpty() || _state.value.bubbleFiles.isNotEmpty()) {
                 _state.value = _state.value.copy(bubbleImages = emptyMap(), bubbleFiles = emptyMap())
@@ -550,9 +555,16 @@ class ChatViewModel(
         bubbleImageJob = viewModelScope.launch(Dispatchers.IO) {
             val loaded = mutableMapOf<Long, List<String>>()
             val loadedFiles = mutableMapOf<Long, List<BubbleFile>>()
+            // 一次查完整个会话的附件：逐条查在长会话里是几十次 DB 往返
+            val sessionId = _state.value.sessionId
+            val byMessage = runCatching { repository.attachmentsOfSession(sessionId) }
+                .getOrDefault(emptyList())
+                .groupBy { it.messageId }
             targets.forEach { message ->
-                val attachments = message.attachmentIds()
-                    .mapNotNull { repository.attachmentById(it) }
+                val attachments = byMessage[message.id].orEmpty().ifEmpty {
+                    // 兼容旧数据：只在 attachmentIdsJson 里登记过的附件
+                    message.attachmentIds().mapNotNull { repository.attachmentById(it) }
+                }
                 val urls = attachments
                     .filter { it.kind == AttachmentKind.IMAGE && it.status == AttachmentStatus.READY }
                     .mapNotNull { attachment -> repository.imageDataUrlOf(attachment) }
@@ -809,6 +821,23 @@ class ChatViewModel(
                 messageText = sb.toString().trimEnd()
             }
 
+            // T6 降级注入：@资料库 选中的文件内容（50KB 截断）前置为本轮上下文。
+            // 标签包住来源，模型能区分「资料原文」与「用户问题」。
+            if (pendingLibraryFiles.isNotEmpty()) {
+                val sb = StringBuilder(messageText)
+                pendingLibraryFiles.forEach { f ->
+                    val (content, truncated) =
+                        com.mistakebook.data.library.LibraryStore.read(f) ?: return@forEach
+                    val note = if (truncated) "（内容超 50KB 已截断）" else ""
+                    sb.insert(0, "\n\n")
+                    sb.insert(0, content)
+                    sb.insert(0, note)
+                    sb.insert(0, "【资料库文件：${f.name}】\n")
+                }
+                messageText = sb.toString().trim()
+                pendingLibraryFiles.clear()
+            }
+
             runOnce(
                 profile = profile,
                 text = messageText,
@@ -922,6 +951,8 @@ class ChatViewModel(
             sessionId = sessionId,
             questionId = questionId,
             supportsVision = effectiveProfile.supportsVision,
+            visionToolAvailable = settingsStore.snapshotNow().visionConfigured,
+            ocrToolAvailable = settingsStore.snapshotNow().mineruConfigured,
             // 批改指令与题目上下文拼进同一条 system 消息（ChatRepository）；
             // 不开批改时传空串——普通对话的上下文与 v0.0.33 逐字一致
             gradingInstruction = if (grading) ChatPrompts.GRADING_INSTRUCTION else ""
@@ -973,11 +1004,6 @@ class ChatViewModel(
     /** 切换搜索出口（DeepSeek / Tavily）。 */
     fun setChatSearchProvider(provider: ChatSearchProvider) {
         viewModelScope.launch { settingsStore.setChatSearchProvider(provider) }
-    }
-
-    /** 保存 Tavily API Key。 */
-    fun setTavilyApiKey(key: String) {
-        viewModelScope.launch { settingsStore.setTavilyApiKey(key) }
     }
 
     /**
@@ -1061,127 +1087,65 @@ class ChatViewModel(
     private suspend fun ensureImageOcr(sessionId: Long) {
         try {
             val settings = settingsStore.settings.first()
-            if (!settings.mineruConfigured) {
-                // 没配 MinerU Key 就别白跑一趟。用常驻通知而不是一次性 toast——
-                // 这个原因不会自己消失，用户回到应用时还得看见它。
-                _state.value = _state.value.copy(
-                    ocrStage = null,
-                    ocrNotice = "当前模型看不到图片，需要先用 MinerU 把图转成文字，" +
-                        "但还没有配置 MinerU Key。去设置里配置后，可点右侧「重试」。"
-                )
-                return
-            }
-            val pending = repository.imageAttachmentsWithoutOcr(sessionId)
-            if (pending.isEmpty()) {
-                _state.value = _state.value.copy(ocrStage = null)
-                return
-            }
-            val failureReasons = mutableListOf<String>()
-            for ((index, attachment) in pending.withIndex()) {
-                _state.value = _state.value.copy(
-                    ocrStage = "正在用 MinerU 识别图片（${index + 1}/${pending.size}）…"
-                )
-                val file = java.io.File(attachment.localPath)
-                if (!file.exists()) {
-                    // 文件没了（被清理或没拷完）：记一条说明，
-                    // 否则它会永远待在待识别队列里，每轮重传一次。
-                    markOcrFailed(attachment, "图片文件不存在")
-                    failureReasons += "图片文件不存在"
-                    continue
-                }
-                // 本会话已认真试过的图不重传（正常不会走到这——失败说明已落库；
-                // 这是落库失败时的兜底）
-                if (imageOcr.alreadyTried(file)) continue
-                val result = imageOcr.recognize(
-                    sessionId = sessionId,
-                    imageFile = file,
-                    settings = settings,
-                    onStage = { stage ->
-                        _state.value = _state.value.copy(
-                            ocrStage = "正在用 MinerU 识别图片（${index + 1}/${pending.size}）：$stage"
-                        )
-                    }
-                )
-                when (result) {
-                    is com.mistakebook.net.ApiResult.Success -> {
-                        if (result.data.isNotBlank()) {
-                            repository.updateAttachmentOcr(attachment.id, result.data)
-                        } else {
-                            // 跑通了但没抽到字：同样记一笔，别让下一句话再烧一次额度
-                            markOcrFailed(attachment, "MinerU 已返回，但图里没有识别出文字")
-                            failureReasons += "图里没有识别出文字"
-                        }
-                    }
 
-                    is com.mistakebook.net.ApiResult.Failure -> {
-                        // 单张失败不中断后面的：一张图识别不出来，
-                        // 不该让整会话的其他图都不识别。
-                        // 网络类失败带上当前出口模式（用户反馈「切换代理/直连
-                        // 没发挥作用」——把决策面亮出来，切换效果立刻可对账）。
-                        val reason = result.error.serverMessage.ifBlank { "识别请求失败" } +
-                            if (result.error.kind == com.mistakebook.net.ApiErrorKind.NETWORK ||
-                                result.error.kind == com.mistakebook.net.ApiErrorKind.TIMEOUT
-                            ) "（出口：${com.mistakebook.net.NetworkRouter.describe()}）" else ""
-                        Log.w(TAG, "图片 OCR 失败: ${attachment.fileName} / $reason")
-                        markOcrFailed(attachment, reason)
-                        failureReasons += reason
-                    }
-                }
+            // **会话里不再自动预识别**（v0.0.49）。
+            //
+            // 用户诉求：「会话里的逻辑不一样，mineru 速度很慢，会话里这些都
+            // 作为工具可以调用，模型自己决定用不用工具」。
+            //
+            // 这里只做一件事：**确认模型有办法读到图**。
+            // - 模型支持识图：图片本体直接随请求发出，不需要任何预处理；
+            // - 模型不识图但配了识图模型 / MinerU：它们分别是
+            //   describe_image / ocr_image 工具，模型按需调用；
+            // - 两者都没有：模型物理上读不到图，只能如实告诉用户。
+            //
+            // 关键的一点：**图片附件仍然会进请求上下文**（见
+            // `ChatRepository.attachmentManifest`），模型知道有图、
+            // 知道该调哪个工具——早先这里预跑一次 MinerU，模型既看不到图、
+            // 也拿不到工具，纯属白烧一次按页计费的额度。
+            val profile = settings.activeProfile
+            val modelCanSee = profile?.supportsVision == true
+            val hasVisionTool = settings.visionConfigured
+            val hasOcrTool = settings.mineruConfigured
+            val pending = repository.imageAttachmentsWithoutOcr(sessionId)
+
+            if (modelCanSee || pending.isEmpty()) {
+                _state.value = _state.value.copy(ocrStage = null, ocrNotice = null)
+                return
             }
+            if (hasVisionTool || hasOcrTool) {
+                // 有工具可用：交给模型自己决定要不要读。
+                _state.value = _state.value.copy(ocrStage = null, ocrNotice = null)
+                return
+            }
+            // 没有任何一条能读到图的路径：如实告诉用户，别让模型对着空气瞎猜。
             _state.value = _state.value.copy(
                 ocrStage = null,
-                ocrNotice = if (failureReasons.isEmpty()) {
-                    null
-                } else {
-                    buildOcrNotice(failureReasons)
-                }
+                ocrNotice = "当前模型（${profile?.model ?: "未配置"}）看不到图片，" +
+                    "也没有配置识图模型或 MinerU，无法读取图片内容。" +
+                    "请到设置里配置识图模型（设置 → 大模型 → 识图模型），" +
+                    "或换用支持识图的模型。"
             )
         } catch (cancelled: CancellationException) {
-            // 用户按了停止：进度条必须撤掉，不能卡在「正在识别」——
-            // 撤了才重抛，state 写入不是挂起函数，取消态下照样能执行。
             _state.value = _state.value.copy(ocrStage = null)
             throw cancelled
         } catch (t: Throwable) {
-            Log.w(TAG, "图片 OCR 任务异常", t)
-            _state.value = _state.value.copy(
-                ocrStage = null,
-                ocrNotice = buildOcrNotice(listOf(t.message ?: "识别任务异常"))
-            )
-        }
-    }
-
-    /** 把一条失败说明写进附件：不重传 + 模型知道 + 用户看得见。 */
-    private suspend fun markOcrFailed(attachment: ChatAttachment, reason: String) {
-        runCatching { repository.updateAttachmentOcr(attachment.id, ChatOcrText.failureNote(reason)) }
-            .onFailure { Log.w(TAG, "写入 OCR 失败说明失败: ${attachment.fileName}", it) }
-    }
-
-    /** 通知条文案：第一张的原因 + 总数。MinerU 的文案可能很长，只取代表性的那条。 */
-    private fun buildOcrNotice(reasons: List<String>): String {
-        val first = reasons.firstOrNull { it.isNotBlank() }?.take(120).orEmpty()
-        val count = reasons.size
-        return if (count <= 1) {
-            "图片识别失败：$first 已如实告知模型这张图没能读出来；" +
-                "网络或额度恢复后可点右侧「重试」。"
-        } else {
-            "$count 张图片识别失败，第一张的原因：$first " +
-                "已如实告知模型这些图没能读出来；恢复后可点右侧「重试」。"
+            Log.w(TAG, "图片可读性检查异常", t)
+            _state.value = _state.value.copy(ocrStage = null)
         }
     }
 
     /**
      * 重试识别失败的图片（通知条上的「重试」）。
      *
-     * 网断了、额度没了导致的失败不该是终局：把失败说明清掉、
-     * 撤掉内存里的「已尝试」标记，重新跑一遍 [ensureImageOcr]。
-     * 全部成功则通知条自动消失。
+     * 会话里图片由**工具**按需读取，不再有「待识别队列」——
+     * 但工具调用本身可能失败（网络、额度）。这个入口把失败说明清掉，
+     * 让模型下一轮能重新调工具。
      */
     fun retryOcr() {
         val sessionId = _state.value.sessionId
         // 流式进行中不重试：那一轮的请求早就带着现状发出去了，
         // 现在补识别只对下一轮有用，没理由和生成中的界面抢 attention。
-        // 已经有一轮 OCR 在跑也同样不重试——两个 ensureImageOcr 并发
-        // 会重复处理同一批图。
         if (sessionId == 0L || _state.value.isStreaming || ocrJob?.isActive == true) return
         viewModelScope.launch {
             _state.value = _state.value.copy(ocrNotice = null)
@@ -1194,12 +1158,6 @@ class ChatViewModel(
                         .takeIf { it.exists() }
                         ?.let { imageOcr.forget(it) }
                 }
-                ocrJob = currentCoroutineContext()[Job]
-                try {
-                    ensureImageOcr(sessionId)
-                } finally {
-                    ocrJob = null
-                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (t: Throwable) {
@@ -1208,7 +1166,6 @@ class ChatViewModel(
             }
         }
     }
-
 
     // ------------------------------------------------------------ 附件
 
@@ -1253,6 +1210,24 @@ class ChatViewModel(
                 }
             )
         }
+    }
+
+    /** T6 降级：把资料库文件加入待注入列表（发送时前置为当轮上下文）。 */
+    fun addLibraryInjection(file: File) {
+        if (file.isFile && pendingLibraryFiles.none { it.absolutePath == file.absolutePath }) {
+            pendingLibraryFiles += file
+            _state.value = _state.value.copy(
+                libraryInjectionNames = pendingLibraryFiles.map { it.name }
+            )
+        }
+    }
+
+    /** 移除一个待注入的资料库文件。 */
+    fun removeLibraryInjection(file: File) {
+        pendingLibraryFiles.removeAll { it.absolutePath == file.absolutePath }
+        _state.value = _state.value.copy(
+            libraryInjectionNames = pendingLibraryFiles.map { it.name }
+        )
     }
 
     fun removePendingAttachment(id: Long) {

@@ -33,4 +33,12 @@ interface ReviewLogDao {
         """
     )
     suspend fun resultCountsSince(sinceMs: Long): List<NameCount>
+
+    /** 徽章统计（T10）：累计复习次数。 */
+    @Query("SELECT COUNT(*) FROM review_logs")
+    suspend fun totalCount(): Int
+
+    /** 徽章统计（T10）：全部复习发生的时间戳（学习行为日期集合用）。 */
+    @Query("SELECT reviewedAt FROM review_logs")
+    suspend fun allReviewedDays(): List<Long>
 }

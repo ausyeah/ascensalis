@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -39,6 +40,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -97,6 +100,7 @@ fun DetailScreen(
         containerViewModel(container) { DetailViewModel(it, questionId) }
     val state by viewModel.uiState.collectAsState()
     val variantState by viewModel.variantState.collectAsState()
+    val auxImageState by viewModel.auxImage.collectAsState()
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showFullImage by remember { mutableStateOf(false) }
     // 点开的具体图片：null 表示原始照片，非空为某张附图
@@ -307,6 +311,18 @@ fun DetailScreen(
                         InfoRow(
                             label = stringResource(R.string.detail_knowledge_points),
                             value = state.knowledgePoints.joinToString("、")
+                        )
+                    }
+                    // 辅助图（F-IMG-4）：解析区下方的配图入口。
+                    // 精确几何走 SVG（模型会在解析里直接输出），
+                    // 这里留给「实物/场景类」示意——细胞结构、实验装置这类。
+                    if (question != null) {
+                        Spacer(Modifier.height(12.dp))
+                        SectionLabel(stringResource(R.string.detail_aux_image))
+                        AuxImageBlock(
+                            auxState = auxImageState,
+                            onGenerate = viewModel::generateAuxImage,
+                            onDismiss = viewModel::dismissAuxImage
                         )
                     }
                     // 备注：看题时就能直接改，不用进编辑页
@@ -538,6 +554,100 @@ private fun MasteredSection(
                 modifier = Modifier.weight(1f)
             )
             Switch(checked = mastered, onCheckedChange = onChange)
+        }
+    }
+}
+
+/**
+ * 辅助图区块（F-IMG-4）：三态——生成中 / 已有图 / 未生成（或失败）。
+ *
+ * ## 反馈纪律
+ *
+ * 生图是 5~15 秒的操作，生成中必须转 spinner：
+ * 没有任何反馈的话用户会以为按钮坏了而连点，而连点会真的多烧几次额度
+ * （生图 API 按次计费）。
+ *
+ * 失败态可关闭：错误留在屏幕上会挡住解析正文，
+ * 但图本身留在磁盘缓存里——下次进这道题还在。
+ */
+@Composable
+private fun AuxImageBlock(
+    auxState: AuxImageState,
+    onGenerate: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    when {
+        auxState.generating -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = stringResource(R.string.detail_aux_generating),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        auxState.path != null -> {
+            Column {
+                AsyncImage(
+                    model = auxState.path,
+                    contentDescription = stringResource(R.string.detail_aux_image),
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                )
+                if (!auxState.prompt.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = auxState.prompt,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        auxState.error != null -> {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = auxState.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.detail_aux_dismiss))
+                }
+            }
+        }
+
+        else -> {
+            OutlinedButton(
+                onClick = onGenerate,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    Icons.Default.Image,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.detail_aux_generate))
+            }
         }
     }
 }

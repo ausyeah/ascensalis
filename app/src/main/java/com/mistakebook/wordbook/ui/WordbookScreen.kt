@@ -36,16 +36,17 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -75,8 +76,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,6 +104,10 @@ import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.theme.LocalDarkTheme
 import com.mistakebook.ui.theme.PaperBorderLight
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material.icons.filled.Landscape
+import androidx.compose.material.icons.filled.Share
 import com.mistakebook.ui.theme.PaperLv0
 import com.mistakebook.ui.theme.PaperLv1
 import com.mistakebook.ui.theme.PaperLv2
@@ -359,6 +370,90 @@ private fun WordbookTabBar(
 // 1. 刷题页面 (Study View)
 // =========================================================================
 
+/**
+ * 单词场景图（F-IMG-1）：三态渲染——生成中 / 已有图 / 未生成。
+ *
+ * ## 为什么按钮常驻而不是藏在菜单里
+ *
+ * 场景图是「想看就看」的辅助，不是答题的一部分。常驻一颗按钮，
+ * 出过图的词切回来直接显示（磁盘缓存命中），没出过图的给入口。
+ *
+ * ## 反馈纪律
+ *
+ * 生成中按钮转 spinner + 「生成中…」：生图是 5~15 秒的操作，
+ * 没有任何反馈用户会以为按钮坏了而连点（连点会真的多烧几次额度）。
+ */
+@Composable
+private fun WordSceneImage(
+    state: WordbookUiState,
+    viewModel: WordbookViewModel
+) {
+    Spacer(Modifier.height(8.dp))
+    if (state.sceneImageLoading) {
+        OutlinedButton(
+            onClick = {},
+            enabled = false,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("生成中…")
+        }
+        return
+    }
+    val path = state.sceneImagePath
+    if (path != null) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column {
+                AsyncImage(
+                    model = path,
+                    contentDescription = "场景图",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                )
+                // 展示模型写的场景描述：让用户知道这张图是怎么来的，
+                // 也便于判断「图不对」是 prompt 的问题还是生图模型的问题。
+                if (!state.sceneImagePrompt.isNullOrBlank()) {
+                    Text(
+                        text = state.sceneImagePrompt,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+        return
+    }
+    OutlinedButton(
+        onClick = viewModel::generateSceneImage,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(46.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Icon(
+            Icons.Default.Landscape,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("场景图")
+    }
+}
+
 @Composable
 internal fun StudyView(
     state: WordbookUiState,
@@ -608,7 +703,7 @@ internal fun StudyView(
                                             modifier = Modifier.size(36.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.VolumeUp,
+                                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                                 contentDescription = "朗读单词",
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(18.dp)
@@ -709,7 +804,7 @@ internal fun StudyView(
                                             modifier = Modifier.size(36.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.VolumeUp,
+                                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                                 contentDescription = "朗读单词",
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(18.dp)
@@ -814,7 +909,7 @@ internal fun StudyView(
                                 modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.VolumeUp,
+                                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                     contentDescription = "朗读单词",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(17.dp)
@@ -837,6 +932,7 @@ internal fun StudyView(
                     }
                 }
             }
+
 
             // 模式分支交互
             if (state.studyMode == StudyMode.QUIZ || state.studyMode == StudyMode.SENSE) {
@@ -1009,6 +1105,14 @@ internal fun StudyView(
                         }
                     }
                 }
+
+            // 场景图（F-IMG-1/T7）：入口下沉到页面最底部——
+            // 单词列表下方低调呈现，不占首屏；生成后仍是一张可保存的图。
+            if (currentWord != null) {
+                item {
+                    WordSceneImage(state = state, viewModel = viewModel)
+                }
+            }
             }
         }
     }
@@ -1078,7 +1182,7 @@ private fun SpellAnswerArea(
             isError = state.spellSubmitted && !state.spellCorrect,
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.None,
-                autoCorrect = false,
+                autoCorrectEnabled = false,
                 imeAction = ImeAction.Done,
                 keyboardType = KeyboardType.Text
             ),
@@ -1089,7 +1193,7 @@ private fun SpellAnswerArea(
                         onClick = viewModel::submitSpell,
                         enabled = state.spellInput.isNotBlank()
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = "提交答案")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "提交答案")
                     }
                 }
             },
@@ -1558,7 +1662,8 @@ private fun WrongBookView(
                         showRemove = state.wrongSubTab == WrongSubTab.WRONG_BOOK,
                         onRemove = { viewModel.removeFromWrongBook(word.word) },
                         onSpeak = { viewModel.speakWord(word.word) },
-                        onToggleFavorite = { viewModel.toggleFavorite(word.word) }
+                        onToggleFavorite = { viewModel.toggleFavorite(word.word) },
+                        scenePath = viewModel.scenePathFor(word.word, word.meaning)
                     )
                 }
             }
@@ -1749,6 +1854,144 @@ internal fun StatsView(
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
             ) {
                 WeeklyAccuracyCard(stats = state.weeklyDayStats)
+            }
+        }
+
+        // 打卡海报（F-IMG-2）：本地 Canvas 渲染的一张图，
+        // 不经过任何生图 API——数据是本地统计，画也是本地画。
+        //
+        // v0.0.49 补两个生图入口：
+        // - 「背景图生成打卡」：生图模型只出背景，文字仍由本地 Canvas 画
+        //   （中文清晰、数字绝对准确）；
+        // - 「生图打卡」：文字内容也交给生图模型一起画（风格自由，
+        //   但生图模型写中文偶尔会出错）。
+        item {
+            val context = LocalContext.current
+            val scope = rememberCoroutineScope()
+
+            suspend fun saveAndShare(bitmap: android.graphics.Bitmap) {
+                val uri = withContext(Dispatchers.IO) {
+                    savePosterToGallery(
+                        context = context,
+                        bitmap = bitmap,
+                        displayName = "登临打卡-${System.currentTimeMillis()}.png"
+                    )
+                }
+                if (uri != null) {
+                    sharePoster(context, uri)
+                } else {
+                    viewModel.showMessage("海报保存失败，请检查相册权限")
+                }
+            }
+
+            // 生图走**后台任务**（WorkManager）：离开页面照跑，回来能取回结果。
+            // 状态挂在 appScope 上，所以这里的订阅在页面重建后仍然接得上。
+            val posterWork = com.mistakebook.poster.rememberPosterWorkHandler(
+                monitor = viewModel.posterWorkMonitor,
+                onBitmap = { bitmap ->
+                    scope.launch { saveAndShare(bitmap) }
+                },
+                onFailed = { message -> viewModel.showMessage(message) }
+            )
+            val generating = posterWork.value is com.mistakebook.poster.PosterWorkState.Running
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        scope.launch {
+                            val bitmap = withContext(Dispatchers.Default) {
+                                com.mistakebook.poster.PosterRenderer.render(buildPosterContent(state))
+                            }
+                            saveAndShare(bitmap)
+                        }
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("生成打卡海报")
+                }
+
+                // ---- 生图入口 1：只生成背景，文字本地叠 ----
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        viewModel.generateCheckInPoster(
+                            mode = com.mistakebook.poster.PosterImageMode.BACKGROUND
+                        )
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (generating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图背景中…")
+                    } else {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("用背景图生成打卡")
+                    }
+                }
+
+                // ---- 生图入口 2：文字也交给生图模型 ----
+                OutlinedButton(
+                    onClick = {
+                        if (generating) return@OutlinedButton
+                        viewModel.generateCheckInPoster(
+                            mode = com.mistakebook.poster.PosterImageMode.FULL
+                        )
+                    },
+                    enabled = !generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (generating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图中…")
+                    } else {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("生图打卡")
+                    }
+                }
+
+                if (generating) {
+                    Text(
+                        text = "生图在后台继续运行，离开这个页面也不会中断。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
@@ -2146,7 +2389,14 @@ private fun WordItemCard(
     showRemove: Boolean,
     onRemove: () -> Unit,
     onSpeak: () -> Unit = {},
-    onToggleFavorite: () -> Unit = {}
+    onToggleFavorite: () -> Unit = {},
+    /**
+     * 场景图缩略图路径（已生成过才有值）。
+     *
+     * 错词本列表用它做**视觉锚点**：背单词时那张图比文字更容易被记起来，
+     * 列表里露出 40dp 小图，扫一眼就能把词和场景对上。
+     */
+    scenePath: String? = null
 ) {
     val levelColor = when (progress.level) {
         1 -> PaperLv1
@@ -2212,11 +2462,24 @@ private fun WordItemCard(
                 )
             }
 
+            // 场景图缩略图：出过图才占位置（没出过图的词布局不变）。
+            if (scenePath != null) {
+                AsyncImage(
+                    model = scenePath,
+                    contentDescription = "场景图",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+
             // 列表里的发音与收藏：单词旁的即点即读/即收藏，
             // 不用进详情页（本项目不做单词详情页）。
             IconButton(onClick = onSpeak, modifier = Modifier.size(40.dp)) {
                 Icon(
-                    imageVector = Icons.Default.VolumeUp,
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                     contentDescription = "朗读单词",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)

@@ -53,7 +53,17 @@ data class StreamDelta(
      */
     @SerialName("reasoning_content") val reasoningContent: String? = null,
     val reasoning: String? = null,
-    val thinking: String? = null
+    val thinking: String? = null,
+
+    /**
+     * 工具调用增量（v0.0.43）。
+     *
+     * 流式里一次调用被拆成多个分片：首片带 [StreamToolCallDelta.id] 与
+     * function.name，后续分片只带 function.arguments 的**字符串片段**，
+     * 按 [StreamToolCallDelta.index] 归属同一次调用。accumulate 逻辑见
+     * [com.mistakebook.net.llm.accumulateToolCall]。
+     */
+    @SerialName("tool_calls") val toolCalls: List<StreamToolCallDelta>? = null
 ) {
     /** 取第一个非空的思考字段。 */
     fun reasoningOrNull(): String? =
@@ -66,4 +76,25 @@ data class StreamDelta(
 data class StreamError(
     val message: String = "",
     val type: String = ""
+)
+
+/** 一次工具调用在流里的一个分片。 */
+@Serializable
+data class StreamToolCallDelta(
+    /** 同一次调用在所有分片里共享同一个 index（并行调用时从 0 递增）。 */
+    val index: Int = 0,
+
+    /** 只有首片带；后续分片为 null。 */
+    val id: String? = null,
+    val type: String? = null,
+    val function: StreamFunctionDelta? = null
+)
+
+@Serializable
+data class StreamFunctionDelta(
+    /** 只有首片带。 */
+    val name: String? = null,
+
+    /** 参数 JSON 的**字符串片段**，要按 index 累积拼接。 */
+    val arguments: String? = null
 )

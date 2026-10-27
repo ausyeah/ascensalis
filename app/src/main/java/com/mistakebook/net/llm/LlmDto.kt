@@ -42,7 +42,16 @@ data class ChatRequest(
      * 由 [ChatCompletionStream.buildRequest] 在流式时统一注入，
      * 调用方不需要知道这个字段的存在；非流式响应体本来就带 usage，不发。
      */
-    @SerialName("stream_options") val streamOptions: StreamOptions? = null
+    @SerialName("stream_options") val streamOptions: StreamOptions? = null,
+
+    /**
+     * 工具（function calling）定义；null 表示不带，行为与改造前完全一致。
+     *
+     * v0.0.43 起联网搜索改走这条链路：模型自己决定要不要搜、搜什么，
+     * 而不是请求前盲目检索注入。只有 [com.mistakebook.data.prefs.SettingsSnapshot.chatSearchEnabled]
+     * 开启时才由调用方填入（见 `ChatGenerationService` 的 tool loop）。
+     */
+    val tools: List<LlmTool>? = null
 ) {
     /**
      * 用指定的字段名携带思考强度；[field] 为 null 表示三个字段全不发。
@@ -57,11 +66,61 @@ data class ChatRequest(
 /**
  * 消息内容既可以是纯字符串，也可以是多模态片段数组（text + image_url）。
  * content 用 JsonElement 承载两种形态，由调用方决定。
+ *
+ * v0.0.43：tool loop 需要三种新角色形态，都在下面——
+ * - assistant 带 [toolCalls]：模型请求调用工具；
+ * - role=tool 带 [toolCallId]：客户端执行结果回传；
+ * - [reasoningContent]：DeepSeek 思考模式**必须**在后续请求里完整回传，
+ *   否则 API 直接 400（官方文档明确要求）。
  */
 @Serializable
 data class ChatMessage(
     val role: String,
-    val content: JsonElement
+    val content: JsonElement,
+
+    /** assistant 消息：模型发起的工具调用请求。 */
+    @SerialName("tool_calls") val toolCalls: List<ToolCall>? = null,
+
+    /** tool 消息：回指被执行的调用 id。 */
+    @SerialName("tool_call_id") val toolCallId: String? = null,
+
+    /** tool 消息：被调用的函数名（部分服务端要求）。 */
+    val name: String? = null,
+
+    /** DeepSeek 思考模式回传字段；其他服务端不认识，故按渠道条件发送。 */
+    @SerialName("reasoning_content") val reasoningContent: String? = null
+)
+
+/** 一个工具（OpenAI function calling 格式）。 */
+@Serializable
+data class LlmTool(
+    val type: String = "function",
+    val function: ToolFunction
+)
+
+/** 工具的 schema：名字、用途说明、参数 JSON Schema。 */
+@Serializable
+data class ToolFunction(
+    val name: String,
+    val description: String,
+    /** JSON Schema（object 类型）。用 JsonElement 承载，省一整棵 schema 树。 */
+    val parameters: JsonElement
+)
+
+/** assistant 消息里的一次工具调用请求。 */
+@Serializable
+data class ToolCall(
+    val id: String,
+    val type: String = "function",
+    val function: ToolCallFunction
+)
+
+@Serializable
+data class ToolCallFunction(
+    val name: String,
+
+    /** 参数 **JSON 字符串**（模型给的就是字符串，不是对象）。 */
+    val arguments: String
 )
 
 @Serializable
@@ -124,7 +183,15 @@ data class ChoiceMessage(
      * 所以两边都要单独声明。只改一边的结果是——
      * 模型支持流式时看起来正常，端点不支持需要降级到非流式时思考流失。
      */
-    @SerialName("reasoning_content") val reasoningContent: String = ""
+    @SerialName("reasoning_content") val reasoningContent: String = "",
+
+    /**
+     * 非流式路径下的工具调用请求（v0.0.43）。
+     *
+     * 流式在 `delta.tool_calls` 里分片给，非流式在 `message.tool_calls` 里
+     * 一次给全——两边都要声明，否则降级到非流式时工具调用整段丢失。
+     */
+    @SerialName("tool_calls") val toolCalls: List<ToolCall>? = null
 )
 
 @Serializable

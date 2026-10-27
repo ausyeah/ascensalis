@@ -222,6 +222,50 @@ class LlmClient(private val api: LlmApi) {
 
     /** 设置页「测试连接」：GET {base}/models，HTTP 200 即有效。 */
     /**
+     * 轻量纯文本调用：一次 system + user，返回模型原文。
+     *
+     * 与 [refineJson] 的区别：**不走 JSON 模式、不走降级阶梯、不重试**——
+     * 阶梯是为「结构化输出必须成功」设计的（错题整理），而这类调用
+     * （生成生图 prompt、起标题这类）失败一次让用户重点即可，
+     * 强行阶梯只会把 5 秒的失败拖成 15 秒。
+     */
+    suspend fun plainText(
+        profile: LlmProfile,
+        systemPrompt: String,
+        userPrompt: String,
+        maxTokens: Int = DEFAULT_PLAIN_MAX_TOKENS
+    ): ApiResult<String> = withContext(Dispatchers.IO) {
+        if (!profile.isConfigured()) return@withContext fail(ApiErrorKind.NO_KEY)
+        sendOnce(profile, systemPrompt, userPrompt, imagePart = null, useJsonMode = false, maxTokens = maxTokens)
+    }
+
+    /**
+     * 带一张图的纯文本调用：**识图模型读图**。
+     *
+     * 与 [refineJson] 的区别同 [plainText]：不走 JSON 模式、不重试、不阶梯。
+     * 识图是要模型「看图说话」，返回一段描述；JSON 模式只会把它套进
+     * 一个壳里，还得再剥一层。
+     *
+     * @param imageFile 本地图片；为空或不存在时按纯文本调用处理（不报错）。
+     */
+    suspend fun plainTextWithImage(
+        profile: LlmProfile,
+        systemPrompt: String,
+        userPrompt: String,
+        imageFile: File?,
+        longEdgePx: Int = 1280,
+        maxTokens: Int = DEFAULT_PLAIN_MAX_TOKENS
+    ): ApiResult<String> = withContext(Dispatchers.IO) {
+        if (!profile.isConfigured()) return@withContext fail(ApiErrorKind.NO_KEY)
+        val imagePart = if (imageFile != null && imageFile.exists()) {
+            encodeImage(imageFile, longEdgePx)
+        } else {
+            null
+        }
+        sendOnce(profile, systemPrompt, userPrompt, imagePart, useJsonMode = false, maxTokens = maxTokens)
+    }
+
+    /**
      * 拉取某个配置下的可用模型列表。
      *
      * [keyOverride] 用来**指定用哪一把 key 去探**：一个配置下有多把 key
@@ -308,6 +352,9 @@ class LlmClient(private val api: LlmApi) {
          * 4096 会把多题结果拦腰截断，JSON 残缺必然解析失败。
          */
         const val DEFAULT_MAX_TOKENS = 16384
+
+        /** [plainText] 的默认上限：一段场景 prompt / 一个标题，512 足够。 */
+        const val DEFAULT_PLAIN_MAX_TOKENS = 512
 
         private const val TRUNCATED_MARKER = "__truncated__"
 

@@ -201,10 +201,40 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun selectProfile(id: String) = viewModelScope.launch { store.setActiveProfileId(id) }
 
+    // ===== 生图渠道（多套，可切换） =====
+
+    fun saveImageProfile(profile: com.mistakebook.data.prefs.ImageProfile) =
+        viewModelScope.launch { store.upsertImageProfile(profile) }
+
+    fun addImageProfile(profile: com.mistakebook.data.prefs.ImageProfile) =
+        viewModelScope.launch { store.upsertImageProfile(profile) }
+
+    fun deleteImageProfile(id: String) = viewModelScope.launch { store.deleteImageProfile(id) }
+
+    fun selectImageProfile(id: String) = viewModelScope.launch { store.setActiveImageProfileId(id) }
+
+    /** 指定专门的识图模型（传 null 取消指定，回到默认识图路径）。 */
+    fun setVisionProfileId(id: String?) = viewModelScope.launch { store.setVisionProfileId(id) }
+
+    // 识图模型：独立多套，字段全由用户填（含模型名）
+    fun saveVisionProfile(profile: com.mistakebook.data.prefs.LlmProfile) =
+        viewModelScope.launch { store.upsertVisionProfile(profile) }
+
+    fun addVisionProfile(profile: com.mistakebook.data.prefs.LlmProfile) =
+        viewModelScope.launch { store.upsertVisionProfile(profile) }
+
+    fun deleteVisionProfile(id: String) = viewModelScope.launch { store.deleteVisionProfile(id) }
+
+    fun selectVisionProfile(id: String) = viewModelScope.launch { store.setActiveVisionProfileId(id) }
+
     // setMineruModelVersion / setOcrLanguage / setForceOcr 已随设置项移除。
     // 模型版本固定 vlm、语言固定 ch、强制 OCR 固定开启，写在 SettingsSnapshot 里。
 
     fun setAttachImage(value: Boolean) = viewModelScope.launch { store.setAttachOriginalImage(value) }
+
+    /** 切换题目识别方式（MinerU / 大模型 / 自动）。 */
+    fun setRecognitionMode(value: com.mistakebook.data.prefs.RecognitionMode) =
+        viewModelScope.launch { store.setRecognitionMode(value) }
 
     fun setPrintIncludeImage(value: Boolean) = viewModelScope.launch {
         store.setPrintIncludeImage(value)
@@ -249,6 +279,29 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     /** 设置对话思考强度（下一次请求生效）。 */
     fun setReasoningEffort(effort: ReasoningEffort) = viewModelScope.launch {
         store.setReasoningEffort(effort)
+    }
+
+    // ---- 联网搜索（v0.0.43）：配置从模型面板挪进设置页 ----
+
+    /** 开关联网搜索（下一次请求生效）。 */
+    fun setChatSearchEnabled(value: Boolean) = viewModelScope.launch {
+        store.setChatSearchEnabled(value)
+    }
+
+    /** 切换搜索出口（DeepSeek 官方 Search API / Tavily）。 */
+    fun setChatSearchProvider(provider: com.mistakebook.data.chat.ChatSearchProvider) =
+        viewModelScope.launch {
+            store.setChatSearchProvider(provider)
+        }
+
+    /** 保存 DeepSeek 搜索服务专用 Key（留空 = 复用 DeepSeek 模型 Key）。 */
+    fun setDeepseekSearchApiKey(key: String) = viewModelScope.launch {
+        store.setDeepseekSearchApiKey(key)
+    }
+
+    /** 保存 Tavily API Key（去首尾空白）。 */
+    fun setTavilyApiKey(key: String) = viewModelScope.launch {
+        store.setTavilyApiKey(key)
     }
 
     fun testMineru() {

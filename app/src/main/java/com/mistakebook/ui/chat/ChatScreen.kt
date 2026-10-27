@@ -51,6 +51,7 @@ import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
@@ -101,7 +102,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalClipboardManager
+import android.content.ClipData
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
@@ -120,6 +121,7 @@ import com.mistakebook.domain.ChatRole
 import com.mistakebook.domain.MessageStatus
 import com.mistakebook.ui.common.ApiKeyRequiredDialog
 import com.mistakebook.ui.common.RichText
+import com.mistakebook.ui.common.rememberStreamTextDebounced
 import com.mistakebook.ui.common.containerViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlin.math.PI
@@ -211,7 +213,6 @@ fun ChatScreen(
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val clipboard = LocalClipboardManager.current
 
     val copiedText = stringResource(R.string.chat_copied)
     val title = stringResource(
@@ -227,6 +228,7 @@ fun ChatScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var showAttachSheet by remember { mutableStateOf(false) }
+    var showLibraryPicker by remember { mutableStateOf(false) }
     var showModelSheet by remember { mutableStateOf(false) }
 
     // 选文件：OpenDocument 拿的是可长期读取的 Uri（不依赖临时授权），
@@ -244,11 +246,23 @@ fun ChatScreen(
     // 裁切页交回的聊天附件（T12）：扫描相机 + 裁切确认后经容器标志交接。
     // 快照状态驱动重组 → LaunchedEffect 重跑；取走即清，防旧图误入下一轮。
     // 进程死亡不持久化（与旧 TakePicture 方案的记忆边界一致）。
+    // 相机/裁切页交回的待发附件：单张（T12）与多张（T2 对话连拍）两条交接口。
+    // 状态驱动 → LaunchedEffect 消费：取逻辑单一，附件准备异步转 placeholder。
     val pendingChatAttachment = container.pendingChatAttachmentPath
+    val pendingChatAttachments = container.pendingChatAttachmentPaths
     LaunchedEffect(pendingChatAttachment) {
         if (!pendingChatAttachment.isNullOrBlank()) {
             container.pendingChatAttachmentPath = null
             viewModel.onAttachmentPicked(android.net.Uri.fromFile(File(pendingChatAttachment)))
+        }
+    }
+    LaunchedEffect(pendingChatAttachments) {
+        val paths = pendingChatAttachments
+        if (!paths.isNullOrEmpty()) {
+            container.pendingChatAttachmentPaths = null
+            paths.forEach { path ->
+                viewModel.onAttachmentPicked(android.net.Uri.fromFile(File(path)))
+            }
         }
     }
 
@@ -359,6 +373,17 @@ fun ChatScreen(
         )
     }
 
+    // T6 降级：资料库文件选择弹层（列出 files/library/ 下的文本文件，多选注入）
+    if (showLibraryPicker) {
+        LibraryPickerDialog(
+            filesDir = container.files.rootDir,
+            selectedNames = state.libraryInjectionNames,
+            onPick = { file -> viewModel.addLibraryInjection(file) },
+            onRemove = { file -> viewModel.removeLibraryInjection(file) },
+            onDismiss = { showLibraryPicker = false }
+        )
+    }
+
     if (showAttachSheet) {
         AttachmentSourceSheet(
             onPickImage = { imagePicker.launch(IMAGE_MIME_TYPES) },
@@ -370,6 +395,8 @@ fun ChatScreen(
                 onLaunchScanCamera()
             },
             onPickFile = { filePicker.launch(DOCUMENT_MIME_TYPES) },
+            // T6 降级：资料库文件选择 → 加入待注入列表（发送时前置为当轮上下文）
+            onPickLibrary = { showLibraryPicker = true },
             onDismiss = { showAttachSheet = false }
         )
     }
@@ -427,7 +454,13 @@ fun ChatScreen(
                         bubbleFiles = state.bubbleFiles,
                         truncatedMessageId = state.truncatedMessageId,
                         onCopy = { text ->
-                            clipboard.setText(AnnotatedString(text))
+                            // 直接走 Android 原生剪贴板：Compose 的 clipboard API
+                            // 一分为二（旧 ClipboardManager.setText 非 suspend 已弃用、
+                            // 新 Clipboard.setClipEntry 要 ClipData），原生 API 在
+                            // minSdk 26 上稳定且零弃用警告，行为与原来一致。
+                            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("copied", text))
                             viewModel.notifyCopied()
                         },
                         onRetry = viewModel::retry,
@@ -488,6 +521,11 @@ fun ChatScreen(
                 streaming = state.isStreaming,
                 attachments = state.pendingAttachments,
                 modelName = state.currentModel,
+                libraryInjectionNames = state.libraryInjectionNames,
+                libraryFiles = remember { com.mistakebook.data.library.LibraryStore.list(
+                    com.mistakebook.data.library.LibraryStore.ensureDir(container.files.rootDir)
+                ) },
+                onRemoveLibraryInjection = viewModel::removeLibraryInjection,
                 onTextChange = viewModel::onInputChange,
                 onSend = viewModel::send,
                 onStop = viewModel::stop,
@@ -512,13 +550,11 @@ fun ChatScreen(
             enabled = !state.isStreaming,
             searchEnabled = state.chatSearchEnabled,
             searchProvider = state.chatSearchProvider,
-            tavilyKey = state.tavilyApiKey,
             onSelect = viewModel::selectModel,
             onSelectProvider = viewModel::selectProvider,
             onEffortChange = viewModel::setReasoningEffort,
             onSearchEnabledChange = viewModel::setChatSearchEnabled,
             onSearchProviderChange = viewModel::setChatSearchProvider,
-            onTavilyKeyChange = viewModel::setTavilyApiKey,
             onDismiss = { showModelSheet = false }
         )
     }
@@ -539,20 +575,12 @@ private fun MessageList(
     onSaveToNote: ((Long) -> Unit)? = null
 ) {
     // 倒序提供数据配合 reverseLayout：最新消息固定在底边，流式气泡增长无需反复重启滚动动画。
-    val items: List<ChatListItem> = buildList {
-        if (state.omittedCount > 0) add(ChatListItem.OmittedNotice(state.omittedCount))
-        state.messages.forEach { message ->
-            val preview = state.streamingContent
-            val visibleMessage = if (message.id == state.streamingMessageId && preview != null) {
-                message.copy(content = preview)
-            } else {
-                message
-            }
-            add(ChatListItem.Message(visibleMessage))
-        }
-    }
-    val displayItems = remember(items) { items.asReversed() }
-
+    //
+    // 流式预览（streamingContent）在**item 作用域内**读取，不在外层：
+    // 快照每 220ms 一帧，读在外层会让整个 MessageList（连同 LazyColumn 的
+    // item provider）每帧重组一遍——长会话里这是白烧的主线程时间。
+    // 读在 item 里，只有正在生成的那条气泡重组。
+    val messages = state.messages
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -560,47 +588,42 @@ private fun MessageList(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        items(
-            items = displayItems,
-            key = { item ->
-                when (item) {
-                    is ChatListItem.OmittedNotice -> "omitted-notice"
-                    is ChatListItem.Message -> item.message.id
-                }
-            },
-            // contentType 让 Compose 按类型分池复用：不写的话滚动时
-            // 每条消息都可能拿到上一条不同类型的容器重新组合。
-            contentType = { item ->
-                when (item) {
-                    is ChatListItem.OmittedNotice -> "notice"
-                    is ChatListItem.Message -> "message"
-                }
-            }
-        ) { item ->
-            when (item) {
-                is ChatListItem.OmittedNotice -> OmittedNoticeRow(item.count)
-                is ChatListItem.Message -> MessageBubble(
-                    message = item.message,
-                    images = bubbleImages[item.message.id].orEmpty(),
-                    files = bubbleFiles[item.message.id].orEmpty(),
-                    stage = state.generationStage.takeIf {
-                        item.message.id == state.streamingMessageId && state.isStreaming
-                    },
-                    truncated = truncatedMessageId == item.message.id,
-                    mathRenderer = mathRenderer,
-                    onCopy = onCopy,
-                    onRetry = onRetry,
-                    onDelete = onDelete,
-                    onSaveToNote = onSaveToNote
-                )
+        if (state.omittedCount > 0) {
+            item(key = "omitted-notice", contentType = "notice") {
+                OmittedNoticeRow(state.omittedCount)
             }
         }
+        items(
+            items = messages.asReversed(),
+            // key 用消息 id：内容更新（流式 / 落库）时按 id 对齐，
+            // 不因为实例变化而丢掉滚动位置与已组合的 item。
+            key = { it.id },
+            // contentType 让 Compose 按类型分池复用：不写的话滚动时
+            // 每条消息都可能拿到上一条不同类型的容器重新组合。
+            contentType = { "message" }
+        ) { message ->
+            val preview = if (message.id == state.streamingMessageId) {
+                state.streamingContent
+            } else {
+                null
+            }
+            val visibleMessage = if (preview != null) message.copy(content = preview) else message
+            MessageBubble(
+                message = visibleMessage,
+                images = bubbleImages[message.id].orEmpty(),
+                files = bubbleFiles[message.id].orEmpty(),
+                stage = state.generationStage.takeIf {
+                    message.id == state.streamingMessageId && state.isStreaming
+                },
+                truncated = truncatedMessageId == message.id,
+                mathRenderer = mathRenderer,
+                onCopy = onCopy,
+                onRetry = onRetry,
+                onDelete = onDelete,
+                onSaveToNote = onSaveToNote
+            )
+        }
     }
-}
-
-private sealed interface ChatListItem {
-    data class OmittedNotice(val count: Int) : ChatListItem
-    data class Message(val message: ChatMessage) : ChatListItem
 }
 
 @Composable
@@ -780,9 +803,21 @@ private fun MessageBubble(
                 // 附件从来没进过界面**——模型看得到图，用户这边看不见，
                 // 表现成「图片发不出去」。
                 if (images.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        images.forEach { dataUrl ->
-                            BubbleImage(dataUrl = dataUrl)
+                    // 多图（T2 对话连拍）两两一行；单图保持全宽。
+                    if (images.size == 1) {
+                        BubbleImage(dataUrl = images.first())
+                    } else {
+                        images.chunked(2).forEach { rowImages ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                rowImages.forEach { dataUrl ->
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        BubbleImage(dataUrl = dataUrl)
+                                    }
+                                }
+                                if (rowImages.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                     if (message.content.isNotBlank()) Spacer(Modifier.height(8.dp))
@@ -809,11 +844,21 @@ private fun MessageBubble(
                 }
                 // 流式时把尾巴上未闭合的公式先藏起来：半截公式一旦进 RichText
                 // 就会先显示源码、拼完再跳成公式。等配对符到齐再整段渲染滑入。
-                val displayAnswer = remember(answer, isStreaming) {
-                    if (isStreaming) trimIncompleteTrailingFormula(answer) else answer
-                }
+                val displayAnswer = rememberStreamTextDebounced(
+                    key = message.id,
+                    // 防抖只作用于流式中间帧；trim/清洗语义不变
+                    text = run {
+                        val base = if (isStreaming) trimIncompleteTrailingFormula(answer) else answer
+                        // v0.0.46 生图旧版本曾把 `![](本地路径)` 写进正文，
+                        // 老会话残留会被清洗（无引用的图片路径直接删）
+                        LegacyImageRefs.strip(base)
+                    },
+                    streaming = isStreaming
+                )
                 // 阶段提示：联网搜索要几秒到十几秒，没这行就是又一例「点了没反应」。
-                if (isStreaming && stage != null && answer.isBlank() && thinking.isBlank()) {
+                // 不要求内容为空——工具循环里搜索期间气泡**带着已生成的内容**，
+                // 阶段行显示在内容上方，用户知道「还在搜，但没断」。
+                if (isStreaming && stage != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(12.dp),
@@ -832,7 +877,9 @@ private fun MessageBubble(
                     ThinkingBlock(
                         text = thinking,
                         streaming = isStreaming,
-                        mathRenderer = mathRenderer
+                        mathRenderer = mathRenderer,
+                        // 思考块与正文同属一条消息：共用消息 id 隔离防抖
+                        debounceKey = message.id
                     )
                     if (answer.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
@@ -1126,9 +1173,14 @@ private fun StatusRow(
 private fun ThinkingBlock(
     text: String,
     streaming: Boolean,
-    mathRenderer: com.mistakebook.math.MathRenderer
+    mathRenderer: com.mistakebook.math.MathRenderer,
+    debounceKey: Any? = null
 ) {
-    var expanded by remember { mutableStateOf(true) }
+    // 初始展开态直接取 streaming：历史消息（streaming=false）首次组合就是
+    // 收起态，不会先把整段思考渲染一遍再折叠——那笔开销在滚动到每条
+    // 带思考的历史消息时都要付一次，是「新 item 进视口就卡一下」的一员。
+    // 流式中为 true；流式结束由下面的 LaunchedEffect 收起。
+    var expanded by remember { mutableStateOf(streaming) }
     LaunchedEffect(streaming) {
         if (!streaming) {
             expanded = false
@@ -1291,6 +1343,10 @@ private fun ChatInputBar(
     streaming: Boolean,
     attachments: List<PendingAttachment>,
     modelName: String,
+    /** T6 降级：待注入的资料库文件名与文件列表（chips 移除用）。 */
+    libraryInjectionNames: List<String> = emptyList(),
+    libraryFiles: List<java.io.File> = emptyList(),
+    onRemoveLibraryInjection: (java.io.File) -> Unit = {},
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
@@ -1314,6 +1370,20 @@ private fun ChatInputBar(
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
+            if (libraryInjectionNames.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    libraryInjectionNames.forEach { name ->
+                        LibraryInjectionChip(
+                            fileName = name,
+                            onRemove = {
+                                libraryFiles.firstOrNull { it.name == name }
+                                    ?.let(onRemoveLibraryInjection)
+                            }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
             if (attachments.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     attachments.forEach { attachment ->
@@ -1461,13 +1531,11 @@ private fun ModelPickerSheet(
     enabled: Boolean,
     searchEnabled: Boolean,
     searchProvider: ChatSearchProvider,
-    tavilyKey: String,
     onSelect: (String) -> Unit,
     onSelectProvider: (String) -> Unit,
     onEffortChange: (ReasoningEffort) -> Unit,
     onSearchEnabledChange: (Boolean) -> Unit,
     onSearchProviderChange: (ChatSearchProvider) -> Unit,
-    onTavilyKeyChange: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var page by remember { mutableStateOf(0) } // 0 模型列表 / 1 思考强度
@@ -1621,7 +1689,12 @@ private fun ModelPickerSheet(
                 }
             }
 
-            // ---- 联网搜索（v0.0.41）：开关默认开，出口二选一 ----
+            // ---- 联网搜索（v0.0.43）：只留「选择 + 开启」 ----
+            //
+            // v0.0.43 起改走 function calling：开关只决定**要不要给模型挂
+            // web_search 工具**，用不用、什么时候用由模型自己决定——
+            // 不再是「回答前先盲目搜一次」。API Key 等具体配置已移到
+            // 设置页（SearchProviderSection），这里不再堆表单。
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Row(
                 modifier = Modifier
@@ -1633,7 +1706,7 @@ private fun ModelPickerSheet(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("联网搜索", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "回答前先检索最新网页信息（DeepSeek / Tavily）",
+                        "需要时由模型自主检索最新网页（DeepSeek / Tavily）",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1660,31 +1733,18 @@ private fun ModelPickerSheet(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                when (searchProvider) {
-                    ChatSearchProvider.DEEPSEEK -> Text(
-                        "使用 DeepSeek 渠道的 API Key 做服务端搜索；当前供应商不是 DeepSeek 或失败时，自动改用 Tavily。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 20.dp)
-                    )
+                Text(
+                    when (searchProvider) {
+                        ChatSearchProvider.DEEPSEEK ->
+                            "调用 DeepSeek 官方搜索服务，与对话模型无关：用别家大模型时也能获得搜索能力。API Key 在「设置 → 联网搜索」配置，留空则复用 DeepSeek 模型 Key。"
 
-                    ChatSearchProvider.TAVILY -> Column(
-                        modifier = Modifier.padding(horizontal = 20.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = tavilyKey,
-                            onValueChange = onTavilyKeyChange,
-                            singleLine = true,
-                            label = { Text("Tavily API Key（tvly-…）") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text(
-                            "在 tavily.com 免费注册获取，每月 1000 次免费额度。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                        ChatSearchProvider.TAVILY ->
+                            "使用 Tavily 独立搜索服务，API Key 请在「设置 → 识别与大模型 → 联网搜索」里配置。"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
             }
         }
     }
@@ -1713,6 +1773,7 @@ private fun AttachmentSourceSheet(
     onPickImage: () -> Unit,
     onTakePhoto: () -> Unit,
     onPickFile: () -> Unit,
+    onPickLibrary: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -1740,6 +1801,14 @@ private fun AttachmentSourceSheet(
                 modifier = Modifier.clickable {
                     onDismiss()
                     onPickFile()
+                }
+            )
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.chat_attach_library)) },
+                leadingContent = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
+                modifier = Modifier.clickable {
+                    onDismiss()
+                    onPickLibrary()
                 }
             )
         }
@@ -1960,3 +2029,10 @@ private fun Context.findActivity(): Activity? {
     }
     return null
 }
+
+/**
+ * 流式期间裁掉未闭合的行内/块级公式尾巴；静态文本原样返回。
+ * 纯函数抽出便于与防抖组合。
+ */
+private fun trimIncomplete(text: String, streaming: Boolean): String =
+    if (streaming) trimIncompleteTrailingFormula(text) else text

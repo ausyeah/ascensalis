@@ -18,6 +18,7 @@ import com.mistakebook.data.local.entities.ReviewLog
 import com.mistakebook.data.local.entities.Subject
 import com.mistakebook.data.local.entities.Tag
 import com.mistakebook.data.local.entities.WeeklyReport
+import com.mistakebook.data.local.entities.BadgeRecord
 
 @Database(
     entities = [
@@ -33,9 +34,10 @@ import com.mistakebook.data.local.entities.WeeklyReport
         ChatAttachment::class,
         PomodoroTask::class,
         PomodoroSession::class,
-        WeeklyReport::class
+        WeeklyReport::class,
+        BadgeRecord::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -58,6 +60,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
     abstract fun pomodoroDao(): PomodoroDao
 
     abstract fun weeklyReportDao(): WeeklyReportDao
+
+    abstract fun badgeDao(): BadgeDao
 
     companion object {
         const val DB_NAME = "mistake_book.db"
@@ -298,6 +302,26 @@ abstract class MistakeBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 6 → 7：新增徽章表（T10 成就系统）。
+         *
+         * 纯加表：一行 = 一枚已解锁徽章，建表 SQL 与 [BadgeRecord] 实体逐字对应。
+         */
+        private val SQL_CREATE_BADGES = """
+            CREATE TABLE IF NOT EXISTS `badges` (
+                `key` TEXT NOT NULL,
+                `unlockedAt` INTEGER NOT NULL,
+                `progressJson` TEXT NOT NULL,
+                PRIMARY KEY(`key`)
+            )
+        """.trimIndent()
+
+        val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(SQL_CREATE_BADGES)
+            }
+        }
+
         fun build(context: Context): MistakeBookDatabase =
             Room.databaseBuilder(context, MistakeBookDatabase::class.java, DB_NAME)
                 // 两个都**必须**注册：漏一个，Room 就找不到那条升级路径，
@@ -310,7 +334,14 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                 //
                 // 加新版本时记得两处同步：改上面的 `version`，并在此追加 MIGRATION_n_n+1。
                 // 「定义了但忘了注册」是 Room 最常见也最致命的疏漏。
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7
+                )
                 .build()
     }
 }

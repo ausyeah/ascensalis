@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「今日」小组件（v0.0.51 T9）：2x2，三数据块纵向排列。
+  顶行：今日待复习数；中行：考试倒计时；底行：今日专注时长。
+  系统会按 appwidget-provider 的 initialLayout 预览，实际渲染走 RemoteViews。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center_vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_today_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_review_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="—"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:textColor="#1B1F26" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="今日待复习"
+            android:textSize="13sp"
+            android:textColor="#5A5F6A" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_exam_countdown"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="暂无考试"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#1B1F26" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="考试倒计时"
+            android:textSize="13sp"
+            android:textColor="#5A5F6A" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_pomodoro"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="—"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#1B1F26" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="今日专注"
+            android:textSize="13sp"
+            android:textColor="#5A5F6A" />
+    </LinearLayout>
+</LinearLayout>

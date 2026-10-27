@@ -110,8 +110,17 @@
     <string name="crop_decode_missing">照片文件已丢失</string>
     <string name="crop_decode_oom">照片太大，内存不足</string>
     <string name="crop_back">返回</string>
+    <string name="crop_skip">跳过这张</string>
     <string name="crop_too_small">裁剪区域太小，请至少选 100×100</string>
     <string name="crop_hint">拖动四角手柄框选题目，排除页面噪声</string>
+
+    <!-- F6 连拍模式 -->
+    <string name="capture_batch_count">本批 %1$d 张</string>
+    <string name="capture_batch_done">完成</string>
+    <string name="capture_batch_full">一次最多 12 张，先完成这批</string>
+    <string name="capture_batch_discard_title">丢弃本批照片？</string>
+    <string name="capture_batch_discard_body">本批 %1$d 张将丢弃</string>
+    <string name="capture_batch_skip_missing">原图文件丢失，已跳过</string>
 
     <!-- 进度页 -->
     <string name="progress_title">识别进度</string>
@@ -240,6 +249,53 @@
     <string name="settings_reasoning_max">最高</string>
     <string name="settings_reasoning_hint">各服务端字段名不统一（reasoning_effort / thinking / reasoning），不被识别时会自动换字段重试，通常无感；关闭则完全由服务端默认决定。</string>
 
+    <!-- 联网搜索（v0.0.43） -->
+    <string name="settings_search_title">联网搜索</string>
+    <string name="settings_search_desc">开启后，模型在需要最新信息或事实依据时会自主调用搜索工具（用不用、什么时候用由模型决定）。API 配置如下。</string>
+    <string name="settings_search_enabled">启用联网搜索</string>
+    <string name="settings_search_provider">搜索出口</string>
+    <string name="settings_search_deepseek_key">DeepSeek API Key（sk-…）</string>
+    <string name="settings_search_tavily_key">Tavily API Key（tvly-…）</string>
+    <string name="settings_search_tavily_hint">在 tavily.com 免费注册获取，每月 1000 次免费额度。选 DeepSeek 出口时无需填写。</string>
+    <string name="settings_search_deepseek_hint">调用 DeepSeek 官方搜索服务（api.deepseek.com/v1/tools/search），与对话用哪个模型无关：用别家大模型对话时，填一把 DeepSeek Key 即可获得搜索能力。留空则自动复用已配置的 DeepSeek 模型 Key；两者都没有时自动改用 Tavily。</string>
+
+    <!-- 题目识别方式（v0.0.43） -->
+    <string name="settings_recognition_title">识别方式</string>
+    <string name="settings_recognition_desc">拍照整理错题时，题目从图片变成结构化数据的途径。MinerU 是专业文档解析服务；大模型直连由可识图的对话模型直接看原图输出，不依赖 MinerU。</string>
+    <string name="settings_recognition_mineru">仅 MinerU</string>
+    <string name="settings_recognition_llm">当前模型</string>
+    <string name="settings_recognition_vision">识图模型</string>
+    <string name="settings_recognition_auto">自动</string>
+    <string name="settings_recognition_hint_mineru">只用 MinerU 解析图片。没配 Key 或解析失败时按失败处理，不自动改走大模型。适合网络稳定、MinerU 配额充足的场景。</string>
+    <string name="settings_recognition_hint_llm">跳过 MinerU，由当前对话模型直接看原图输出结构化题目。需要当前模型支持识图，消耗的是对话模型的额度；识别质量与模型识图能力直接相关。</string>
+    <string name="settings_recognition_hint_vision">跳过 MinerU 与对话模型，专用「识图模型」（设置 → 大模型 → 识图模型）直接看原图。主对话模型再普通也能拍照整理错题。</string>
+    <string name="settings_recognition_hint_auto">默认方式。依次尝试：MinerU → 当前对话模型 → 专用识图模型；某一环失败会自动改走下一环，中途不会直接报错，只有全部不可用才失败。</string>
+    <string name="settings_recognition_warn_vision">还没有配置可用的识图模型。请到设置 → 大模型 → 识图模型里填写地址、Key 与模型名，或把识别方式改成「自动」。</string>
+    <string name="settings_recognition_warn_llm">当前模型不支持识图（或尚未配置模型），大模型识别这条路走不通。请到下方切换到识图模型，或把识别方式改回「自动」/「仅 MinerU」。</string>
+    <string name="settings_recognition_warn_auto">当前模型不支持识图（或尚未配置模型），MinerU 不可用时将没有兜底。建议切换到识图模型以获得自动回落能力。</string>
+
+    <!-- 生图渠道（v0.0.45） -->
+    <string name="settings_image_profiles">生图设置</string>
+    <string name="settings_image_profiles_desc">单词场景图、详情页辅助图都通过这里配置的渠道生成。各家生图 API 请求体差异大：留空请求体模板时走内置默认格式，不兼容时按 API 文档贴一份模板自行适配。</string>
+    <string name="settings_add_image_profile">新增生图渠道</string>
+    <string name="settings_image_profile_name">渠道名称</string>
+    <string name="settings_image_profile_model">模型 / 引擎名</string>
+    <string name="settings_image_profile_template">请求体模板（可选）</string>
+    <string name="settings_image_profile_template_hint">占位符：{prompt} 提示词、{width} 宽、{height} 高。写在引号内，如 {"model":"xxx","prompt":"{prompt}","n":1,"size":"{width}x{height}"}。留空走内置默认格式。</string>
+    <string name="settings_image_profile_delete">删除该渠道</string>
+    <string name="settings_hint_image_key">尚未配置生图渠道。配好地址、Key 与模型名后，单词卡与详情页的图片功能即可使用。</string>
+    <string name="settings_vision_profile">识图模型</string>
+    <string name="settings_vision_profile_moved">识图模型改到下方「识图模型」分区单独配置：地址、Key、模型名全部自己填，不受对话配置限制。</string>
+    <string name="settings_vision_profiles">识图模型</string>
+    <string name="settings_vision_profiles_desc">专门用来看图的模型。配好后对话里会多出「看图」工具：主模型看不到图片时由它来读，也能回答「图里画了什么」。模型名按渠道文档填，例如 qwen-vl-max、gpt-4o、glm-4v。</string>
+    <string name="settings_add_vision_profile">新增识图模型</string>
+    <string name="settings_vision_profile_model">模型名（识图）</string>
+    <string name="settings_vision_profile_model_hint">填渠道提供的具体模型名，不是供应商名。例如 qwen-vl-max、gpt-4o-mini、glm-4v-flash。</string>
+    <string name="settings_hint_vision_key">尚未配置识图模型。配好后，不识图的主模型也能通过「看图」工具读取图片。</string>
+    <string name="settings_vision_profile_none">不指定</string>
+    <string name="settings_vision_profile_hint">指定一套专门用来看图的模型。指定后，对话里会多出一个「看图」工具：主模型看不到图片时由它来读，也能回答「图里画了什么」这类问题。不指定时沿用原来的 MinerU 识别。</string>
+    <string name="settings_save">保存</string>
+
     <string name="settings_active_profile">当前使用</string>
     <string name="settings_add_profile">新增配置</string>
     <string name="settings_edit_profile">编辑配置</string>
@@ -356,6 +412,12 @@
     <string name="edit_subject_manual_hint">例如：通信原理</string>
     <string name="detail_note_saved">备注已保存</string>
     <string name="detail_variant_generate">举一反三：出一道同源变式题</string>
+
+    <!-- 辅助图（F-IMG-4） -->
+    <string name="detail_aux_image">辅助图</string>
+    <string name="detail_aux_generate">生成辅助图</string>
+    <string name="detail_aux_generating">生成中…</string>
+    <string name="detail_aux_dismiss">知道了</string>
     <string name="detail_variant_title">变式题</string>
     <string name="detail_variant_generating">正在基于这道题出变式…</string>
     <string name="detail_variant_save">存为错题</string>
@@ -643,4 +705,35 @@
     <string name="chat_save_to_note">存入题目备注</string>
     <string name="chat_grading_need_image">批改模式需要附上手写过程照片</string>
     <string name="chat_saved_to_note">已存入题目备注</string>
-</resources>
+    <string name="capture_chat_batch_count">本批 %1$d 张</string>
+    <string name="capture_chat_batch_done">完成</string>
+    <string name="capture_chat_batch_full">一次最多 9 张，本批已满</string>
+    <string name="capture_chat_batch_discard_title">丢弃本批照片？</string>
+    <string name="capture_chat_batch_discard_body">本批 %1$d 张将丢弃</string>
+    <string name="crop_chat_skip">不裁切，下一张</string>    <string name="capture_enhance_title">拍照增强调节</string>
+    <string name="capture_enhance_preview">增强预览</string>
+    <string name="capture_enhance_computing">正在计算预览…</string>
+    <string name="capture_enhance_confirm">确认，去裁切</string>    <string name="library_title">资料库</string>
+    <string name="library_desc">存放在 App 内的文本资料（.md / .txt / .json / .csv）。对话时可让 AI 参考或整理存入。</string>
+    <string name="library_empty">还没有资料。右下角导入或新建。</string>
+    <string name="library_import">导入文件</string>
+    <string name="library_import_failed">导入失败：文件名不支持或读取失败（一期仅支持 .md / .txt / .json / .csv）</string>
+    <string name="library_new">新建文档</string>
+    <string name="library_new_name">文件名</string>
+    <string name="library_new_name_hint">支持 .md / .txt / .json / .csv</string>
+    <string name="library_new_content">内容</string>
+    <string name="library_rename">重命名</string>
+    <string name="library_delete">删除</string>
+    <string name="library_delete_confirm_title">删除文件？</string>
+    <string name="library_delete_confirm_body">「%1$s」将被删除，无法恢复。</string>
+    <string name="library_bad_name">文件名无效：只能用单一文件名，扩展名须为 .md / .txt / .json / .csv，且不与现有文件重名</string>
+    <string name="library_truncated">内容超过 50KB，已截断显示（保存会丢失被截断部分）</string>
+    <string name="settings_library_section">资料库</string>    <string name="chat_attach_library">@资料库</string>
+    <string name="widget_no_exam">暂无考试</string>
+    <string name="badge_title">成就墙</string>
+    <string name="badge_loading">正在统计…</string>
+    <string name="badge_unlocked_on">%1$s 解锁</string>
+    <string name="badge_progress">%1$d / %2$d</string>
+    <string name="badge_locked">未达成</string>
+    <string name="settings_badge_entry">成就墙</string>
+    <string name="badge_new_toast">解锁新成就：%1$s</string></resources>

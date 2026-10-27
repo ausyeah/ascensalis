@@ -108,27 +108,117 @@ class RecognitionEngine(
             }
             val settings = settingsStore.snapshotNow()
 
-            val markdown = obtainMarkdown(taskId, task, file, settings)
-            taskRepository.findById(taskId)?.let { refreshed ->
-                taskRepository.update(
-                    refreshed.copy(
-                        status = TaskStatus.LLM,
-                        markdown = markdown,
-                        stageText = "AI 整理中",
-                        updatedAt = System.currentTimeMillis()
+            // ---- 识别路线决策（v0.0.44：MinerU / 大模型 / 自动）----
+            //
+            // 纯文本 PDF 不参与选择：它的「识别」就是本地读文件，
+            // 与 MinerU、大模型都无关（老行为原样保留）。
+            val plan = if (task.sourceType == CaptureTask.SOURCE_PDF_TEXT) {
+                RecognitionPlan.Mineru
+            } else {
+                RecognitionPlan.decide(
+                    mode = settings.recognitionMode,
+                    mineruConfigured = settings.mineruConfigured,
+                    supportsVision = settings.activeProfile?.supportsVision == true,
+                    visionConfigured = settings.visionConfigured,
+                    modelName = settings.activeProfile?.model.orEmpty()
+                )
+            }
+
+            // 大模型直连：一步出结构化题目，没有 MinerU 中间产物。
+            // markdown 槽位存模型原始输出——重试的缓存路径与降级展示都读它。
+            if (plan is RecognitionPlan.LlmDirect) {
+                val bundle = recognizeWithVisionLlm(
+                    taskId = taskId,
+                    task = task,
+                    file = file,
+                    settings = settings,
+                    profile = settings.activeProfile
+                )
+                finishWith(taskId, bundle)
+                return
+            }
+
+            // 用**用户单独配置的识图模型**直连看图。
+            if (plan is RecognitionPlan.VisionDirect) {
+                val vision = settings.visionProfile
+                    ?: throw PipelineException(
+                        com.mistakebook.net.ApiError(
+                            kind = com.mistakebook.net.ApiErrorKind.NO_KEY,
+                            serverMessage = "尚未配置识图模型（设置 → 大模型 → 识图模型）。"
+                        )
+                    )
+                val bundle = recognizeWithVisionLlm(
+                    taskId = taskId,
+                    task = task,
+                    file = file,
+                    settings = settings,
+                    profile = vision
+                )
+                finishWith(taskId, bundle)
+                return
+            }
+
+            // 两条路都走不通：把原因作为任务失败落库（与其它失败同一套 UI）。
+            if (plan is RecognitionPlan.Unavailable) {
+                throw PipelineException(
+                    com.mistakebook.net.ApiError(
+                        kind = com.mistakebook.net.ApiErrorKind.NO_KEY,
+                        serverMessage = plan.reason
                     )
                 )
             }
 
-            val bundle = refineWithLlm(taskId, task, markdown, settings)
+            // 自动回落链（AUTO）：依次尝试，**中途失败不中断**，
+            // 全部失败才报错。链的顺序见 [RecognitionPlan.decide]。
+            if (plan is RecognitionPlan.Chain) {
+                val failures = mutableListOf<String>()
+                for (route in plan.routes) {
+                    val result = runCatching {
+                        when (route) {
+                            RecognitionPlan.Route.MINERU -> {
+                                val markdown = mineruMarkdown(taskId, task, file, settings)
+                                // MinerU 出的是原始文字，**最后一步交回大模型整理**
+                                // ——「自动」链条的终点就是大模型处理。
+                                refineWithLlm(taskId, task, markdown, settings)
+                            }
 
-            taskRepository.finish(
-                id = taskId,
-                markdown = markdown,
-                refinedJson = DraftBundleCodec.encode(bundle),
-                questionCount = bundle.questions.size,
-                now = System.currentTimeMillis()
-            )
+                            RecognitionPlan.Route.CURRENT_LLM -> recognizeWithVisionLlm(
+                                taskId = taskId,
+                                task = task,
+                                file = file,
+                                settings = settings,
+                                profile = settings.activeProfile
+                            )
+
+                            RecognitionPlan.Route.VISION_LLM -> recognizeWithVisionLlm(
+                                taskId = taskId,
+                                task = task,
+                                file = file,
+                                settings = settings,
+                                profile = settings.visionProfile
+                            )
+                        }
+                    }
+                    val bundle = result.getOrNull()
+                    if (bundle != null) {
+                        finishWith(taskId, bundle)
+                        return
+                    }
+                    failures += routeFailureText(route, result.exceptionOrNull())
+                }
+                // 整条链都不通：把每一条的失败原因都说清楚，用户才知道该改哪一项。
+                throw PipelineException(
+                    com.mistakebook.net.ApiError(
+                        kind = com.mistakebook.net.ApiErrorKind.NO_KEY,
+                        serverMessage = "自动识别的所有途径都没成功：\n" +
+                            failures.joinToString("\n") { "· $it" }
+                    )
+                )
+            }
+
+            // 纯 MinerU：失败（含没配 Key）按老行为报错，不回落。
+            val markdown = obtainMarkdown(taskId, task, file, settings)
+            refineAndFinish(taskId, task, markdown, settings)
         } catch (cancel: CancellationException) {
             taskRepository.fail(taskId, CANCELLED_MESSAGE, System.currentTimeMillis())
             throw cancel
@@ -139,6 +229,38 @@ class RecognitionEngine(
             // MinerU 临时目录在这里分层回收（T5），备份瘦身靠它。
             cleanupMineruTemp(taskId)
         }
+    }
+
+    /** MinerU 路线拿到 markdown 后的统一收尾：状态切 LLM → 整理 → 落库。 */
+    private suspend fun refineAndFinish(
+        taskId: Long,
+        task: CaptureTask,
+        markdown: String,
+        settings: SettingsSnapshot
+    ) {
+        taskRepository.findById(taskId)?.let { refreshed ->
+            taskRepository.update(
+                refreshed.copy(
+                    status = TaskStatus.LLM,
+                    markdown = markdown,
+                    stageText = "AI 整理中",
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
+        val bundle = refineWithLlm(taskId, task, markdown, settings)
+        finishWith(taskId, bundle)
+    }
+
+    /** 落一条完成态任务（大模型直连与 MinerU 路线共用）。 */
+    private suspend fun finishWith(taskId: Long, bundle: DraftBundle) {
+        taskRepository.finish(
+            id = taskId,
+            markdown = bundle.markdown,
+            refinedJson = DraftBundleCodec.encode(bundle),
+            questionCount = bundle.questions.size,
+            now = System.currentTimeMillis()
+        )
     }
 
     /**
@@ -226,6 +348,40 @@ class RecognitionEngine(
             taskRepository.setStage(taskId, "读取 PDF 文本…", System.currentTimeMillis())
             return file.readText()
         }
+        // 纯 MinerU 路线：失败照旧抛 PipelineException（老行为，不回落）。
+        return mineruMarkdown(taskId, task, file, settings)
+    }
+
+    /**
+     * 自动回落链里某一条路失败时的一句话说明。
+     *
+     * 用户要看到的是「每条路各为什么不行」，而不是一句笼统的
+     * 「识别失败」——否则他不知道该去配 MinerU 还是去配识图模型。
+     */
+    private fun routeFailureText(
+        route: RecognitionPlan.Route,
+        error: Throwable?
+    ): String {
+        val name = when (route) {
+            RecognitionPlan.Route.MINERU -> "MinerU"
+            RecognitionPlan.Route.CURRENT_LLM -> "当前大模型直连"
+            RecognitionPlan.Route.VISION_LLM -> "识图模型直连"
+        }
+        val detail = when (error) {
+            is PipelineException -> error.apiError.serverMessage.ifBlank { "调用失败" }
+            null -> "未知原因"
+            else -> error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+        }
+        return "$name：$detail"
+    }
+
+    /** 调 MinerU 拿 markdown；失败抛 [PipelineException]（由调用方决定是否回落）。 */
+    private suspend fun mineruMarkdown(
+        taskId: Long,
+        task: CaptureTask,
+        file: File,
+        settings: SettingsSnapshot
+    ): String {
         taskRepository.setStage(taskId, "上传照片…", System.currentTimeMillis())
         val result = mineruClient.recognize(
             taskId = taskId,
@@ -248,6 +404,88 @@ class RecognitionEngine(
             is com.mistakebook.net.ApiResult.Success -> result.data.markdown
             is com.mistakebook.net.ApiResult.Failure -> throw PipelineException(result.error)
         }
+    }
+
+    /**
+     * **大模型直连识别**（v0.0.44）：可识图模型直接看原图，一步输出结构化题目。
+     *
+     * 与「MinerU 出文字 → 再整理」的两步路线相比：少一次外部依赖
+     * （没有 MinerU Key 也能用）、少一次网络往返，模型自己对图片里的
+     * 公式/表格/手写作答痕迹做判断，不被 OCR 错别字带偏。
+     *
+     * 产出与 MinerU 路线**同一个 [DraftBundle]**——下游（编辑页、打印）
+     * 不需要区分题目是怎么来的。
+     */
+    private suspend fun recognizeWithVisionLlm(
+        taskId: Long,
+        task: CaptureTask,
+        file: File,
+        settings: SettingsSnapshot,
+        /** 用哪个模型看图：当前默认模型，或用户单独配置的识图模型。 */
+        profile: com.mistakebook.data.prefs.LlmProfile?
+    ): DraftBundle {
+        val active = profile ?: throw PipelineException(noProfileError())
+        if (!active.supportsVision) {
+            // 正常情况下 decide() 已经把这条路堵死了；这里是纵深防御——
+            // 用户可能在任务排队期间换了模型，执行时必须再验一次。
+            throw PipelineException(
+                com.mistakebook.net.ApiError(
+                    kind = com.mistakebook.net.ApiErrorKind.NO_KEY,
+                    serverMessage = "当前模型（${active.model}）不支持识图，" +
+                        "无法直接识别图片。请在设置里切换到识图模型，" +
+                        "或把识别方式改成「自动」/「仅 MinerU」。"
+                )
+            )
+        }
+        taskRepository.setStatus(taskId, TaskStatus.PARSING, System.currentTimeMillis())
+        taskRepository.setStage(taskId, "大模型识图中…", System.currentTimeMillis())
+        val raw = llmClient.refineJson(
+            profile = active,
+            systemPrompt = PromptTemplates.visionSystemPrompt(),
+            userPrompt = PromptTemplates.visionUserPrompt(),
+            imageFile = file,
+            longEdgePx = settings.imageLongEdgePx,
+            // 直连路径**必须**带图：图就是输入。这与「整理时附带原图核对」
+            // （attachOriginalImage）是两个不同的设置，别混。
+            attachImage = true
+        )
+        return when (raw) {
+            is com.mistakebook.net.ApiResult.Success -> bundleFrom(
+                task = task,
+                // markdown 槽位存模型原始输出：重试的缓存路径与降级展示都读它。
+                // 降级兜底也用同一份——直连路线没有「截断」概念。
+                markdown = raw.data,
+                fallbackMarkdown = raw.data,
+                truncatedInput = false,
+                raw = raw.data
+            )
+
+            is com.mistakebook.net.ApiResult.Failure -> throw PipelineException(
+                raw.error.copy(serverMessage = visionFailureMessage(raw.error, active.model))
+            )
+        }
+    }
+
+    /**
+     * 带图调用失败时的用户可读原因。
+     *
+     * 多出的一句排查建议是针对一个具体陷阱：[LlmProfile.supportsVision]
+     * 默认 **true**（存量配置兼容：升级不能把「能看图」悄悄改成不能）。
+     * 于是「这个模型到底识不识图」在多数情况下其实是**猜的**——
+     * 模型不识图时，带图的请求要么被忽略图片、要么直接 400，
+     * 表现就是「识别失败」，用户无从判断是配置问题还是网络问题。
+     * 把这条最可能的原因写进错误里，省得对着笼统的失败发呆。
+     */
+    private fun visionFailureMessage(
+        error: com.mistakebook.net.ApiError,
+        model: String
+    ): String {
+        val base = error.serverMessage.ifBlank { "大模型识别失败" }
+        val suspicious = error.kind == com.mistakebook.net.ApiErrorKind.BAD_RESPONSE ||
+            error.kind == com.mistakebook.net.ApiErrorKind.AUTH
+        if (!suspicious) return base
+        return "$base。若反复失败，可能是「$model」实际不支持识图：" +
+            "请到设置里关掉该模型的识图开关，或把识别方式改回「仅 MinerU」。"
     }
 
     private suspend fun refineWithLlm(
@@ -273,39 +511,64 @@ class RecognitionEngine(
             longEdgePx = settings.imageLongEdgePx,
             attachImage = attachImage
         )
-        when (raw) {
-            is com.mistakebook.net.ApiResult.Success -> {
-                val outcome = JsonExtractor.extract(
-                    raw = raw.data,
-                    markdown = truncated.text,
-                    imagePath = task.photoPath
-                )
-                return DraftBundle(
-                    imagePath = task.photoPath,
-                    markdown = markdown,
-                    truncatedInput = truncated.truncated,
-                    degraded = outcome.degraded,
-                    degradedReason = if (outcome.degraded) DEGRADED_MESSAGE else "",
-                    questions = outcome.drafts.map { draft ->
-                        DraftQuestion(
-                            subject = draft.subjectName,
-                            title = draft.title,
-                            stem = draft.stem,
-                            options = draft.options.map { option ->
-                                RefinedOptionDto(label = option.label, text = option.text)
-                            },
-                            answer = draft.answer,
-                            analysis = draft.analysis,
-                            knowledgePoints = draft.knowledgePoints,
-                            errorReason = draft.errorReason.label,
-                            difficulty = draft.difficulty,
-                            uncertain = draft.uncertain
-                        )
-                    }
-                )
-            }
+        return when (raw) {
+            is com.mistakebook.net.ApiResult.Success -> bundleFrom(
+                task = task,
+                markdown = markdown,
+                // extract 的 markdown 参数是「降级时的兜底题干」，
+                // 用截断后的文本（与老行为一致）：真降级时说明输出不可用，
+                // 兜底内容短一点反而好读。
+                fallbackMarkdown = truncated.text,
+                truncatedInput = truncated.truncated,
+                raw = raw.data
+            )
+
             is com.mistakebook.net.ApiResult.Failure -> throw PipelineException(raw.error)
         }
+    }
+
+    /**
+     * 大模型原始输出 → [DraftBundle]（两条识别路线共用）。
+     *
+     * @param markdown 记入 bundle 的中间产物：MinerU 路线是 markdown，
+     *   直连路线是模型原始 JSON（重试的缓存路径与降级展示都读它）。
+     * @param fallbackMarkdown 解析失败时的兜底题干来源。
+     */
+    private fun bundleFrom(
+        task: CaptureTask,
+        markdown: String,
+        fallbackMarkdown: String,
+        truncatedInput: Boolean,
+        raw: String
+    ): DraftBundle {
+        val outcome = JsonExtractor.extract(
+            raw = raw,
+            markdown = fallbackMarkdown,
+            imagePath = task.photoPath
+        )
+        return DraftBundle(
+            imagePath = task.photoPath,
+            markdown = markdown,
+            truncatedInput = truncatedInput,
+            degraded = outcome.degraded,
+            degradedReason = if (outcome.degraded) DEGRADED_MESSAGE else "",
+            questions = outcome.drafts.map { draft ->
+                DraftQuestion(
+                    subject = draft.subjectName,
+                    title = draft.title,
+                    stem = draft.stem,
+                    options = draft.options.map { option ->
+                        RefinedOptionDto(label = option.label, text = option.text)
+                    },
+                    answer = draft.answer,
+                    analysis = draft.analysis,
+                    knowledgePoints = draft.knowledgePoints,
+                    errorReason = draft.errorReason.label,
+                    difficulty = draft.difficulty,
+                    uncertain = draft.uncertain
+                )
+            }
+        )
     }
 
     private fun noProfileError() = com.mistakebook.net.ApiError(

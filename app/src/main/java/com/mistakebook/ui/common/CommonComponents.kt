@@ -31,6 +31,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
@@ -179,7 +181,15 @@ fun QuestionThumb(
      * - false：完全遵守调用方给的固定尺寸（如列表里 72×72 方块），
      *   配合 [ContentScale.Crop] 居中裁剪——列表小图要整齐划一，用它。
      */
-    keepAspect: Boolean = true
+    keepAspect: Boolean = true,
+    /**
+     * 图不可用时的**文字封面**内容（一般传题干）。
+     *
+     * 覆盖三类场景：纯文本 PDF 路线（photoPath 是 .md，不是图片）、
+     * 原图被删、后缀不是图片格式。以前这些情况显示的是一块空白，
+     * 列表里没有视觉锚点——PDF 识别出来的题尤其明显（整列都没封面）。
+     */
+    fallbackText: String? = null
 ) {
     val context = LocalContext.current
     // request 也 remember：否则每次重组都新建 ImageRequest，Coil 会认为
@@ -193,6 +203,11 @@ fun QuestionThumb(
     // 加载成功前置 null → 先按 1:1 占位（调用方给的高度当边长），
     // 成功后切到真实比例。remember(imagePath)：换图（重新裁切）后重算。
     var aspectRatio by remember(imagePath) { mutableStateOf<Float?>(null) }
+    // 一开始就判一次：PDF 文本路线的路径根本不是图片，
+    // 等 Coil 异步失败再切会先闪一帧空白。
+    var failed by remember(imagePath) {
+        mutableStateOf(!com.mistakebook.util.CoverFallback.isLikelyImage(imagePath))
+    }
     Surface(
         modifier = modifier
             .then(if (keepAspect) Modifier.aspectRatio(aspectRatio ?: 1f) else Modifier)
@@ -200,6 +215,23 @@ fun QuestionThumb(
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant
     ) {
+        if (failed) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = com.mistakebook.util.CoverFallback.label(fallbackText.orEmpty()),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(6.dp)
+                )
+            }
+            return@Surface
+        }
         AsyncImage(
             model = request,
             contentDescription = contentDescription,
@@ -212,6 +244,9 @@ fun QuestionThumb(
                     aspectRatio = (w.toFloat() / h).coerceIn(0.4f, 3f)
                 }
             },
+            // 真去解码才发现的失败（文件损坏、空文件）也落到文字封面，
+            // 不留一块白。
+            onError = { failed = true },
             modifier = Modifier.fillMaxSize()
         )
     }

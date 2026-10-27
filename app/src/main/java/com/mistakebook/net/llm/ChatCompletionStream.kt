@@ -57,6 +57,59 @@ sealed interface ChatStreamEvent {
     ) : ChatStreamEvent
 
     data class Failed(val error: ApiError) : ChatStreamEvent
+
+    /**
+     * 模型发起了工具调用（v0.0.43）。
+     *
+     * 上层收到它时：正文流已结束（finish_reason=tool_calls），
+     * 接下来该**客户端执行工具**、把结果以 tool 消息回传、再发一次请求。
+     * 循环与上限在 [com.mistakebook.ui.chat.ChatGenerationService]。
+     */
+    data class ToolCalls(val calls: List<AccumulatedToolCall>) : ChatStreamEvent
+}
+
+/**
+ * 累积完整的**一次**工具调用。
+ *
+ * 流式里一次调用的参数是分片给的（首片带 id/name，后续只带 arguments 片段），
+ * 必须按 index 拼完整才能执行。
+ */
+data class AccumulatedToolCall(
+    val index: Int,
+    val id: String,
+    val name: String,
+    val arguments: String
+)
+
+/**
+ * 把一个分片并入累积结果（**纯函数，可 JVM 单测**）。
+ *
+ * 同 index 的分片属于同一次调用：id/name 取第一个非空，arguments 直接拼接。
+ * 不同 index 各自成条，保持传入顺序。
+ */
+fun accumulateToolCall(
+    accumulated: List<AccumulatedToolCall>,
+    delta: StreamToolCallDelta
+): List<AccumulatedToolCall> {
+    val existing = accumulated.firstOrNull { it.index == delta.index }
+    val fn = delta.function
+    if (existing == null) {
+        val call = AccumulatedToolCall(
+            index = delta.index,
+            id = delta.id.orEmpty(),
+            name = fn?.name.orEmpty(),
+            arguments = fn?.arguments.orEmpty()
+        )
+        // 新 index 一律追加到末尾；绝大多数服务端本来就是顺序到达，
+        // 乱序时也保证「同 index 聚合、整体不丢」。
+        return accumulated + call
+    }
+    val merged = existing.copy(
+        id = if (existing.id.isNotEmpty()) existing.id else delta.id.orEmpty(),
+        name = if (existing.name.isNotEmpty()) existing.name else fn?.name.orEmpty(),
+        arguments = existing.arguments + fn?.arguments.orEmpty()
+    )
+    return accumulated.map { if (it.index == delta.index) merged else it }
 }
 
 /**
@@ -185,6 +238,8 @@ class ChatCompletionStream(
                             )
                         }
 
+                        is RawEvent.ToolCalls -> emit(ChatStreamEvent.ToolCalls(event.calls))
+
                         is RawEvent.Failed -> attemptFailure = event.error
                     }
                 }
@@ -235,6 +290,10 @@ class ChatCompletionStream(
             val finishReason: String?,
             val cachedTokens: Int = 0
         ) : RawEvent
+
+        /** 这一轮模型请求调用工具（参数已累积完整）。 */
+        data class ToolCalls(val calls: List<AccumulatedToolCall>) : RawEvent
+
         data class Failed(val error: ApiError) : RawEvent
     }
 
@@ -371,6 +430,10 @@ class ChatCompletionStream(
         )
         // 无论是怎么结束的（[DONE] / EOF / finish_reason），都发一次 Ended。
         // 上层靠它把消息状态从「生成中」翻成完成。
+        //
+        // 工具调用（v0.0.43）先于 Ended 发：finish_reason=tool_calls 时
+        // 服务端也是这个顺序，上层据此进入「执行工具 → 回传 → 续请求」循环。
+        if (result.toolCalls.isNotEmpty()) emit(RawEvent.ToolCalls(result.toolCalls))
         emit(
             RawEvent.Ended(
                 promptTokens = result.promptTokens,
@@ -397,6 +460,21 @@ class ChatCompletionStream(
         choice.message?.reasoningContent?.takeIf { it.isNotBlank() }
             ?.let { emit(RawEvent.Thinking(it)) }
         choice.message?.content?.takeIf { it.isNotEmpty() }?.let { emit(RawEvent.Delta(it)) }
+        // 工具调用同样要输出：服务端忽略 stream 参数时，工具链不能断在这里
+        choice.message?.toolCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
+            emit(
+                RawEvent.ToolCalls(
+                    calls.mapIndexed { index, call ->
+                        AccumulatedToolCall(
+                            index = index,
+                            id = call.id,
+                            name = call.function.name,
+                            arguments = call.function.arguments
+                        )
+                    }
+                )
+            )
+        }
         emit(
             RawEvent.Ended(
                 promptTokens = parsed.usage?.promptTokens ?: 0,
@@ -449,6 +527,21 @@ class ChatCompletionStream(
             ?.let { emit(ChatStreamEvent.Thinking(it)) }
         val text = choice.message?.content.orEmpty()
         if (text.isNotEmpty()) emit(ChatStreamEvent.Delta(text))
+        // 非流式降级路径的工具调用出口（v0.0.43）
+        choice.message?.toolCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
+            emit(
+                ChatStreamEvent.ToolCalls(
+                    calls.mapIndexed { index, call ->
+                        AccumulatedToolCall(
+                            index = index,
+                            id = call.id,
+                            name = call.function.name,
+                            arguments = call.function.arguments
+                        )
+                    }
+                )
+            )
+        }
         emit(
             ChatStreamEvent.Done(
                 promptTokens = parsed.usage?.promptTokens ?: 0,
@@ -571,7 +664,15 @@ data class SseStreamResult(
     val cachedTokens: Int = 0,
 
     /** 因什么而结束的：`done` 哨兵 / `eof` 连接关闭 / `finish_reason` 已到齐。 */
-    val endedBy: String = ""
+    val endedBy: String = "",
+
+    /**
+     * 本轮模型请求的工具调用（参数已按 index 累积完整）。
+     *
+     * 空列表 = 模型没请求工具，正常收尾。非空 = finish_reason 通常是
+     * `tool_calls`，上层要执行工具并回传（v0.0.43）。
+     */
+    val toolCalls: List<AccumulatedToolCall> = emptyList()
 )
 
 /**
@@ -622,16 +723,22 @@ fun drainSse(
     var promptTokens = 0
     var completionTokens = 0
     var cachedTokens = 0
+    var toolCalls: List<AccumulatedToolCall> = emptyList()
 
     while (true) {
         val line = readLine() ?: return SseStreamResult(
-            promptTokens, completionTokens, finishReason, cachedTokens, endedBy = "eof"
+            promptTokens, completionTokens, finishReason, cachedTokens,
+            endedBy = "eof", toolCalls = toolCalls
         )
         val event = parser.accept(line) ?: continue
         when (event) {
             is SseEvent.Chunk -> {
                 event.thinking.takeIf { it.isNotEmpty() }?.let(onThinking)
                 event.text.takeIf { it.isNotEmpty() }?.let(onDelta)
+                // 工具调用分片：按 index 累积（一次调用的参数被拆成多片）
+                event.toolCalls.forEach { delta ->
+                    toolCalls = accumulateToolCall(toolCalls, delta)
+                }
                 // finish_reason / usage 只在特定帧出现，取**最后一个非空值**
                 event.finishReason?.let { finishReason = it }
                 if (event.promptTokens > 0) promptTokens = event.promptTokens
@@ -648,13 +755,14 @@ fun drainSse(
                     }
                     return SseStreamResult(
                         promptTokens, completionTokens, finishReason, cachedTokens,
-                        endedBy = "finish_reason"
+                        endedBy = "finish_reason", toolCalls = toolCalls
                     )
                 }
             }
 
             SseEvent.Done -> return SseStreamResult(
-                promptTokens, completionTokens, finishReason, cachedTokens, endedBy = "done"
+                promptTokens, completionTokens, finishReason, cachedTokens,
+                endedBy = "done", toolCalls = toolCalls
             )
 
             // 坏帧不中断：可能只是某一行被代理改坏了。累计数量交给上层判断。

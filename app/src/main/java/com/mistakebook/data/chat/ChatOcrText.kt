@@ -20,7 +20,7 @@ object ChatOcrText {
      * 模型需要知道这段文字**是图片的内容**，而不是用户自己打的话——
      * 否则它会以为用户在描述图片（「这道题如图所示」），答非所问。
      */
-    const val IMAGE_TEXT_HEADER = "【图片中的文字内容（由 MinerU 自动识别）】"
+    const val IMAGE_TEXT_HEADER = "【图片中的文字内容（由识图工具提取）】"
 
     /** 单张图片最多注入多少字符。 */
     const val MAX_IMAGE_TEXT_CHARS = 8_000

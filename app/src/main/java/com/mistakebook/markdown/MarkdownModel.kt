@@ -1,5 +1,7 @@
 package com.mistakebook.markdown
 
+import androidx.collection.LruCache
+
 /**
  * 轻量 Markdown / MinerU 输出解析：标题、段落、列表、引用、分割线、代码块、
  * HTML 表格与 Markdown 管道表格、图片、行内与独立公式。
@@ -14,7 +16,16 @@ object MarkdownParser {
         data class Table(val rows: List<List<String>>) : Block
         data class Image(val path: String, val alt: String) : Block
         data class Math(val latex: String, val display: Boolean, val complete: Boolean = true) : Block
-        data class Code(val text: String) : Block
+        /** 围栏代码块的**语言标记**（```svg / ```python / 无标记都是空串）。 */
+        data class Code(val text: String, val language: String = "") : Block
+
+        /**
+         * ```svg 围栏：不走等宽文本渲染，走 [com.mistakebook.ui.common.SvgBlock]。
+         *
+         * [source] 已经是**清洗过**的 SVG（去脚本 / 外链等），
+         * 渲染层可以放心交给解码器。
+         */
+        data class Svg(val source: String) : Block
         data object Rule : Block
     }
 
@@ -37,6 +48,35 @@ object MarkdownParser {
         }
         return blocks
     }
+
+    /**
+     * 带缓存的 [parse]。
+     *
+     * ## 解决什么
+     *
+     * LazyColumn 滚动时，新进入视口的 item 会在主线程跑整段解析
+     * （逐行正则 + 块结构），离屏 item 被销毁后滑回来还要再解一遍——
+     * 用户看到的现象就是「对话之间滑动时列表抽风、一闪一闪、滑不下去」。
+     *
+     * 解析是**纯函数**（同输入同输出、无副作用），结果 Block 也只读，
+     * 所以缓存整个列表是安全的。流式期间每条新文本 miss 一次、付一次解析，
+     * 历史消息滑出再滑回则直接命中，主线程不再反复被解析堵住。
+     *
+     * 上限 [PARSE_CACHE_ENTRIES] 条：一个会话页可见 + 邻近的消息远小于此，
+     * 流式增长由 LRU 自然淘汰最早的半成品。
+     */
+    fun parseCached(input: String): List<Block> {
+        if (input.isBlank()) return emptyList()
+        parseCache[input]?.let { return it }
+        val parsed = parse(input)
+        parseCache.put(input, parsed)
+        return parsed
+    }
+
+    /** 解析缓存条数。见 [parseCached]。 */
+    private const val PARSE_CACHE_ENTRIES = 128
+
+    private val parseCache = LruCache<String, List<Block>>(PARSE_CACHE_ENTRIES)
 
     private fun splitByTables(input: String): List<String> {
         val result = mutableListOf<String>()
@@ -76,6 +116,8 @@ object MarkdownParser {
         val paragraph = StringBuilder()
         var inCode = false
         val code = StringBuilder()
+        /** 当前围栏的语言标记（```svg → "svg"）；无标记为空串。 */
+        var codeLanguage = ""
 
         // 跨行 `$$` 公式的状态。
         //
@@ -88,9 +130,35 @@ object MarkdownParser {
         // 而 LLM 输出 `$$\n\begin{aligned}...\n\end{aligned}\n$$` 是常规写法，必然踩中。
         var displayMath: StringBuilder? = null
 
-        fun flushParagraph() {
+        // 跨行 `\[ ... \]` 的状态。
+        //
+        // 早先只支持「`\[` 与 `\]` 同一行」；多行 display 公式（模型写
+        // `\[\n\begin{aligned}...\n\end{aligned}\n\]` 是常规写法）会掉进
+        // else 分支按正文走，被拆成好几个 paragraph——块级公式的
+        // `\left{`、`&` 于是漏进普通文本，整块渲染不出来。
+        var bracketMath: StringBuilder? = null
+
+        /**
+         * 裸 LaTeX 救援（v0.0.51 用例 B1）：整段输出 LaTeX 却没有 `$$` 包裹。
+         *
+         * 判定交给 [com.mistakebook.pipeline.LatexSanitizer.rescueUndelimited]，
+         * 只在「独立成段」的文本上调用——段内混有正文的由启发式的
+         * 中文/标点反例拦下。救援失败（null）按原样走普通段落。
+         * 所有 flush 点统一走这里，消息中部的裸公式段也能救到。
+         */
+        fun flushParagraphWithRescue() {
             if (paragraph.isNotBlank()) {
-                blocks += paragraphBlock(paragraph.toString().trim())
+                val raw = paragraph.toString().trim()
+                val rescued = runCatching {
+                    com.mistakebook.pipeline.LatexSanitizer.rescueUndelimited(raw)
+                }.getOrNull()
+                if (rescued != null) {
+                    val latex = rescued.trim().removePrefix("$$").removeSuffix("$$").trim()
+                    blocks += Block.Math(latex, true)
+                    paragraph.clear()
+                    return
+                }
+                blocks += paragraphBlock(raw)
             }
             paragraph.clear()
         }
@@ -98,8 +166,24 @@ object MarkdownParser {
         lines.forEach { rawLine ->
             val line = rawLine.trimEnd()
             val openMath = displayMath
+            val openBracket = bracketMath
 
             when {
+                // 正在 `\[ ... \]` 公式块里：找闭合的 `\]`
+                openBracket != null -> {
+                    val closeAt = line.indexOf("\\]")
+                    if (closeAt < 0) {
+                        openBracket.appendLine(line)
+                    } else {
+                        openBracket.append(line.substring(0, closeAt))
+                        val latex = openBracket.toString().trim()
+                        if (latex.isNotEmpty()) blocks += Block.Math(latex, true)
+                        bracketMath = null
+                        val rest = line.substring(closeAt + 2)
+                        if (rest.isNotBlank()) paragraph.append(rest)
+                    }
+                }
+
                 // 正在公式块里：先找闭合的 `$$`，找到就把剩下半行也收进来
                 openMath != null -> {
                     val closeAt = line.indexOf("$$")
@@ -118,27 +202,44 @@ object MarkdownParser {
 
                 line.trimStart().startsWith("```") -> {
                     if (inCode) {
-                        blocks += Block.Code(code.toString().trimEnd())
+                        // 闭合：按语言分流。svg 走图形块，其余（含无标记）
+                        // 走等宽代码块——语言标记一并带出去，渲染层可据此
+                        // 决定要不要显示语言标签。
+                        val text = code.toString().trimEnd()
+                        blocks += if (codeLanguage.equals("svg", ignoreCase = true)) {
+                            Block.Svg(sanitizeSvg(text))
+                        } else {
+                            Block.Code(text, codeLanguage)
+                        }
                         code.clear()
+                        codeLanguage = ""
                         inCode = false
                     } else {
-                        flushParagraph()
+                        flushParagraphWithRescue()
+                        // 开围栏那行的剩余内容就是语言标记：
+                        // ```svg / ```python / ```（空）
+                        codeLanguage = line.trimStart()
+                            .removePrefix("```")
+                            .trim()
+                            // 有些模型会写成 ```svg title="xx"，只取第一个词
+                            .substringBefore(' ')
+                            .substringBefore('\t')
                         inCode = true
                     }
                 }
 
                 inCode -> code.appendLine(line)
 
-                line.isBlank() -> flushParagraph()
+                line.isBlank() -> flushParagraphWithRescue()
 
                 // 独占一行的 `$$`：进入公式块，攒到下一个独占的 `$$` 为止
                 line.trim() == "\$\$" -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     displayMath = StringBuilder()
                 }
 
                 line.trimStart().startsWith("$$") -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val closeAt = line.indexOf("$$", 2)
                     if (closeAt > 2) {
                         val latex = line.trim().removePrefix("$$").substring(0, closeAt - 2).trim()
@@ -154,41 +255,46 @@ object MarkdownParser {
                 // 模型（尤其 DeepSeek/o 系）输出独立公式时发 `\[..\]` 是常态，
                 // 只认 `$$` 会让整块公式以源码形式躺在段落里。
                 line.trimStart().startsWith("\\[") -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val closeAt = line.indexOf("\\]", 2)
                     if (closeAt > 2) {
                         val latex = line.trim().substring(2, closeAt).trim()
                         if (latex.isNotEmpty()) blocks += Block.Math(latex, true)
                         val rest = line.substring(closeAt + 2).trim()
                         if (rest.isNotBlank()) paragraph.append(rest)
+                    } else {
+                        // 未闭合：进入跨行状态机，攒到下一个 `\]` 为止。
+                        // 多行 display 公式（`\[\n\begin{aligned}…\n\]`）是常规写法，
+                        // 早先这里「落进 else 按正文走」，结果整块公式被拆散成
+                        // 若干 paragraph，块级结构（\left{、&）漏进普通文本，
+                        // 整块渲染不出来。
+                        bracketMath = StringBuilder(line.trim().removePrefix("\\["))
                     }
-                    // 未闭合：不建状态机，落进 else 按正文走——parseInline 里
-                    // 同样认 `\[`，闭合后自然升级成公式；流式藏尾见 ChatStreaming。
                 }
 
                 line.matches(RULE_REGEX) -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     blocks += Block.Rule
                 }
 
                 line.trimStart().startsWith("#") -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val level = line.takeWhile { it == '#' }.length.coerceIn(1, 6)
                     blocks += Block.Heading(level, line.trimStart().drop(level).trim())
                 }
 
                 line.trimStart().startsWith(">") -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     blocks += Block.Quote(line.trimStart().removePrefix(">").trim())
                 }
 
                 isPipeTableRow(line) -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     parsePipeTable(lines, line, blocks)
                 }
 
                 isImageLine(line) -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val match = IMAGE_LINE_REGEX.find(line)
                     if (match != null) {
                         blocks += Block.Image(match.groupValues[2].trim(), match.groupValues[1])
@@ -196,7 +302,7 @@ object MarkdownParser {
                 }
 
                 isListItem(line) -> {
-                    flushParagraph()
+                    flushParagraphWithRescue()
                     val marker = line.trimStart().takeWhile { !it.isWhitespace() }
                     blocks += Block.ListItem(
                         marker = marker,
@@ -210,7 +316,7 @@ object MarkdownParser {
                 }
             }
         }
-        flushParagraph()
+        flushParagraphWithRescue()
         // 没闭合的 `$$`：照样产出块。
         //
         // 流式输出时正文尾端正停在 `$$x = ` 这种半截状态，之后每个新 chunk
@@ -221,7 +327,20 @@ object MarkdownParser {
             val latex = open.toString().trim()
             if (latex.isNotEmpty()) blocks += Block.Math(latex, display = true, complete = false)
         }
-        if (inCode && code.isNotBlank()) blocks += Block.Code(code.toString().trimEnd())
+        // 同理：未闭合的 `\[ …`（流式尾端 / 模型漏写闭合符）。
+        bracketMath?.let { open ->
+            val latex = open.toString().trim()
+            if (latex.isNotEmpty()) blocks += Block.Math(latex, display = true, complete = false)
+        }
+        // 同上：流式渲染期间围栏可能还没闭合，有内容就先渲染。
+        if (inCode && code.isNotBlank()) {
+            val text = code.toString().trimEnd()
+            blocks += if (codeLanguage.equals("svg", ignoreCase = true)) {
+                Block.Svg(sanitizeSvg(text))
+            } else {
+                Block.Code(text, codeLanguage)
+            }
+        }
     }
 
     private fun paragraphBlock(text: String): Block {
