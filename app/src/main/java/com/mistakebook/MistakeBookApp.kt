@@ -70,6 +70,9 @@ class MistakeBookApp : Application() {
         @Volatile
         private var instance: MistakeBookApp? = null
 
+        /** 进程内单例访问（小组件刷新等无 Context 场景用）；未初始化返回 null。 */
+        fun instanceOrNull(): MistakeBookApp? = instance
+
         fun from(context: Context): MistakeBookApp =
             instance ?: (context.applicationContext as MistakeBookApp)
     }

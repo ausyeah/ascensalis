@@ -334,6 +334,8 @@ class PomodoroViewModel(
             if (result != null) {
                 refreshStats()
                 message.value = result
+                // T9 事件驱动：完成番茄后主动刷新桌面小组件
+                com.mistakebook.widget.TodayWidgetProvider.refreshAll(getApplication())
             }
             syncTimerUi()
         }

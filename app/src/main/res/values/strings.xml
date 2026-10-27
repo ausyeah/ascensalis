@@ -729,4 +729,5 @@
     <string name="library_bad_name">文件名无效：只能用单一文件名，扩展名须为 .md / .txt / .json / .csv，且不与现有文件重名</string>
     <string name="library_truncated">内容超过 50KB，已截断显示（保存会丢失被截断部分）</string>
     <string name="settings_library_section">资料库</string>    <string name="chat_attach_library">@资料库</string>
+    <string name="widget_no_exam">暂无考试</string>
 </resources>

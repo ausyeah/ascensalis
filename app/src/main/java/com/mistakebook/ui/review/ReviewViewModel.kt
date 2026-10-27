@@ -93,6 +93,11 @@ class ReviewViewModel(private val container: AppContainer) : ViewModel() {
         val question = state.queue[state.index]
         viewModelScope.launch {
             repository.applyReviewResult(question.id, result)
+            // T9 事件驱动：复习完成后刷新桌面小组件的今日待复习数
+            // （容器不持 Context，App 单例在进程内必然已初始化）
+            (com.mistakebook.MistakeBookApp.instanceOrNull())?.let {
+                com.mistakebook.widget.TodayWidgetProvider.refreshAll(it)
+            }
             _uiState.update {
                 val correct = it.correctCount + if (result == ReviewResult.CORRECT) 1 else 0
                 val vague = it.vagueCount + if (result == ReviewResult.VAGUE) 1 else 0
