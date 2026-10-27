@@ -19,7 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -128,7 +128,7 @@ fun LibraryScreen(
                     onClick = { importLauncher.launch(arrayOf("*/*")) },
                     modifier = Modifier.padding(bottom = 10.dp)
                 ) {
-                    Icon(Icons.Default.OpenInNew, contentDescription = stringResource(R.string.library_import))
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.library_import))
                 }
                 FloatingActionButton(onClick = { showNewDialog = true }) {
                     Icon(Icons.Default.Add, contentDescription = stringResource(R.string.library_new))

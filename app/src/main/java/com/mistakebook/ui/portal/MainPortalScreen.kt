@@ -70,7 +70,11 @@ fun MainPortalScreen(
     onOpenNotebooks: () -> Unit = {},
     onOpenQuestion: (Long) -> Unit,
     onOpenChatList: () -> Unit = {},
-    onStartReview: () -> Unit = {}
+    onStartReview: () -> Unit = {},
+    /** 资料库管理页（T6）：门户设置 Tab 的内嵌设置页经此进子页面。 */
+    onOpenLibrary: () -> Unit = {},
+    /** 成就墙（T10）：同上。 */
+    onOpenBadgeWall: () -> Unit = {}
 ) {
     val pagerState = rememberPagerState(initialPage = 0) { 4 }
     val scope = rememberCoroutineScope()
@@ -163,10 +167,14 @@ fun MainPortalScreen(
                 3 -> {
                     // 内嵌设置：不显示自己的顶栏与返回键，门户 Tab 行即它的导航。
                     // onBack 不会以任何路径被调用（没有返回箭头可点），传空实现。
+                    // 资料库/成就墙是子页面：必须接 NavHost 的路由回调，
+                    // 否则内嵌页里这两个入口点了没反应（v0.0.52 修复）。
                     SettingsScreen(
                         container = container,
                         onBack = {},
-                        embedded = true
+                        embedded = true,
+                        onOpenLibrary = onOpenLibrary,
+                        onOpenBadgeWall = onOpenBadgeWall
                     )
                 }
             }
