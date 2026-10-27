@@ -1,6 +1,7 @@
 package com.mistakebook.math
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -147,5 +148,61 @@ class MathWrapTest {
         val once = MathWrap.splitForDisplay(latex, 30)
         val twice = once.flatMap { MathWrap.splitForDisplay(it, 30) }
         assertEquals(once, twice)
+    }
+
+    // ── v0.0.53：配对定界符（`\left` / `\right`）被拆散导致整块公式退化 ──
+
+    @Test
+    fun eachSegmentHasBalancedLeftRight() {
+        // 真机截图 1 原文：集合定义 + 不等式 + 分式
+        val latex = "\\left\\{(r,\\theta) \\mid 0 \\leq r \\leq \\sec\\theta, 0 \\leq \\theta \\leq \\dfrac{\\pi}{4}\\right\\}"
+        val rows = MathWrap.splitForDisplay(latex, 30)
+        assertTrue("应拆成多行", rows.size > 1)
+        rows.forEach {
+            val left = it.split("\\left").size - 1
+            val right = it.split("\\right").size - 1
+            assertEquals("片段的 `\\left` / `\\right` 必须成对: $it", left, right)
+        }
+    }
+
+    @Test
+    fun eachSegmentHasBalancedLeftRightForPolarIntegral() {
+        // 真机截图 3 原文：极坐标面积分
+        val latex = "\\frac{\\cos\\theta\\sin(\\pi r)}{\\cos\\theta+\\sin\\theta}\\cdot\\mathrm{d}r\\, , \\mathrm{d}r\\mathrm{d}\\theta ="
+        val rows = MathWrap.splitForDisplay(latex, 30)
+        rows.forEach {
+            val left = it.split("\\left").size - 1
+            val right = it.split("\\right").size - 1
+            assertEquals("片段的 `\\left` / `\\right` 必须成对: $it", left, right)
+        }
+    }
+
+    @Test
+    fun unmatchedLeftIsDemotedToLiteral() {
+        // 落单的 `\left\{` 降级成 `\{`：括号还在，但不再要求配对
+        val out = MathWrap.balanceDelimiters("\\left\\{x \\leq 1")
+        assertTrue("应保留左括号字面量: $out", out.contains("\\{"))
+        assertFalse("不应再残留 `\\left`: $out", out.contains("\\left"))
+    }
+
+    @Test
+    fun unmatchedRightIsDemotedToLiteral() {
+        val out = MathWrap.balanceDelimiters("\\dfrac{\\pi}{4}\\right\\}")
+        assertTrue("应保留右括号字面量: $out", out.contains("\\}"))
+        assertFalse("不应再残留 `\\right`: $out", out.contains("\\right"))
+    }
+
+    @Test
+    fun matchedDelimitersAreLeftUntouched() {
+        val latex = "\\left( \\frac{a}{b} \\right)"
+        assertEquals(latex, MathWrap.balanceDelimiters(latex))
+    }
+
+    @Test
+    fun equalCountsButMisalignedIsStillFixed() {
+        // 左右各出现一次，但第二个 `\right` 落单——只比数量会漏掉
+        val out = MathWrap.balanceDelimiters("\\left\\{ a \\right\\} b \\right\\}")
+        assertEquals(1, out.split("\\right").size - 1)
+        assertEquals(1, out.split("\\left").size - 1)
     }
 }

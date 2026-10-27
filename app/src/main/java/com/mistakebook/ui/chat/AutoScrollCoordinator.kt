@@ -8,8 +8,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
@@ -17,25 +19,54 @@ import kotlinx.coroutines.flow.first
 
 /** Scroll ownership for a reverse-layout chat list. */
 class AutoScrollCoordinator {
+    /**
+     * 是否处于「触底跟随」状态。
+     *
+     * 语义：**只有贴底时才跟随**。用户上滑离开底部 → 立即变成 false；
+     * 回到底部 → 恢复 true。
+     */
     var following by mutableStateOf(true)
         private set
 
+    /** 是否显示「回到底部」悬浮按钮。 */
     var showJumpButton by mutableStateOf(false)
         internal set
 
+    /**
+     * 本 App 自己发起的滚动（回底动画）进行中。
+     *
+     * 这段时间里位置驱动那一路**不得**把状态改成「不跟随」——
+     * 否则回底动画刚起步就被自己的中间帧打断，表现为「点按钮也回不去」。
+     */
+    var programmaticScroll by mutableStateOf(false)
+        internal set
+
+    /** 用户手指接触屏幕（或已滚离底部）：交出滚动权。 */
     fun pause() {
         following = false
         showJumpButton = true
     }
 
+    /** 回到触底：恢复跟随。 */
     fun resume() {
         following = true
         showJumpButton = false
     }
 
+    /**
+     * 点「回到底部」：滑到底部并恢复跟随。
+     *
+     * 动画期间置 [programmaticScroll]，避免位置驱动把回底动画误判成
+     * 「用户又滚走了」。
+     */
     suspend fun jumpToBottom(state: LazyListState) {
         if (state.layoutInfo.totalItemsCount > 0) {
-            state.animateScrollToItem(0)
+            programmaticScroll = true
+            try {
+                state.animateScrollToItem(0)
+            } finally {
+                programmaticScroll = false
+            }
         }
         resume()
     }
@@ -110,23 +141,34 @@ internal class BottomFollowStateMachine(
 /**
  * 反向列表（index 0 = 最新一条，贴底）的滚动跟随。
  *
- * ## 谁在滚动
+ * ## 用户要求的行为契约（v0.0.53）
  *
- * 「是否跟随」由**几何位置 + 迟滞状态机**驱动，不依赖松手时机：
- * - 用户滚离底部（锚点序号变大 / 同一锚点被切得更多）→ 立即暂停；
- * - 用户回到底部（|gap| ≤ 2dp 连续两帧）→ 才恢复跟随。
+ * 1. **触底就跟随**：贴在底部时，新消息/新内容自动保持在底边；
+ * 2. **手接触就停止跟随**：手指一按上去，立刻交出滚动权；
+ * 3. **点向下按钮就滑到触底然后跟随**：按钮 → 动画回底 → 恢复跟随；
+ * 4. **一旦不触底就不跟随**：离开底部后，任何新内容都不再把列表拽回去。
  *
- * `isDragged`（按住）只是**提前**暂停的输入：手一按就停，响应更快；
- * 即使拖动手势被气泡内子元素（公式图、图片）消费导致 `isDragged` 不翻，
- * 位置驱动那一路也会在离开底部时立刻接手暂停。
+ * ## 为什么 v0.0.52 还会「一跳一跳」
  *
- * **布局瞬态不暂停**：新消息插入的瞬间，最新一条还在视口下方、不在可见集里
- * （gap = null）。若据此暂停，跟随会被插入动作本身掐断——发送新消息后不再
- * 自动回底。所以位置驱动那一路只在「用户正在滚动且正在滚离」时暂停；
- * 自己发起的回底动画（锚点序号递减）不算滚离。
+ * 老实现有两条互相打架的滚动路径：
+ * - 「暂停期间的内容增长补偿」：每帧比较锚点 item 顶边的 Y 值，
+ *   不等就 `scrollToItem` 把它拨回去；
+ * - 「跟随时的回底动画」：`animateScrollToItem(0)`。
  *
- * 暂停期间新内容增长不得掀动用户视口：按「锚点 item 顶边」补偿滚动位置
- * （见下方 LaunchedEffect，保持首可见项稳定，泛化到任意滚动位置）。
+ * 前者的判据是**精确浮点不等**（`currentTop != anchorTopY`），而它拨回去
+ * 的量又是用 `scrollToItem` 的绝对偏移算的——两者的坐标基准并不严格一致，
+ * 于是每一帧都在「拨过去 → 差一点点 → 再拨」，用户看到的就是列表在
+ * **不触底时也一跳一跳**（v0.0.52 用户反馈原话）。
+ *
+ * 现在把这件事彻底简化：
+ * - **跟随与否只看几何**（贴底判定），不再有「补偿滚动」这条路径；
+ * - 跟随的回底只在**新消息到达**这一个时刻发生一次（key 变化驱动），
+ *   流式增长期间不重复重启动画；
+ * - 「是否跟随」与「要不要回底」解耦：回底与否用**紧贴底的窄带**判定，
+ *   用户哪怕上滑 3px 也不算贴底，不会被莫名拽回底部。
+ *
+ * @param state 反向布局的列表状态；
+ * @param latestItemKey 最新一条消息的 key，变化 = 有新消息到达。
  */
 @Composable
 fun rememberAutoScrollEffect(
@@ -135,109 +177,64 @@ fun rememberAutoScrollEffect(
 ): AutoScrollCoordinator {
     val coordinator = remember { AutoScrollCoordinator() }
     val isDragged by state.interactionSource.collectIsDraggedAsState()
+    // collect{} 里读的是**组合期捕获**的值，会一直是旧的。
+    // 手指状态必须用 rememberUpdatedState 才能拿到实时值。
+    val draggedNow by rememberUpdatedState(isDragged)
     val leaveTolerancePx = with(LocalDensity.current) { LEAVE_TOLERANCE_DP.roundToPx() }
     val resumeTolerancePx = with(LocalDensity.current) { RESUME_TOLERANCE_DP.roundToPx() }
     val policy = remember(leaveTolerancePx, resumeTolerancePx) {
         BottomFollowStateMachine(leaveTolerancePx, resumeTolerancePx)
     }
 
-    // 手指按住立即交出滚动权（响应快）；松手后的恢复交给下面的位置驱动。
+    // ① 手指接触屏幕：立刻交出滚动权（比等位置变化更快，用户「手一碰就知道
+    //    列表不会自己跑了」）。
     LaunchedEffect(isDragged) {
         if (isDragged) coordinator.pause()
     }
 
-    // 位置驱动 + 迟滞：回到底部连续两帧才恢复；只有用户主动滚离才暂停。
+    // ② 位置驱动：贴底 → 跟随；离开底部 → 停止跟随并显示回底按钮。
+    //
+    //    手指还按着的时候**不判**位置：用户正在拖拽，位置每帧都在变，
+    //    此刻判出来的「在不在底部」没有意义。
     LaunchedEffect(state, policy) {
-        var lastAnchorIndex = -1
-        var lastAnchorOffset = 0
-        snapshotFlow {
-            val gap = newestGapOf(state.layoutInfo)
-            Triple(gap, policy.onGap(gap), state.isScrollInProgress)
-        }.collect { (_, atBottom, scrolling) ->
-            val anchorIndex = state.firstVisibleItemIndex
-            val anchorOffset = state.firstVisibleItemScrollOffset
-            // 「正在滚离底部」：锚点序号变大（翻过更新的消息），或同一个锚点
-            // 被切掉更多（state offset 变大 = item 底边越低出内容区底边）。
-            // 回底动画与用户往回滚都是序号递减/offset 递减，不算滚离。
-            val movingAway = anchorIndex > lastAnchorIndex ||
-                (anchorIndex == lastAnchorIndex && anchorOffset > lastAnchorOffset)
-            lastAnchorIndex = anchorIndex
-            lastAnchorOffset = anchorOffset
-            when {
-                atBottom -> coordinator.resume()
-                scrolling && movingAway -> coordinator.pause()
+        snapshotFlow { newestGapOf(state.layoutInfo) }
+            .collect { gap ->
+                if (draggedNow || coordinator.programmaticScroll) return@collect
+                if (gap == null) {
+                    // index 0 不在可见集。两种可能：
+                    // - 「新消息刚插入、还没进视口」的瞬态 → 底部仍贴着，不动；
+                    // - 用户翻到了历史 → 不在底部，暂停跟随。
+                    if (isFlushAtBottom(state.layoutInfo)) return@collect
+                    policy.onGap(null)
+                    coordinator.pause()
+                    return@collect
+                }
+                if (policy.onGap(gap)) coordinator.resume() else coordinator.pause()
             }
-        }
     }
 
-    // 暂停期间的内容增长补偿（保持锚点 item 的顶边屏幕位置不动）。
+    // ③ 新消息到达 → 只有「本来就在底部」才回底。
     //
-    // 反向布局下，底边的新内容长高（流式气泡、新消息插入后的首条）会把锚点
-    // 连同它上面的内容一起往上顶——体感同样是「还在跟随」。这里以「最底部
-    // 可见 item 的顶边 Y」为锚：跟随时/滚动中持续重设基准；暂停且静止时
-    // 若顶边被顶动了，就 scrollToItem 把它拨回原位。
+    //    判据用**紧贴底的窄带**（[isFlushAtBottom]）：
+    // - 贴底时：最底部可见 item 的 offset ≈ 0 → 回底；
+    // - 新消息插入的瞬态：老的最底部可见 item 仍贴着视口底边 → 回底；
+    // - 用户上滑过：最底部可见 item 被切掉一截（offset 明显为负）→ 不回底。
     //
-    // 锚点按 key 找（不按 index）：新消息插入会让 index 整体前移，key 稳定。
-    // 补偿量换算：scrollToItem 的第二参数量 = -锚点 item.offset，
-    // 而 item.offset = viewportEnd - item 顶边Y - item.size，代入即得。
-    LaunchedEffect(state, coordinator) {
-        var anchorKey: Any? = null
-        var anchorTopY = 0f
-        snapshotFlow {
-            val info = state.layoutInfo
-            val bottomMost = info.visibleItemsInfo.firstOrNull()
-            Triple(coordinator.following, state.isScrollInProgress, info to bottomMost)
-        }.collect { (following, scrolling, pair) ->
-            val (info, bottomMost) = pair
-            val topOf = { item: androidx.compose.foundation.lazy.LazyListItemInfo ->
-                info.viewportEndOffset - item.offset - item.size
-            }
-            // 跟随时/滚动中：以当前位置为新的锚点基准（key 非空，无需判空）
-            if (following || scrolling || bottomMost == null) {
-                anchorKey = bottomMost?.key
-                anchorTopY = bottomMost?.let { topOf(it).toFloat() } ?: 0f
-                return@collect
-            }
-            if (anchorKey == null) {
-                anchorKey = bottomMost.key
-                anchorTopY = topOf(bottomMost).toFloat()
-                return@collect
-            }
-            val anchored = info.visibleItemsInfo.firstOrNull { it.key == anchorKey }
-            if (anchored == null) {
-                // 锚点被滚出视口：放弃补偿（用户在自由阅读别处）
-                anchorKey = null
-                return@collect
-            }
-            val currentTop = topOf(anchored)
-            if (currentTop.toFloat() != anchorTopY) {
-                val target = (anchorTopY + anchored.size - info.viewportEndOffset).roundToInt()
-                state.scrollToItem(anchored.index, target)
-            }
-        }
-    }
-
-    // 只在「最新一条的 key 变了」或「跟随状态翻转」时滚。流式期间 key 不变：
-    // 气泡长高由反向布局自己锚在底边，不需要反复重启滚动动画。
-    LaunchedEffect(latestItemKey, coordinator.following) {
-        if (coordinator.following && latestItemKey != null) {
-            snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }
-            // 双保险（v0.0.35，v0.0.52 按实测语义重写）：动画启动**前**再验
-            // 一次仍在底部。反向布局语义（Paparazzi 实测，见 [newestGapOf]）：
-            // item.offset = 内容区底边 - item 底边，贴底 = 0。所以：
-            // - 最新一条可见且贴底 → 在底部；
-            // - 最新一条还在视口下方（新消息插入瞬间）时，最底部可见 item 贴底
-            //   （offset ≈ 0）同样说明插入前用户就在底部，应该跟随。
-            // 用户滚离后最底部可见 item 的 offset 是负的（被切），不会误判。
-            val info = state.layoutInfo
-            val newest = info.visibleItemsInfo.firstOrNull { it.index == 0 }
-            val bottomMost = info.visibleItemsInfo.firstOrNull()
-            val band = -resumeTolerancePx..leaveTolerancePx
-            val atBottomNow = newest != null && newest.offset in band
-            val flushAtBottom = bottomMost != null && bottomMost.offset in band
-            if (coordinator.following && (atBottomNow || flushAtBottom)) {
-                state.animateScrollToItem(0)
-            }
+    //    只在 key 变化时做**一次**，流式期间 key 不变 → 不重启动画，
+    //    也就不会有「动画跟内容增长打架」的抖动。
+    LaunchedEffect(latestItemKey) {
+        if (latestItemKey == null) return@LaunchedEffect
+        snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }
+        // 等一帧：确保新消息已经进布局（index 0 已是最新那条），
+        // 否则 animateScrollToItem(0) 会滚到「上一条」上。
+        withFrameNanos { }
+        if (draggedNow || coordinator.programmaticScroll) return@LaunchedEffect
+        if (!isFlushAtBottom(state.layoutInfo)) return@LaunchedEffect
+        coordinator.programmaticScroll = true
+        try {
+            state.animateScrollToItem(0)
+        } finally {
+            coordinator.programmaticScroll = false
         }
     }
 
@@ -265,6 +262,33 @@ internal fun newestGapOf(info: LazyListLayoutInfo): Int? {
     val newest = info.visibleItemsInfo.firstOrNull { it.index == 0 } ?: return null
     return newest.offset
 }
+
+/**
+ * 最底部可见 item 是否仍**贴在视口底边**。
+ *
+ * ## 为什么要单独判这一条
+ *
+ * 反向列表插入一条新消息时，列表内容整体下移：
+ * 新消息落在 index 0（视口下方），原来的最底部可见 item 仍然紧贴视口底边，
+ * 但 `newestGapOf` 此时返回 null（index 0 还没进视口）。
+ *
+ * 用它区分两种「index 0 不在视口」：
+ * - 最底部可见 item 仍贴底 → 这是**插入瞬态**，应当继续跟随；
+ * - 最底部可见 item 被切掉一截 → 用户已经离开底部，不该再跟随。
+ *
+ * 带宽取 2px（不是 dp）：贴底时 offset 精确为 0；用户哪怕上滑 3px
+ * 也会让 offset 明显变负 → 判为「不在底部」，不会被莫名拽回底部。
+ */
+internal fun isFlushAtBottom(
+    info: LazyListLayoutInfo,
+    tolerancePx: Int = FLUSH_TOLERANCE_PX
+): Boolean {
+    val bottomMost = info.visibleItemsInfo.firstOrNull() ?: return false
+    return bottomMost.offset in -tolerancePx..0
+}
+
+/** 贴底判定的紧带宽（px）：极窄，用户轻微上滑即判「不在底部」。 */
+private const val FLUSH_TOLERANCE_PX = 2
 
 /** 上滑离开底部超过这个距离立即判「不在底部」（2–4dp 取中，响应优先）。 */
 private val LEAVE_TOLERANCE_DP = 3.dp

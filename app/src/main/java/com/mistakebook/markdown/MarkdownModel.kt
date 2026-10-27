@@ -163,10 +163,19 @@ object MarkdownParser {
             paragraph.clear()
         }
 
-        lines.forEach { rawLine ->
+        // 用**索引循环**而不是 forEach：管道表格必须能「吃掉」自己那几行，
+        // 否则外层循环会把表格的每一行都重新当一次表头再解析一遍，
+        // 同一张表被输出 N 次（用户截图：表格内容连续重复 3 次）。
+        var lineIndex = 0
+        while (lineIndex < lines.size) {
+            val rawLine = lines[lineIndex]
             val line = rawLine.trimEnd()
             val openMath = displayMath
             val openBracket = bracketMath
+
+            // 本轮结束后要接着处理的行号。管道表格会把它**吃掉**的那些行
+            // 一并返回（见 [parsePipeTable]），其余分支都是一行一行推进。
+            var nextLineIndex = lineIndex + 1
 
             when {
                 // 正在 `\[ ... \]` 公式块里：找闭合的 `\]`
@@ -290,7 +299,9 @@ object MarkdownParser {
 
                 isPipeTableRow(line) -> {
                     flushParagraphWithRescue()
-                    parsePipeTable(lines, line, blocks)
+                    // 表格必须**吃掉**自己的所有行：否则外层循环会把表格的
+                    // 每一行都重新当一次表头再解析一遍，同一张表被输出 N 次。
+                    nextLineIndex = parsePipeTable(lines, lineIndex, blocks)
                 }
 
                 isImageLine(line) -> {
@@ -315,6 +326,7 @@ object MarkdownParser {
                     paragraph.append(line.trim())
                 }
             }
+            lineIndex = nextLineIndex
         }
         flushParagraphWithRescue()
         // 没闭合的 `$$`：照样产出块。
@@ -384,17 +396,68 @@ object MarkdownParser {
         line.trimStart().startsWith("|") && line.trimEnd().endsWith("|") &&
             line.count { it == '|' } >= 2
 
-    private fun parsePipeTable(allLines: List<String>, header: String, blocks: MutableList<Block>) {
+    /**
+     * 解析一张管道表格，**并返回表格结束后的下一行下标**。
+     *
+     * ## 为什么必须返回下标（而不是就地解析完就算）
+     *
+     * 旧实现只接收表头行、就地往下吞行，**不告诉调用方吞到哪儿了**。
+     * 调用方（[parsePlain]）当时用的是 `lines.forEach`，会把**每一行**
+     * 都独立喂进来——于是表格的第 2 行、第 3 行也各自被当成「表头」
+     * 再解析一次，同一张表被输出 3 次、4 次。
+     *
+     * 用户截图里的现象正是这个：一段 Markdown 表格的内容在气泡里
+     * 连续出现 3 遍。根因不在渲染层，在解析层。
+     *
+     * 现在改成索引循环 + 返回下一行下标，表格整体只产出**一个**块。
+     *
+     * @param startIndex 表头所在行下标。
+     * @return 表格最后一行之后的行下标（= 下一个待处理行）。
+     */
+    /**
+     * 是否是 Markdown 表格的**分隔行**（`| --- | :---: |`）。
+     *
+     * 判据：整行由 `|`、`-`、`:`、空白组成，且至少有一个 `-`，
+     * 且每一格都不含除 `-`/`:` 以外的字符。
+     */
+    private fun isTableSeparatorRow(line: String): Boolean {
+        val trimmed = line.trim()
+        if (!trimmed.contains('-')) return false
+        val cells = trimmed.trim('|').split('|')
+        if (cells.isEmpty()) return false
+        return cells.all { cell ->
+            val c = cell.trim()
+            c.isNotEmpty() && c.all { it == '-' || it == ':' }
+        }
+    }
+
+    private fun parsePipeTable(
+        allLines: List<String>,
+        startIndex: Int,
+        blocks: MutableList<Block>
+    ): Int {
         val rows = mutableListOf<List<String>>()
-        val headerCells = header.trim().trim('|').split('|').map { it.trim() }
+        val headerCells = allLines[startIndex].trim().trim('|').split('|').map { it.trim() }
         if (headerCells.any { it.isNotBlank() }) rows += headerCells
-        val index = allLines.indexOf(header)
-        for (i in (index + 1) until allLines.size) {
+        var i = startIndex + 1
+        while (i < allLines.size) {
             val line = allLines[i]
             if (!isPipeTableRow(line)) break
-            if (line.trim().trim('|').all { it == '-' || it == ':' || it == ' ' }) continue
+            // 分隔行（`| --- | --- |`）不产出内容行。
+            //
+            // 注意判定方式：单元格内容是「若干个 `-`（可带 `:` 对齐标记）」，
+            // 不是单个字符 `-`——Markdown 标准写法就是 `| --- |`，
+            // 按单字符判定会把它当成数据行，表格就会多出一行「---」。
+            if (isTableSeparatorRow(line)) {
+                i++
+                continue
+            }
             rows += line.trim().trim('|').split('|').map { it.trim() }
+            i++
         }
         if (rows.isNotEmpty()) blocks += Block.Table(rows)
+        // 表格至少占一行：即使内容为空（只有表头）也要跳过这一行，
+        // 否则它会被外层循环再次当成表头解析。
+        return maxOf(i, startIndex + 1)
     }
 }

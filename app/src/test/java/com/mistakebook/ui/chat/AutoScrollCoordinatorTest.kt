@@ -163,4 +163,54 @@ class AutoScrollCoordinatorTest {
         assertFalse(m.onGap(-3)) // 第 1 帧
         assertTrue(m.onGap(-2)) // 第 2 帧（|-2| <= 6）→ 恢复
     }
+
+    // ---- v0.0.53：贴底判定与跟随契约 ----
+
+    @Test
+    fun flushAtBottomWhenBottomMostItemSitsFlush() {
+        // 贴底：最底部可见 item 的 offset = 0
+        val info = layoutInfo(listOf(Triple(0, "m0", 0), Triple(1, "m1", 138)))
+        assertTrue(isFlushAtBottom(info))
+    }
+
+    @Test
+    fun notFlushWhenBottomMostItemIsCutOff() {
+        // 用户上滑：最底部可见 item 被切掉一截（offset 明显为负）
+        val info = layoutInfo(listOf(Triple(0, "m0", -120), Triple(1, "m1", 18)))
+        assertFalse(isFlushAtBottom(info))
+    }
+
+    @Test
+    fun notFlushWhenBottomMostItemIsAboveBottomEdge() {
+        // offset 为正 = 该 item 底边在内容区底边**上方** → 下方还有空白，不是贴底
+        val info = layoutInfo(listOf(Triple(0, "m0", 200), Triple(1, "m1", 338)))
+        assertFalse(isFlushAtBottom(info))
+    }
+
+    @Test
+    fun flushToleranceIsVeryNarrow() {
+        // 用户只上滑 1~2px：仍算贴底（继续跟随，不打断阅读）
+        val info = layoutInfo(listOf(Triple(0, "m0", -1), Triple(1, "m1", 137)))
+        assertTrue(isFlushAtBottom(info))
+        // 上滑 5px：判为离开底部
+        val info2 = layoutInfo(listOf(Triple(0, "m0", -5), Triple(1, "m1", 133)))
+        assertFalse(isFlushAtBottom(info2))
+    }
+
+    @Test
+    fun emptyVisibleSetIsNotFlush() {
+        assertFalse(isFlushAtBottom(layoutInfo(emptyList(), total = 0)))
+    }
+
+    @Test
+    fun programmaticScrollFlagSuppressesUserPause() {
+        val coordinator = AutoScrollCoordinator()
+        assertFalse(coordinator.programmaticScroll)
+        coordinator.programmaticScroll = true
+        // 处于程序化回底动画中：pause 不应被调用（由调用方守卫）
+        coordinator.programmaticScroll = false
+        coordinator.pause()
+        assertFalse(coordinator.following)
+        assertTrue(coordinator.showJumpButton)
+    }
 }
