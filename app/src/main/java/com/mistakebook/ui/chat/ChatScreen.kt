@@ -15,6 +15,7 @@ import android.content.Intent
 import android.view.WindowManager
 import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -141,15 +142,16 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import java.io.File
+import android.net.Uri
 import android.widget.Toast
 
 /**
- * 选图片的 MIME 过滤。
+ * 会话相册一次最多选几张（v0.0.52 多选）。
  *
- * 不用通配 image 类型：部分文档管理应用会把 HEIC 归到 image 类型、
- * 但也有把不相关文件归到这里的，让用户自己挑下文件不能最终判定。
+ * 取 9 与旧 CHAT 连拍上限一致：附件要逐张压缩/转 data URL，
+ * 一次十几张既慢也没意义，真需要更多分几次选。
  */
-private val IMAGE_MIME_TYPES = arrayOf("image/jpeg", "image/png", "image/webp", "image/heic", "image/bmp")
+private const val CHAT_GALLERY_MAX = 9
 
 /** 选文档。PDF 单独列出，因为部分文件管理应用不会把 .pdf 归到 text 类型。 */
 private val DOCUMENT_MIME_TYPES = arrayOf(
@@ -167,9 +169,7 @@ fun ChatScreen(
     questionId: Long?,
     sessionId: Long? = null,
     onBack: () -> Unit,
-    onOpenSettings: () -> Unit,
-    /** 「拍照」入口改走扫描相机（T12）：NavHost 置 CHAT 用途后进 CAPTURE。 */
-    onLaunchScanCamera: () -> Unit = {}
+    onOpenSettings: () -> Unit
 ) {
     val viewModel = containerViewModel(
         container = container,
@@ -231,17 +231,44 @@ fun ChatScreen(
     var showLibraryPicker by remember { mutableStateOf(false) }
     var showModelSheet by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+
     // 选文件：OpenDocument 拿的是可长期读取的 Uri（不依赖临时授权），
     // 比 GetContent 好——GetContent 在进程重启后就读不到了。
-    val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let(viewModel::onAttachmentPicked) }
-
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(viewModel::onAttachmentPicked) }
 
-    val context = LocalContext.current
+    // 会话相册：照片多选（v0.0.52）。一次多张进待发区，聊天发多图不再需要
+    // 借用错题的连拍批次——附件管线本身就是多图（气泡内网格渲染）。
+    val galleryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(CHAT_GALLERY_MAX)
+    ) { uris ->
+        uris.forEach { uri -> viewModel.onAttachmentPicked(uri) }
+    }
+
+    // 会话拍照（v0.0.52）：系统相机直拍 → 落 cacheDir → 当轮附件，
+    // 喂给识图/vision 模型。**不再跳错题扫描相机页**——那是拍题链路
+    // （增强档位/连拍批次/裁切接力都是为 OCR 服务的），会话要的只是
+    // 一张能发给模型的图。系统 TakePicture 在个别 ROM 上可能回
+    // RESULT_OK 却不落盘，用「文件存在且非空」兜底校验，失败给明确提示。
+    var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val file = pendingCameraFile
+        pendingCameraFile = null
+        if (success && file != null && file.exists() && file.length() > 0) {
+            viewModel.onAttachmentPicked(Uri.fromFile(file))
+        } else {
+            runCatching { file?.delete() }
+            Toast.makeText(
+                context,
+                context.getString(R.string.chat_camera_failed),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
 
     // 裁切页交回的聊天附件（T12）：扫描相机 + 裁切确认后经容器标志交接。
     // 快照状态驱动重组 → LaunchedEffect 重跑；取走即清，防旧图误入下一轮。
@@ -386,13 +413,38 @@ fun ChatScreen(
 
     if (showAttachSheet) {
         AttachmentSourceSheet(
-            onPickImage = { imagePicker.launch(IMAGE_MIME_TYPES) },
+            onPickImage = {
+                // v0.0.52：相册多选——聊天发多图走附件管线自己搞定
+                galleryPicker.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
             onTakePhoto = {
-                // T12：系统 TakePicture 在部分 ROM 上不可靠（代码注释里
-                // 记了一整段血泪史），统一改走扫描相机——有增强档位、
-                // 闪光灯、框选与涂鸦，拍完经裁切页把产物交回本页附件。
+                // v0.0.52：系统相机直拍 → 当轮附件（识图/vision 管线）。
+                // 旧的 T12 决策是改走错题扫描相机（有增强/闪光/裁切），
+                // 但那是为 OCR 拍题服务的：会话里拍张图想问模型，
+                // 跳进拍题页既违和又绕路。FileProvider 授权见
+                // AndroidManifest 与 res/xml/file_paths.xml。
                 showAttachSheet = false
-                onLaunchScanCamera()
+                val dir = File(context.cacheDir, "chat_captures").apply { mkdirs() }
+                val file = File(dir, "chat_${System.currentTimeMillis()}.jpg")
+                val uri = runCatching {
+                    FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file
+                    )
+                }.getOrNull()
+                if (uri == null) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.chat_camera_failed),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    pendingCameraFile = file
+                    takePictureLauncher.launch(uri)
+                }
             },
             onPickFile = { filePicker.launch(DOCUMENT_MIME_TYPES) },
             // T6 降级：资料库文件选择 → 加入待注入列表（发送时前置为当轮上下文）

@@ -548,11 +548,7 @@ fun MistakeBookNavHost(
                 questionId = raw.takeIf { it != Routes.CHAT_FREE },
                 sessionId = rawSession.takeIf { it != Routes.CHAT_FREE },
                 onBack = { navController.popBackStack() },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onLaunchScanCamera = {
-                    container.cameraPurpose = AppContainer.CameraPurpose.CHAT
-                    navController.navigate(Routes.CAPTURE)
-                }
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) }
             )
         }
 
