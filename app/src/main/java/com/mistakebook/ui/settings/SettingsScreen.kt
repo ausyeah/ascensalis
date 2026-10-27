@@ -159,7 +159,6 @@ fun SettingsScreen(
             // ---- AI 服务（手风琴互斥：同一时刻只展开一张配置卡）----
             CollapsibleSettingsGroup(
                 title = "主题外观",
-                exclusiveScope = "ai"
             ) {
                 ThemeModeSection(
                     state = state,
@@ -169,7 +168,6 @@ fun SettingsScreen(
 
             CollapsibleSettingsGroup(
                 title = "识别方式",
-                exclusiveScope = "ai"
             ) {
                 RecognitionModeSection(
                     state = state,
@@ -179,7 +177,6 @@ fun SettingsScreen(
 
             CollapsibleSettingsGroup(
                 title = "MinerU 配置",
-                exclusiveScope = "ai"
             ) {
                 MineruKeySection(
                     state = state,
@@ -194,7 +191,6 @@ fun SettingsScreen(
 
             CollapsibleSettingsGroup(
                 title = "大模型配置",
-                exclusiveScope = "ai"
             ) {
                 LlmProfilesSection(
                     state = state,
@@ -210,7 +206,6 @@ fun SettingsScreen(
 
             CollapsibleSettingsGroup(
                 title = "识图模型",
-                exclusiveScope = "ai"
             ) {
                 VisionProfilesSection(
                     state = state,
@@ -220,7 +215,6 @@ fun SettingsScreen(
 
             CollapsibleSettingsGroup(
                 title = "生图渠道",
-                exclusiveScope = "ai"
             ) {
                 ImageProfilesSection(
                     state = state,
@@ -230,7 +224,6 @@ fun SettingsScreen(
 
             CollapsibleSettingsGroup(
                 title = "联网搜索",
-                exclusiveScope = "ai"
             ) {
                 SearchProviderSection(
                     state = state,
@@ -267,10 +260,6 @@ fun SettingsScreen(
                 )
             }
 
-            // ---- 资料库（T6）----
-            CollapsibleSettingsGroup(title = stringResource(R.string.settings_library_section)) {
-                LibraryEntrySection(onOpen = onOpenLibrary)
-            }
 
             // ---- 用量与账户 ----
             CollapsibleSettingsGroup(title = "用量统计") {

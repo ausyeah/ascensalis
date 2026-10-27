@@ -176,7 +176,12 @@ fun MistakeBookNavHost(
                 onOpenNotebooks = { navController.navigate(Routes.NOTEBOOKS) },
                 onOpenChatList = { navController.navigate(Routes.CHAT_LIST) },
                 onOpenQuestion = { id -> navController.navigate(Routes.detail(id)) },
-                onStartReview = { navController.navigate(Routes.REVIEW) }
+                onStartReview = { navController.navigate(Routes.REVIEW) },
+                // 门户设置 Tab 内嵌 SettingsScreen，资料库/成就墙两个子页面
+                // 必须经 NavHost 路由打开（v0.0.52：内嵌页此前没接导航回调，
+                // 两个入口点了没反应）
+                onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
+                onOpenBadgeWall = { navController.navigate(Routes.BADGE_WALL) }
             )
         }
 
@@ -543,13 +548,7 @@ fun MistakeBookNavHost(
                 questionId = raw.takeIf { it != Routes.CHAT_FREE },
                 sessionId = rawSession.takeIf { it != Routes.CHAT_FREE },
                 onBack = { navController.popBackStack() },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onLaunchScanCamera = {
-                    // T12：对话页的相机入口显式置 CHAT 用途（与首页拍题互斥的
-                    // 状态隔离，见 CAPTURE composable 的注释）
-                    container.cameraPurpose = AppContainer.CameraPurpose.CHAT
-                    navController.navigate(Routes.CAPTURE)
-                }
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) }
             )
         }
 

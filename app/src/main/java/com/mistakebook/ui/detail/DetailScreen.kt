@@ -316,15 +316,14 @@ fun DetailScreen(
                     // 辅助图（F-IMG-4）：解析区下方的配图入口。
                     // 精确几何走 SVG（模型会在解析里直接输出），
                     // 这里留给「实物/场景类」示意——细胞结构、实验装置这类。
-                    if (question != null) {
-                        Spacer(Modifier.height(12.dp))
-                        SectionLabel(stringResource(R.string.detail_aux_image))
-                        AuxImageBlock(
-                            auxState = auxImageState,
-                            onGenerate = viewModel::generateAuxImage,
-                            onDismiss = viewModel::dismissAuxImage
-                        )
-                    }
+                    // （question 已在上面 loading/空态提前返回后智能转为非空）
+                    Spacer(Modifier.height(12.dp))
+                    SectionLabel(stringResource(R.string.detail_aux_image))
+                    AuxImageBlock(
+                        auxState = auxImageState,
+                        onGenerate = viewModel::generateAuxImage,
+                        onDismiss = viewModel::dismissAuxImage
+                    )
                     // 备注：看题时就能直接改，不用进编辑页
                     Spacer(Modifier.height(12.dp))
                     SectionLabel(stringResource(R.string.detail_note))
