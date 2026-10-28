@@ -160,3 +160,29 @@ OCR 增强档是分段按钮、带文字标签；取景角标 / 九宫格是装�
 **局限（如实）**：Paparazzi 无法直接设 DeviceConfig 宽度（仓库无自定义构造先例，避免猜签名拖垮测试编译），用宽度约束代替；
 Paparazzi 不模拟系统 fontScale，故 **fontScale 1.3 / 2.0 与「320dp+fontScale2.0 无截断/重叠」的最终视觉确认需在真机 / 有渲染环境时看金标图**，
 本次以代码评审 + 窄宽快照兜底，未谎称通过。
+
+---
+
+## Task E：测试、文档与工程收尾（P2）
+
+### 新增测试汇总（本地无 Android SDK/JVM，全部交由 CI 的 `testDebugUnitTest` 校验）
+
+| Task | 测试文件 | 条数 | 说明 |
+|---|---|---|---|
+| A | `math/MathRendererTrimTest.kt` | 23 | `coreInkBox` 阈值口径 + `trimWindow` 几何 + 集成（≥15 达标） |
+| B | `markdown/SvgStreamPerfTest.kt` | 8 | 缓存、闭合后不重复清洗、超长降级、流式各阶段安全 |
+| C | `ui/capture/CaptureA11yTest.kt` | 4 | 无障碍标签契约（JVM，CI 可跑） |
+| D | `ui/settings/SettingsLayoutScreenshotTest.kt` | 4 | Paparazzi 窄宽快照 |
+
+- **既有测试不改、应全绿**：`InkBoxTest`（`inkBoxOf` 字节级未动）、`SvgSanitizerTest` / `MarkdownSvgBlockTest`（sanitize 输出不变）、`BlankDetectTest` 等。
+- **未加 androidTest**：CI 无设备、不编译 androidTest，加了也无法验证，避免引入未验证代码。
+
+### 工程收尾
+
+- 新增 `.gitattributes`：`* text=auto eol=lf`、`*.bat/*.cmd/*.ps1 eol=crlf`、图片与密钥/二进制 `binary`。收口 CRLF/LF 不一致。
+- **未改** `.gitignore`（属资料库 WIP）、**未改** GitHub Actions workflow（不弱化密钥扫描 / 签名校验 / 证书指纹一致性 / release 签名强制四道闸门）。
+- 每个 Task 单独中文 commit，分支 `improve/v0.0.54-math-svg-a11y-settings`。
+
+### CI 状态
+
+本地无 Android SDK，`testDebugUnitTest` / `lintDebug` / `assembleDebug` 均以 CI 为准（分支推送不触发 CI，需开 PR 或 `workflow_dispatch`）。
