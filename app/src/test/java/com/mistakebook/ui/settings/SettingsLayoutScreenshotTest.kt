@@ -53,12 +53,15 @@ class SettingsLayoutScreenshotTest {
         ) { content() }
     }
 
-    private fun category(content: @Composable () -> Unit) = SettingsCategoryCard(
-        title = "AI 与识别",
-        summary = "大模型、识图、生图、搜索的 Key 与参数",
-        icon = Icons.Default.Settings,
-        content = content
-    )
+    @Composable
+    private fun category(content: @Composable () -> Unit) {
+        SettingsCategoryCard(
+            title = "AI 与识别",
+            summary = "大模型、识图、生图、搜索的 Key 与参数",
+            icon = Icons.Default.Settings,
+            content = content
+        )
+    }
 
     @Test
     fun settingsHome_collapsed_320dp() {

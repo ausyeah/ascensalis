@@ -223,7 +223,7 @@ class MathRendererTrimTest {
         }
         val core = coreInkBox(pixels, 40, 30)
         assertEquals("核心口径只框笔画，软边被滤掉", InkBox(10, 8, 29, 21), core)
-        val win = trimWindow(core, marginPx = INK_MARGIN_PX, width = 40, height = 30)!!
+        val win = trimWindow(core, marginPx = 2, width = 40, height = 30)!! // marginPx=2 即 INK_MARGIN_PX（私有，测试用同值字面量）
         // 余量把 2px 软边整个兜回来：软边落在 [8,31]x[6,23]，一点没被裁秃
         assertEquals(InkBox(8, 6, 31, 23), win)
         assertTrue(win.right - win.left + 1 >= 1 && win.bottom - win.top + 1 >= 1)
