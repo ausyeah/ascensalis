@@ -22,7 +22,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.mistakebook.R
 
 /**
  * 可收起的设置分组卡片（v0.0.51 T8，v0.0.52 全局互斥）。
@@ -84,7 +86,7 @@ internal fun CollapsibleSettingsGroup(
             )
             Icon(
                 imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = if (isExpanded) "收起" else "展开",
+                contentDescription = stringResource(if (isExpanded) R.string.settings_collapse else R.string.settings_expand),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -210,7 +212,7 @@ internal fun SettingsCategoryCard(
             }
             Icon(
                 imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = if (isExpanded) "收起" else "展开",
+                contentDescription = stringResource(if (isExpanded) R.string.settings_collapse else R.string.settings_expand),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -222,8 +224,13 @@ internal fun SettingsCategoryCard(
     }
 }
 
-/** 全局唯一展开的分类名（null = 全收起）。 */
-private var expandedCategoryTitle by androidx.compose.runtime.mutableStateOf<String?>(null)
+/**
+ * 全局唯一展开的分类名（null = 全收起）。
+ *
+ * 提成 `internal` 是为了让 Paparazzi 窄屏截图能强制进入「展开」态——
+ * 否则只能截到收起态，覆盖不到「一个展开分组」这个 Task D 要求覆盖的场景。
+ */
+internal var expandedCategoryTitle by androidx.compose.runtime.mutableStateOf<String?>(null)
 
-/** 全局唯一展开态：当前展开的组名（null = 全收起）。 */
-private var expandedGroupTitle by androidx.compose.runtime.mutableStateOf<String?>(null)
+/** 全局唯一展开态：当前展开的组名（null = 全收起）。同 [expandedCategoryTitle]，供截图进入展开态。 */
+internal var expandedGroupTitle by androidx.compose.runtime.mutableStateOf<String?>(null)

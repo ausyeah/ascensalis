@@ -126,3 +126,37 @@ OCR 增强档是分段按钮、带文字标签；取景角标 / 九宫格是装�
 
 **未覆盖 / 风险**：节点级语义（contentDescription 是否真被合并朗读、禁用态朗读文案）需真机 / androidTest 验证；
 本机与 CI 均无安卓设备、无 Robolectric（不新增依赖），故以资源契约测试 + 代码评审兜底，未加 androidTest（CI 不编译、无法验证，避免引入未验证代码）。
+
+---
+
+## Task D：设置页三层目录窄屏表现（P1）
+
+### 结构
+
+三层：`SettingsCategoryCard`（分类卡，全局互斥）→ 嵌套 `CollapsibleSettingsGroup`（类内分组，全局互斥）→ 具体 Section。
+三层各自维护展开态（`expandedCategoryTitle` / `expandedGroupTitle`）。
+
+### 改动（只改布局与语义，不动设置项行为 / 存储 key）
+
+1. **硬编码中文入 strings.xml**：`CollapsibleSettingsGroup` 的展开/收起图标 contentDescription 原写死 `"收起"`/`"展开"`，
+   违反「UI 文案集中 strings.xml」（PRD §11）。提取为 `settings_collapse` / `settings_expand`。
+2. **截图可进入展开态**：`expandedCategoryTitle` / `expandedGroupTitle` 由 `private` 提为 `internal`，
+   让 Paparazzi 能强制进入「展开」态，否则只能截到收起态、覆盖不到「一个展开分组」。
+3. **窄屏截图基线**：`SettingsLayoutScreenshotTest` 用固定宽度 Box（320 / 360dp）把结构组件压到窄宽，
+   覆盖设置首页（收起）、分类卡展开（露类内分组）、一个展开的二级分组（看缩进/换行/溢出）。
+
+### 代码评审结论（窄屏 / 大字体）
+
+- **标题**：分类/分组标题 `Text` 默认多行换行（未设 maxLines/截断），窄屏 + 大字体下会换行而非被切，符合「不截断」；
+  但换行会抬高表头，属可接受。
+- **缩进**：三层累计约 8 + 16 + 16 = 40dp；320dp 屏内容净宽约 248dp，偏紧但不溢出。未再加大缩进。
+- **点击区**：分类卡 / 分组表头整行可点且带 16dp 竖内边距，≥48dp；删除配置用 IconButton（48dp）。模型勾选列表为密集行（<48dp），
+  属密集列表常态，强行抬到 48dp 会令列表过长，故保留（已在评审中记录）。
+- **横向滚动**：识别方式用竖排 FilterChip（非横滚），模型列表用竖滚，无新增横向滚动面。
+
+### 测试 / 验证局限
+
+`SettingsLayoutScreenshotTest`：4 条 Paparazzi 快照（320/360dp 首页 + 320dp 分类展开 + 320dp 二级分组展开），CI 渲染出金标图。
+**局限（如实）**：Paparazzi 无法直接设 DeviceConfig 宽度（仓库无自定义构造先例，避免猜签名拖垮测试编译），用宽度约束代替；
+Paparazzi 不模拟系统 fontScale，故 **fontScale 1.3 / 2.0 与「320dp+fontScale2.0 无截断/重叠」的最终视觉确认需在真机 / 有渲染环境时看金标图**，
+本次以代码评审 + 窄宽快照兜底，未谎称通过。
