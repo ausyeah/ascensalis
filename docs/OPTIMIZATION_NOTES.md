@@ -56,3 +56,46 @@
 
 `app/src/test/java/com/mistakebook/math/MathRendererTrimTest.kt`：23 条 `coreInkBox` / `trimWindow` /
 集成测试（≥15 达标）。本地无 Android SDK，由 CI 的 `testDebugUnitTest` 校验。
+
+---
+
+## Task B：SVG 流式未闭合状态的重解析开销（P0/P1）
+
+### 背景
+
+`MarkdownParser.parseCached` 按完整文本做 LRU，流式每个 chunk 都是新字符串 → 全部 miss → 重跑整篇解析；
+其中未闭合的 SVG（v0.0.54 新增的「围栏 svg」与「裸 `<svg>`」两条路径）会被 `sanitizeSvg` 反复全量正则清洗。
+长 SVG + 高频 token 下，这是 O(n²) 的主线程正则开销。
+
+### 测量（分析 + 计数器断言；本地无 Android SDK/JVM，精确耗时以 CI 为准）
+
+- **闭合前**：每个 chunk 对不断变长的 SVG 前缀跑一次 `sanitizeSvg`（6 条正则 over 全串）。n 个 chunk 累计字符量 ≈ Σ prefix ≈ O(n²)。
+- **闭合后**：SVG 源码已稳定，但每个后续 chunk 重解析整篇仍会对同一段闭合 SVG 再跑一次全量清洗——同样是 O(n²)。
+
+### 方案（两处叠加，都不改输出语义、都不破安全底线）
+
+1. **`SvgSanitizer` 按 source 缓存清洗结果**（`androidx.collection.LruCache`，64 条）。sanitize 是纯函数，
+   同输入同输出，缓存不改变任何结果。闭合后 SVG 源码不变 → 重复清洗命中缓存，「每 chunk 一次全量」
+   降成「一次全量 + 其余 O(1) 查表」。
+2. **超长未闭合 SVG 先不产出**（`MarkdownModel.unclosedSvgBlockOrNull`，上限 `UNCLOSED_SVG_EMIT_LIMIT = 32KB`）：
+   - 空 → 不产出；≤ 上限 → 照旧清洗后产出（有内容就先渲染，**行为不变**）；
+   - 超长 → 返回 null（界面留空占位），等 `</svg>` / 围栏闭合后走闭合路径整段清洗产出，自然恢复。
+   把闭合前每 chunk 开销从 O(全长) 压到 O(1)（超长）或 O(上限)（小图）。
+
+**安全底线**：不产出 = 没有任何未清洗 / 半截的危险内容进入渲染层；一旦产出必是过了 `sanitizeSvg`
+全量清洗的内容。`<script>` / `on*` / `javascript:` / 外链 image 在流式各阶段（半开标签 / 半截 / 未闭合 / 闭合）
+都被清掉（有测试守着）。已知限制（**既有行为，非本次回归**）：若 `<script>` 自身也未闭合，sanitize 的正则
+匹配不到闭合标签而保留开头——但 SvgBlock 走 AndroidSVG 解码，本就不执行脚本；且超长未闭合已被整体跳过。
+
+### 数据（`SvgStreamPerfTest` 的计数器断言）
+
+- `sanitize 纯函数结果按 source 缓存`：同一 source 调 2 次 → `sanitizeCallCount = 2` 但 `sanitizeCharCount = 源长度`（只过一遍正则）。
+- `闭合后每 chunk 追加正文_闭合 svg 只清洗一次`：闭合后追加 50 段正文，`sanitizeCharCount` 不再增长（50 次全命中缓存）。
+- `超长未闭合 svg 流式期间不产出_闭合后恢复`：>32KB 未闭合 svg 分 30 个前缀喂入 → 产出 0 个图形块、`sanitizeCharCount = 0`；闭合后产出完整图。
+- `裸 svg 未闭合超长也不产出` / `闭合时产出完整 svg 不因上限截断` / `小 svg 未闭合仍照旧渲染` / `非 svg 代码块不受上限影响`：行为保持。
+- `流式各阶段危险内容都被清掉`：4 个流式阶段均无 script/on*/javascript:/外链 image，且正常几何与 xmlns 补齐仍在。
+
+### 测试
+
+`app/src/test/java/com/mistakebook/markdown/SvgStreamPerfTest.kt`：8 条（缓存、闭合后不重复清洗、超长降级、
+裸 svg 降级、小 svg 保持、非 svg 代码保持、闭合不截断、流式各阶段安全）。既有 `SvgSanitizerTest` / `MarkdownSvgBlockTest` 不改、应全绿。

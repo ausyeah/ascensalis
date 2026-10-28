@@ -1,5 +1,7 @@
 package com.mistakebook.markdown
 
+import androidx.collection.LruCache
+
 /**
  * SVG 安全清洗（**纯 Kotlin，可 JVM 单测**）。
  *
@@ -45,7 +47,44 @@ object SvgSanitizer {
     )
     private val XMLNS = Regex("xmlns\\s*=", RegexOption.IGNORE_CASE)
 
+    private const val SVG_SANITIZE_CACHE_ENTRIES = 64
+
+    /**
+     * v0.0.54 后续优化 · Task B：按原始 source 缓存清洗结果。
+     *
+     * sanitize 是**纯函数**，缓存不改变任何输出。动机：模型把 SVG 写闭合后，
+     * 这段源码在后续每个流式 chunk 里都不变（新内容都加在它后面），而
+     * [MarkdownParser] 每个 chunk 都重解析整篇 → 同一段闭合 SVG 被反复全量清洗。
+     * 按 source 缓存后，这些重复清洗命中，「每 chunk 一次全量」降成
+     * 「一次全量 + 其余 O(1) 查表」。未闭合阶段的重复清洗由 MarkdownModel 的
+     * 超长降级（超长未闭合先不产出）兜住，两者叠加消除 O(n²)。
+     */
+    private val cache = LruCache<String, String>(SVG_SANITIZE_CACHE_ENTRIES)
+
+    /**
+     * 清洗工作量计数器，**仅供单测**断言「有上界」，不是生产 API。
+     * [sanitizeCallCount] = sanitize 被进入次数；[sanitizeCharCount] = 真正过正则的字符数（仅缓存未命中累计）。
+     */
+    internal var sanitizeCallCount = 0
+    internal var sanitizeCharCount = 0L
+
+    /** 单测专用：清零计数器并清空缓存，避免用例之间互相污染。 */
+    internal fun resetForTest() {
+        sanitizeCallCount = 0
+        sanitizeCharCount = 0L
+        cache.evictAll()
+    }
+
     fun sanitize(source: String): String {
+        sanitizeCallCount++
+        cache.get(source)?.let { return it }
+        sanitizeCharCount += source.length
+        val out = computeSanitized(source)
+        cache.put(source, out)
+        return out
+    }
+
+    private fun computeSanitized(source: String): String {
         var out = source.trim()
         if (out.isBlank()) return ""
         out = out.replace(SCRIPT, "")
