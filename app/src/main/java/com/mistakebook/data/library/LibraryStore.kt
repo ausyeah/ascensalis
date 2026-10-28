@@ -3,11 +3,12 @@ package com.mistakebook.data.library
 import java.io.File
 
 /**
- * 资料库（v0.0.51 T6）：App 私有目录 `files/library/` 下的文本文件集合。
+ * 资料库（v0.0.51 T6）：App 私有目录 `files/library/` 下的资料文件集合。
  *
  * 对话时 AI 能读（降级期）/ 读写（工具框架接入后），管理页能增删改查。
- * 一期只收文本类：`.md` / `.txt` / `.json` / `.csv`；PDF 走 MinerU 的
- * 解析列为二期，本版不落库。
+ * 一期只收文本类：`.md` / `.txt` / `.json` / `.csv`；v0.0.54 起支持
+ * 二进制文档 `.docx` / `.pdf`：原文原样落库，读取时经
+ * [DocumentTextExtractor] 提取正文（尽力而为，提取失败返回提示文案）。
  *
  * ## 路径安全是这里的第一要务
  *
@@ -18,8 +19,16 @@ import java.io.File
  */
 object LibraryStore {
 
-    /** 一期支持的文本扩展名（小写比较）。 */
-    val SUPPORTED_EXTENSIONS = setOf("md", "txt", "json", "csv")
+    /** 支持的扩展名（小写比较）。 */
+    val SUPPORTED_EXTENSIONS = setOf("md", "txt", "json", "csv", "docx", "pdf")
+
+    /** 二进制文档扩展名：读取需提取正文，写入/追加一律拒绝（防损坏原文件）。 */
+    val BINARY_EXTENSIONS = setOf("docx", "pdf")
+
+    /** 二进制文档提取不出正文时返回的提示（预览与对话共用）。 */
+    const val BINARY_EMPTY_HINT =
+        "（未能从该文档提取出文字：可能是扫描件或使用了特殊字体编码。" +
+            "可以直接在对话里发图片提问。）"
 
     /** 读文件的内容上限；超过截断并在返回里注明。 */
     const val MAX_READ_BYTES = 50 * 1024
@@ -49,6 +58,9 @@ object LibraryStore {
         return resolved
     }
 
+    /** 是否为二进制文档（.docx / .pdf）。 */
+    fun isBinaryDoc(file: File): Boolean = file.extension.lowercase() in BINARY_EXTENSIONS
+
     /** 库目录（不存在则创建）。 */
     fun ensureDir(filesDir: File): File {
         val dir = File(filesDir, "library")
@@ -62,14 +74,33 @@ object LibraryStore {
             ?.sortedBy { it.name.lowercase() }
             .orEmpty()
 
-    /** 读文件；超过 [MAX_READ_BYTES] 截断并返回「已截断」标记。 */
+    /**
+     * 读文件；超过 [MAX_READ_BYTES] 截断并返回「已截断」标记。
+     * 二进制文档走正文提取，同样受 50KB 截断约束（对话注入的口径不变）。
+     */
     fun read(file: File): Pair<String, Boolean>? {
         if (!file.isFile || !file.exists()) return null
+        if (isBinaryDoc(file)) {
+            val text = DocumentTextExtractor.extract(file)
+            if (text.isBlank()) return BINARY_EMPTY_HINT to false
+            val (cut, truncated) = truncateUtf8(text, MAX_READ_BYTES)
+            return cut to truncated
+        }
         val raw = file.readBytes()
         val truncated = raw.size > MAX_READ_BYTES
         val bytes = if (truncated) raw.copyOf(MAX_READ_BYTES) else raw
         val text = runCatching { String(bytes, Charsets.UTF_8) }.getOrDefault("")
         return text to truncated
+    }
+
+    /** 在 UTF-8 字符边界上安全截断，不产生半个字符的乱码。 */
+    private fun truncateUtf8(text: String, maxBytes: Int): Pair<String, Boolean> {
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        if (bytes.size <= maxBytes) return text to false
+        var cut = maxBytes
+        // 退到字符起始字节（0b10xxxxxx 是多字节序列的后续字节）
+        while (cut > 0 && (bytes[cut].toInt() and 0xC0) == 0x80) cut--
+        return String(bytes, 0, cut, Charsets.UTF_8) to true
     }
 
     /** 写文件（新建或覆盖）；返回实际字节数。 */

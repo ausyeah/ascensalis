@@ -1,6 +1,7 @@
 package com.mistakebook.ui.library
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -14,6 +15,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -82,15 +86,19 @@ fun LibraryScreen(
         files = LibraryStore.list(root)
     }
 
-    // SAF 导入：拷进 library 目录（只收一期支持的扩展名，其余提示不支持）
+    // SAF 导入：拷进 library 目录（只收支持的扩展名，其余提示不支持）。
+    // 文件名优先查 DISPLAY_NAME：部分文档选择器的 uri.lastPathSegment
+    // 是数字 id（如 msf:100），拿来当文件名必然解析失败。
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             val imported = withContext(Dispatchers.IO) {
-                val rawName = uri.lastPathSegment?.substringAfterLast('/') ?: return@withContext null
-                val name = rawName.substringAfterLast('/')
+                val name = queryDisplayName(context, uri)
+                    ?.substringAfterLast('/')
+                    ?: uri.lastPathSegment?.substringAfterLast('/')
+                    ?: return@withContext null
                 val target = LibraryStore.resolveLibraryPath(root, name)
                     ?: return@withContext null
                 runCatching {
@@ -107,6 +115,15 @@ fun LibraryScreen(
             }
         }
     }
+
+    /** 从内容提供方查文件显示名；查不到返回 null，由调用方回退 lastPathSegment。 */
+    fun queryDisplayName(context: android.content.Context, uri: Uri): String? = runCatching {
+        context.contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+    }.getOrNull()
 
     Scaffold(
         topBar = {
@@ -319,7 +336,7 @@ fun LibraryScreen(
         LibraryPreviewDialog(
             file = file,
             onClose = { editing = null },
-            onSave = { content ->
+            onSave = if (LibraryStore.isBinaryDoc(file)) null else { content ->
                 scope.launch {
                     withContext(Dispatchers.IO) { LibraryStore.write(file, content) }
                     refresh()
@@ -330,22 +347,55 @@ fun LibraryScreen(
     }
 }
 
-/** 文本预览 / 简单编辑：一期文本类直接展示全文，可改可存（无 PDF 占位需求）。 */
+/**
+ * 预览 / 编辑。文本类直接展示全文，可改可存；.docx / .pdf 走提取出的
+ * 正文做只读预览（编辑保存会把二进制原文件冲掉，必须挡死）。
+ * 提取可能耗时（大文档），统一异步读，不卡 UI 线程。
+ */
 @Composable
 private fun LibraryPreviewDialog(
     file: File,
     onClose: () -> Unit,
-    onSave: (String) -> Unit
+    onSave: ((String) -> Unit)?
 ) {
-    var draft by remember(file) {
-        mutableStateOf(LibraryStore.read(file)?.first.orEmpty())
+    var draft by remember(file) { mutableStateOf<String?>(null) }
+    var truncated by remember(file) { mutableStateOf(false) }
+    LaunchedEffect(file) {
+        val (text, wasTruncated) = withContext(Dispatchers.IO) {
+            LibraryStore.read(file)
+        } ?: ("" to false)
+        draft = text
+        truncated = wasTruncated
     }
-    val truncated = remember(file) { LibraryStore.read(file)?.second ?: false }
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text(file.name) },
         text = {
             Column {
+                val content = draft
+                if (content == null) {
+                    Text(
+                        text = stringResource(R.string.library_loading),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (onSave == null) {
+                    Text(
+                        text = stringResource(R.string.library_binary_preview_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    SelectionContainer {
+                        Text(
+                            text = content,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier
+                                .height(280.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                    }
+                } else {
                 if (truncated) {
                     Text(
                         text = stringResource(R.string.library_truncated),
@@ -355,23 +405,28 @@ private fun LibraryPreviewDialog(
                     Spacer(Modifier.height(4.dp))
                 }
                 OutlinedTextField(
-                    value = draft,
+                    value = content,
                     onValueChange = { draft = it },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 6,
                     maxLines = 14
                 )
+                }
             }
         },
-        confirmButton = {
-            TextButton(onClick = { onSave(draft) }) {
+        confirmButton = if (onSave != null) {
+            TextButton(onClick = { draft?.let(onSave) }) {
                 Text(stringResource(R.string.action_confirm))
             }
+        } else {
+            TextButton(onClick = onClose) {
+                Text(stringResource(R.string.action_back))
+            }
         },
-        dismissButton = {
+        dismissButton = if (onSave != null) {
             TextButton(onClick = onClose) {
                 Text(stringResource(R.string.action_cancel))
             }
-        }
+        } else null
     )
 }

@@ -72,6 +72,9 @@ object LibraryTool {
         if (content.isBlank()) return Result(false, "写入内容为空。")
         val file = LibraryStore.resolveLibraryPath(root, name)
             ?: return Result(false, "非法文件名或类型: $name")
+        if (LibraryStore.isBinaryDoc(file)) {
+            return Result(false, ".docx / .pdf 是二进制文档，不支持模型写入，只能读取。")
+        }
         val bytes = LibraryStore.write(file, content)
         return Result(true, "已写入 $name（$bytes 字节）。")
     }
@@ -84,6 +87,9 @@ object LibraryTool {
         val file = LibraryStore.resolveLibraryPath(root, name)
             ?: return Result(false, "非法文件名或类型: $name")
         if (!file.isFile) return Result(false, "文件不存在: $name")
+        if (LibraryStore.isBinaryDoc(file)) {
+            return Result(false, ".docx / .pdf 是二进制文档，不支持编辑或追加，只能读取。")
+        }
         if (old.isNotBlank()) {
             val text = file.readText(Charsets.UTF_8)
             if (!text.contains(old)) return Result(false, "未找到要替换的片段。")
