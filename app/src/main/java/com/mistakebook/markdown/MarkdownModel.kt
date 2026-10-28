@@ -76,6 +76,12 @@ object MarkdownParser {
     /** 解析缓存条数。见 [parseCached]。 */
     private const val PARSE_CACHE_ENTRIES = 128
 
+    /**
+     * 未闭合 SVG 的产出上限（字符数）。超过它的未闭合 SVG 在流式期间先不产出图形块，
+     * 见 [unclosedSvgBlockOrNull]。设得够大（32KB）以保证正常示意图不受影响。
+     */
+    private const val UNCLOSED_SVG_EMIT_LIMIT = 32 * 1024
+
     private val parseCache = LruCache<String, List<Block>>(PARSE_CACHE_ENTRIES)
 
     private fun splitByTables(input: String): List<String> {
@@ -389,19 +395,20 @@ object MarkdownParser {
             if (latex.isNotEmpty()) blocks += Block.Math(latex, display = true, complete = false)
         }
         // 同上：流式渲染期间围栏可能还没闭合，有内容就先渲染。
+        // SVG 围栏未闭合且超长时走降级（见 [unclosedSvgBlockOrNull]）：先不产出，
+        // 避免每个 chunk 都对全量前缀重跑清洗（O(n²)）；闭合后整段重解析自然恢复。
         if (inCode && code.isNotBlank()) {
             val text = code.toString().trimEnd()
-            blocks += if (isSvgFence(codeLanguage, text)) {
-                Block.Svg(sanitizeSvg(text))
+            if (isSvgFence(codeLanguage, text)) {
+                unclosedSvgBlockOrNull(text)?.let { blocks += it }
             } else {
-                Block.Code(text, codeLanguage)
+                blocks += Block.Code(text, codeLanguage)
             }
         }
-        // 同上：流式尾端 / 模型漏写闭合的裸 `<svg …`。有内容就出块——
-        // 渲染失败 SvgBlock 会按比例占位，等闭合后整段重解析自然修复。
+        // 同上：流式尾端 / 模型漏写闭合的裸 `<svg …`。同样走 [unclosedSvgBlockOrNull]，
+        // 小 SVG 有内容就出块，超长未闭合先降级占位、闭合后恢复。
         rawSvg?.let { open ->
-            val source = open.toString().trim()
-            if (source.isNotEmpty()) blocks += Block.Svg(sanitizeSvg(source))
+            unclosedSvgBlockOrNull(open.toString())?.let { blocks += it }
         }
     }
 
@@ -421,6 +428,32 @@ object MarkdownParser {
         return language.isBlank() ||
             language.equals("xml", ignoreCase = true) ||
             language.equals("html", ignoreCase = true)
+    }
+
+    /**
+     * 流式期间**未闭合** SVG 的产出策略（v0.0.54 后续优化 · Task B）。
+     *
+     * 未闭合的 SVG（围栏没关 / 裸 `<svg>` 没闭合）在流式里每来一个 chunk 都会被
+     * 整段重清洗一次；长 SVG + 高频 token 下，这是 O(n²) 的主线程正则开销
+     * （每个 chunk 都对不断变长的历史前缀重跑 [sanitizeSvg]）。
+     *
+     * 策略：
+     * - 空 → 不产出；
+     * - 长度 ≤ [UNCLOSED_SVG_EMIT_LIMIT] → 照旧清洗后产出（有内容就先渲染，行为不变）；
+     * - 超长 → **先不产出**（返回 null，界面留空占位），等 `</svg>` / 围栏闭合后
+     *   走闭合路径整段清洗产出，自然恢复。
+     *
+     * 这样把未闭合阶段每 chunk 的开销从 O(全长) 压到 O(1)（超长）或 O(上限)（小图），
+     * 配合 [SvgSanitizer] 的结果缓存堵住闭合后的重复清洗，两端一起消除 O(n²)。
+     *
+     * 安全底线不变：不产出 = 没有任何未清洗 / 半截的危险内容进入渲染层；
+     * 一旦产出，必是过了 [sanitizeSvg] 全量清洗的内容。
+     */
+    private fun unclosedSvgBlockOrNull(source: String): Block.Svg? {
+        val trimmed = source.trim()
+        if (trimmed.isEmpty()) return null
+        if (trimmed.length > UNCLOSED_SVG_EMIT_LIMIT) return null
+        return Block.Svg(sanitizeSvg(trimmed))
     }
 
     private fun paragraphBlock(text: String): Block {

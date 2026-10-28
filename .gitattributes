@@ -1,0 +1,22 @@
+# 行尾统一：仓库内文本一律按 LF 存储，签出时按平台处理。
+# 背景：CRLF/LF 不一致曾造成实际问题（diff 噪声、脚本/签名异常），这里显式收口。
+* text=auto eol=lf
+
+# Windows 脚本保持 CRLF（在 Windows 上才能正常执行）。
+*.bat eol=crlf
+*.cmd eol=crlf
+*.ps1 eol=crlf
+
+# 二进制资源：绝不做行尾转换，否则字节被改即损坏。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.jks binary
+*.keystore binary
+*.zip binary
+*.apk binary
+*.aar binary
+*.jar binary

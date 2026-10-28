@@ -855,16 +855,13 @@ class MathRenderer(context: Context) {
         if (w <= 0 || h <= 0) return src
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
-        val box = inkBoxOf(pixels, w, h) ?: return src
-        val left = (box.left - marginPx).coerceAtLeast(0)
-        val top = (box.top - marginPx).coerceAtLeast(0)
-        val right = (box.right + marginPx).coerceAtMost(w - 1)
-        val bottom = (box.bottom + marginPx).coerceAtMost(h - 1)
-        val newW = right - left + 1
-        val newH = bottom - top + 1
-        // 已经紧贴墨水（只剩余量）就不裁了，省一次位图分配
-        if (newW == w && newH == h) return src
-        return runCatching { Bitmap.createBitmap(src, left, top, newW, newH) }
+        // 用「核心墨水」包围盒定裁剪边界：亚阈值抗锯齿噪声不参与，避免一粒远处的
+        // 淡噪点把盒子撑大、导致公式偏移或行内基线不齐；被滤掉的软边由 marginPx 兜回。
+        // 全透明（无核心墨水）时 trimWindow 返回 null，原样返回不裁（双保险）。
+        val win = trimWindow(coreInkBox(pixels, w, h), marginPx, w, h) ?: return src
+        val newW = win.right - win.left + 1
+        val newH = win.bottom - win.top + 1
+        return runCatching { Bitmap.createBitmap(src, win.left, win.top, newW, newH) }
             .getOrNull()
             ?.also { src.recycle() }
             ?: src
@@ -1154,5 +1151,139 @@ fun inkBoxOf(pixels: IntArray, width: Int, height: Int): InkBox? {
         if (right >= 0) break
         x--
     }
+    return InkBox(left, top, right, bottom)
+}
+
+/**
+ * 「核心墨水」的 alpha 阈值（0..255）。裁透明边时，只有 alpha 达到这个值的
+ * 像素才参与包围盒求解（见 [coreInkBox]）。
+ *
+ * 取 8（约 3% 不透明度）：KaTeX 笔画核心远浓于此，而透明度抖动 / 亚像素残影
+ * 造成的孤立淡点通常低于此值。这与 [isBlankBySampling] / [inkBoxOf] 的
+ * `alpha > 0` 是**两套口径**——后者要灵敏（漏判=公式消失），前者要稳
+ * （不能被一粒淡噪点带偏裁剪边界）。
+ */
+const val INK_ALPHA_THRESHOLD = 8
+
+/**
+ * 「核心墨水」包围盒：只有 alpha 达到 [alphaThreshold] 的像素才算数。
+ *
+ * ## 与 [inkBoxOf] 的分工（v0.0.54 后续优化）
+ *
+ * [inkBoxOf] 用 `alpha > 0`，是为了「不漏掉任何一点淡墨」（防毛边、防漏判空白）；
+ * 但同一个口径拿去定**裁剪边界**会反受其害：透明度抖动 / 亚像素残影留下的一粒
+ * 孤立淡点（alpha 1~7）会把包围盒远远撑开，裁出来既不紧、又让公式整体偏移、
+ * 行内基线对不齐（用户反馈的「公式位置发飘」）。
+ *
+ * 所以裁剪改用本函数：以 [INK_ALPHA_THRESHOLD] 滤掉亚阈值噪点，只认笔画核心；
+ * 被滤掉的抗锯齿软边由 trimTransparent 里的 `INK_MARGIN_PX` 在核心外再兜一圈
+ * 盖回来，两头都不得罪。
+ *
+ * 全淡图（所有墨都低于阈值）时返回 null——调用方（trimTransparent）据此原样
+ * 返回不裁：虽不收紧，但绝不会把内容裁秃，是安全降级。
+ *
+ * 与 [inkBoxOf] 是同一扫描的两套阈值口径（这里 `>= threshold`，那里 `> 0`）；
+ * 有意分开而不合并，是为了让「有没有墨」的全量口径保持字节级不变、
+ * 既有回归测试原封不动。
+ *
+ * @param alphaThreshold 0..255，默认 [INK_ALPHA_THRESHOLD]；内部至少按 1 处理
+ *   （阈值不大于 0 时退化为 [inkBoxOf] 的全量口径）。
+ */
+fun coreInkBox(
+    pixels: IntArray,
+    width: Int,
+    height: Int,
+    alphaThreshold: Int = INK_ALPHA_THRESHOLD
+): InkBox? {
+    if (width <= 0 || height <= 0) return null
+    if (pixels.size < width * height) return null
+    val threshold = alphaThreshold.coerceAtLeast(1)
+
+    fun rowHasInk(y: Int): Boolean {
+        val start = y * width
+        var x = 0
+        while (x < width) {
+            if (pixels[start + x] ushr 24 >= threshold) return true
+            x++
+        }
+        return false
+    }
+
+    // 上边界：第一行有核心墨水的
+    var top = -1
+    var y = 0
+    while (y < height) {
+        if (rowHasInk(y)) {
+            top = y
+            break
+        }
+        y++
+    }
+    if (top < 0) return null // 整张图没有一像素达到阈值
+
+    // 下边界：最后一行有核心墨水的
+    var bottom = -1
+    y = height - 1
+    while (y >= top) {
+        if (rowHasInk(y)) {
+            bottom = y
+            break
+        }
+        y--
+    }
+
+    // 左右边界只需要在 [top, bottom] 行范围内扫
+    var left = -1
+    var x = 0
+    while (x < width) {
+        var yy = top
+        while (yy <= bottom) {
+            if (pixels[yy * width + x] ushr 24 >= threshold) {
+                left = x
+                break
+            }
+            yy++
+        }
+        if (left >= 0) break
+        x++
+    }
+
+    var right = -1
+    x = width - 1
+    while (x >= left) {
+        var yy = top
+        while (yy <= bottom) {
+            if (pixels[yy * width + x] ushr 24 >= threshold) {
+                right = x
+                break
+            }
+            yy++
+        }
+        if (right >= 0) break
+        x--
+    }
+    return InkBox(left, top, right, bottom)
+}
+
+/**
+ * 由「核心墨水」包围盒算出裁剪窗口（闭区间），全透明 / 无需裁剪时返回 null。
+ *
+ * 从 trimTransparent 抽出来的纯几何：余量在核心盒四边外扩，再夹到位图边界内。
+ * 抽成纯函数是为了能在 JVM 单测里验证「余量、夹取、不裁/裁」的每一步——
+ * trimTransparent 本身要 `Bitmap`，JVM 里造不出来（见 [coreInkBox] 的说明）。
+ *
+ * @param box [coreInkBox] 的结果；null 表示全透明，直接不裁。
+ * @return 裁剪窗口（闭区间，可直接喂 `Bitmap.createBitmap`）；等于整图时返回
+ *   null（已紧贴，省一次分配）。
+ */
+fun trimWindow(box: InkBox?, marginPx: Int, width: Int, height: Int): InkBox? {
+    if (box == null) return null
+    val left = (box.left - marginPx).coerceAtLeast(0)
+    val top = (box.top - marginPx).coerceAtLeast(0)
+    val right = (box.right + marginPx).coerceAtMost(width - 1)
+    val bottom = (box.bottom + marginPx).coerceAtMost(height - 1)
+    if (right < left || bottom < top) return null
+    // 已经铺满整图（只剩余量）就不裁了：newW==w && newH==h 与之等价
+    if (left == 0 && top == 0 && right == width - 1 && bottom == height - 1) return null
     return InkBox(left, top, right, bottom)
 }

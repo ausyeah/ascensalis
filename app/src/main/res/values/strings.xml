@@ -76,6 +76,7 @@
     <string name="capture_flash_auto">闪光灯自动</string>
     <string name="capture_flash_on">闪光灯开</string>
     <string name="capture_flash_off">闪光灯关</string>
+    <string name="capture_flash">闪光灯</string>
     <string name="capture_switch_camera">切换前后摄像头</string>
     <string name="capture_shutter">快门</string>
     <string name="capture_gallery">相册</string>
@@ -219,6 +220,8 @@
 
     <!-- 设置 -->
     <string name="settings_title">设置</string>
+    <string name="settings_collapse">收起</string>
+    <string name="settings_expand">展开</string>
     <string name="settings_mineru_key">MinerU API Key</string>
     <string name="settings_hint_mineru_key">请在 MinerU 开放平台申请 API Key 后填入。公开分发的安装包不预置任何密钥。</string>
     <string name="settings_hint_llm_key">请填入大模型的接口地址与 API Key，点「获取模型列表」可自动选择模型名。公开分发的安装包不预置任何密钥。</string>
