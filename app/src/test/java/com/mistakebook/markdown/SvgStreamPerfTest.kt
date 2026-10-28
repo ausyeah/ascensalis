@@ -69,13 +69,13 @@ class SvgStreamPerfTest {
         assertTrue("测试 svg 必须超过 32KB 上限", svg.length > 32 * 1024)
 
         var emitted = 0
-        val step = svg.length / 30 + 1
-        var i = step
+        // 只喂「已超过上限」的前缀：这些必须降级不产出（未超上限的小前缀照旧产出，由另一条用例覆盖）
+        var i = 33 * 1024
         while (i < svg.length) {
             emitted += svgBlocks("```svg\n" + svg.substring(0, i)).size
-            i += step
+            i += 512
         }
-        assertEquals("超长未闭合 svg 流式期间不应产出图形块（降级占位）", 0, emitted)
+        assertEquals("超长未闭合 svg（已超上限）流式期间不应产出图形块（降级占位）", 0, emitted)
         assertEquals("未闭合阶段不应清洗这段 svg", 0L, SvgSanitizer.sanitizeCharCount)
 
         // 闭合后恢复：整段清洗产出完整图
