@@ -303,6 +303,8 @@
     <string name="settings_add_profile">新增配置</string>
     <string name="settings_edit_profile">编辑配置</string>
     <string name="settings_delete_profile">删除配置</string>
+    <string name="settings_delete_profile_title">删除这条配置？</string>
+    <string name="settings_delete_profile_body">删除「%1$s」后不可恢复，其中的 Key 也会一起清掉。确定删除吗？</string>
     <string name="settings_profile_name">配置名称</string>
     <string name="settings_base_url">Base URL</string>
     <string name="settings_api_key">API Key</string>
