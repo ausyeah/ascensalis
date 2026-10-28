@@ -279,54 +279,171 @@ fun rememberAutoScrollEffect(
     //    反向 scrollBy 把用户刚滑到的位置又推回去，等于跟惯性滑动打架。
     //    所以凡是「上一帧还在动」的静止首帧，一律只重取基线不补偿：
     //    手势的结果优先，内容增长的补偿从下一个静止帧开始。
+    //
+    //    ## 判定逻辑不放在这里
+    //
+    //    上面这几条规则是「渲染/解析链路的策略」，按仓库文化必须能被单测
+    //    断言。所以逐帧判定整段抽成了 [scrollAnchorDecision]：effect 只负责
+    //    把一帧的观察结果喂进去、再按返回值决定要不要 scrollBy。所有分支
+    //    顺序、基线何时更新、补偿量怎么算，都在那个纯函数里，
+    //    由 ScrollAnchorLogicTest 钉住。改这里之前先看那个测试。
     LaunchedEffect(state, coordinator) {
-        var anchorKey: Any? = null
-        var anchorOffset = 0
-        var wasScrolling = false
+        // anchorKey / anchorOffset / wasScrolling 的当前值。effect 重启时重置
+        // （原实现就是三个局部 var，同一个 LaunchedEffect 的生命周期）。
+        var baseline = ScrollAnchorBaseline()
         snapshotFlow {
+            // 视口为空时 topMost 为 null：key 传 null 让纯函数走「无从锚定」
+            // 那一支（offset 用 0 占位，那一支根本不读它）。
             val topMost = state.layoutInfo.visibleItemsInfo.lastOrNull()
-            if (topMost == null) null else Triple(topMost.key, topMost.offset, state.isScrollInProgress)
-        }.collect { info ->
-            // 视口里一条都没有（极端短列表 / 正在重建）：无从锚定
-            if (info == null) return@collect
-            val (key, offset, scrolling) = info
-            // 列表正在动（用户手势 / 惯性 / 自己的回底动画）：不插手，
-            // 也不重取基线——动了之后的静止帧会重新取。
-            if (scrolling) {
-                wasScrolling = true
-                return@collect
-            }
-            // 刚停下来的第一帧：这是用户手势的落点，不是内容增长。
-            if (wasScrolling) {
-                wasScrolling = false
-                anchorKey = key
-                anchorOffset = offset
-                return@collect
-            }
-            // 手指按着 / 自己的回底动画进行中：同样不插手
-            if (draggedNow || coordinator.programmaticScroll) return@collect
-            // 跟随态下内容上推就是「跟随」本身，不能干扰。
-            if (coordinator.following) {
-                anchorKey = key
-                anchorOffset = offset
-                return@collect
-            }
-            if (key != anchorKey) {
-                // 锚点换了（滑着换了一条 / 列表结构变了）：重新取基线。
-                anchorKey = key
-                anchorOffset = offset
-                return@collect
-            }
-            val drift = offset - anchorOffset
-            anchorOffset = offset
+            Triple(topMost?.key, topMost?.offset ?: 0, state.isScrollInProgress)
+        }.collect { (key, offset, scrolling) ->
+            val outcome = scrollAnchorDecision(
+                frameKey = key,
+                frameOffset = offset,
+                scrolling = scrolling,
+                dragged = draggedNow,
+                programmaticScroll = coordinator.programmaticScroll,
+                following = coordinator.following,
+                baseline = baseline
+            )
+            baseline = outcome.baseline
             // 只有「内容把锚点往上推」才补偿；offset 变小是用户在往上翻，
-            // 那正是他要的方向。
-            if (drift <= 0) return@collect
-            state.scrollBy(drift.toFloat())
+            // 那正是他要的方向（判据在纯函数里）。
+            if (outcome.compensatePx > 0) {
+                state.scrollBy(outcome.compensatePx.toFloat())
+            }
         }
     }
 
     return coordinator
+}
+
+/**
+ * 滚动锚定判定的**基线**：上一帧留下的锚点状态。
+ *
+ * 与 effect 里原来的三个局部变量一一对应：
+ * - [anchorKey] ← `anchorKey`（锚点 item 的 key；`null` = 还没取过基线）；
+ * - [anchorOffset] ← `anchorOffset`（取基线那一帧该 item 的 offset）；
+ * - [wasScrolling] ← `wasScrolling`（上一帧是否还在滚动）。
+ *
+ * 之所以做成不可变数据类而不是让 effect 继续持有三个 `var`：
+ * 判定函数要能在没有 Compose 的情况下被单测驱动——每帧「喂当前状态、
+ * 拿回新状态」就能把整条时序跑完。
+ */
+internal data class ScrollAnchorBaseline(
+    val anchorKey: Any? = null,
+    val anchorOffset: Int = 0,
+    val wasScrolling: Boolean = false
+)
+
+/**
+ * [scrollAnchorDecision] 的单帧结论。
+ *
+ * @param baseline 要写回 effect 的新基线（已按本帧结论更新）；
+ * @param compensatePx 本帧应补偿的像素数，`<= 0` 表示不补偿。
+ *   这个值就是原来 `drift = offset - anchorOffset` 里为正的那一支，
+ *   Compose 侧直接 `scrollBy(compensatePx.toFloat())`——补偿的**时机与量**
+ *   因此与重构前逐帧一致。
+ */
+internal data class ScrollAnchorOutcome(
+    val baseline: ScrollAnchorBaseline,
+    val compensatePx: Int
+)
+
+/**
+ * 流式增长期的**滚动锚定**判定（v0.0.54）。纯函数：不碰 Compose / Android，
+ * 输入只有基本类型与 item key，可在 JVM 上直接单测。
+ *
+ * ## 它回答的问题
+ *
+ * 「这一帧，视口该不该被 scrollBy 拽一下？拽多少？」
+ *
+ * ## 与 effect 局部变量的对应关系
+ *
+ * | 参数 | 来源 |
+ * |---|---|
+ * | [frameKey] / [frameOffset] | 最顶部可见 item 的 `key` / `offset` |
+ * | [scrolling] | `state.isScrollInProgress` |
+ * | [dragged] | `collectIsDraggedAsState()`（经 rememberUpdatedState 取实时值） |
+ * | [programmaticScroll] | `coordinator.programmaticScroll` |
+ * | [following] | `coordinator.following` |
+ * | [baseline] | 上一帧的 [ScrollAnchorBaseline] |
+ *
+ * ## 分支顺序即优先级，与原实现逐行同构
+ *
+ * 0. **视口为空**（[frameKey] 为 null）→ 无从锚定：不补偿，且**不动基线**
+ *    （连 `wasScrolling` 都不动，与原来 `if (info == null) return@collect`
+ *    在一切之前返回一致）；
+ * 1. **正在滚动** → 只把 `wasScrolling` 置 true，不重取基线也不补偿。
+ *    手势 / 惯性 / 自己的回底动画期间一律不插手；
+ * 2. **刚静止的首帧**（`wasScrolling`）→ 清标志、重取基线、不补偿。
+ *    向下 fling 停在半路时 offset 也会变大，那是滚动量减少造成的，
+ *    不是内容增长——不区分就会跟惯性滑动打架；
+ * 3. **手指按着 / 回底动画中** → 不插手，且**不重取基线**（基线维持按住前
+ *    那一刻，松手后的静止帧会重新取）；
+ * 4. **跟随态** → 内容上推就是「跟随」本身，不干扰；但仍重取基线，
+ *    这样退出跟随态后的第一帧就有新鲜基线可比；
+ * 5. **锚点 key 变了** → 重取基线，不当成增长（滑着换了一条 / 列表结构变了）；
+ * 6. **同 key** → `drift = offset - anchorOffset`；`drift <= 0` 不补偿
+ *    （offset 变小是用户在往上翻，那正是他要的方向），`drift > 0` 才补偿。
+ *
+ * ## 模糊点（按现有实现的行为建模，未擅自修正）
+ *
+ * - **`dragged` 与 `programmaticScroll` 分支不更新基线**：若用户按住不动
+ *   （`isScrollInProgress == false` 但 `isDragged == true`）期间内容长高，
+ *   这段增长不会立刻补，而是累积到松手后的第一个静止帧一次性补足。
+ *   现有实现即是如此；因为那之前必然先经过分支 2 重取基线，实际上补的是
+ *   「松手落点 → 当前」的增量，不是整段按住期，行为上是自洽的。
+ * - **补偿本身会改 offset**：`scrollBy(+drift)` 之后锚点 offset 应回到
+ *   [ScrollAnchorBaseline.anchorOffset]，下一帧 `drift == 0` 自然不补
+ *   （由 `LazyListState` 兑现，函数不负责验证）。若某平台版本 scrollBy
+ *   有阻尼/取整，这里会留下 1px 级的残差，下一帧继续补——自愈，不会漂移。
+ */
+internal fun scrollAnchorDecision(
+    frameKey: Any?,
+    frameOffset: Int,
+    scrolling: Boolean,
+    dragged: Boolean,
+    programmaticScroll: Boolean,
+    following: Boolean,
+    baseline: ScrollAnchorBaseline
+): ScrollAnchorOutcome {
+    // 视口里一条都没有（极端短列表 / 正在重建）：无从锚定。
+    // 这里必须排在 `scrolling` 之前：原来 `info == null` 是在一切判断之前
+    // 返回的，空视口那一帧连 wasScrolling 都不该被置起来。
+    if (frameKey == null) {
+        return ScrollAnchorOutcome(baseline, compensatePx = 0)
+    }
+    // 列表正在动（用户手势 / 惯性 / 自己的回底动画）：不插手，
+    // 也不重取基线——动了之后的静止帧会重新取。
+    if (scrolling) {
+        return ScrollAnchorOutcome(baseline.copy(wasScrolling = true), compensatePx = 0)
+    }
+    // 刚停下来的第一帧：这是用户手势的落点，不是内容增长。
+    if (baseline.wasScrolling) {
+        return ScrollAnchorOutcome(
+            baseline.copy(wasScrolling = false, anchorKey = frameKey, anchorOffset = frameOffset),
+            compensatePx = 0
+        )
+    }
+    // 手指按着 / 自己的回底动画进行中：同样不插手。
+    // 注意这里**不**重取基线——否则松手后的静止帧会把「按下时的位置」当基线，
+    // 把手势期间攒下的增长当成该补的量，反而跟用户打架。
+    if (dragged || programmaticScroll) {
+        return ScrollAnchorOutcome(baseline, compensatePx = 0)
+    }
+    // 跟随态下内容上推就是「跟随」本身，不能干扰。
+    if (following) {
+        return ScrollAnchorOutcome(baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset), compensatePx = 0)
+    }
+    if (frameKey != baseline.anchorKey) {
+        // 锚点换了（滑着换了一条 / 列表结构变了）：重新取基线。
+        return ScrollAnchorOutcome(baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset), compensatePx = 0)
+    }
+    val drift = frameOffset - baseline.anchorOffset
+    // 只有「内容把锚点往上推」才补偿；offset 变小是用户在往上翻，
+    // 那正是他要的方向。
+    return ScrollAnchorOutcome(baseline.copy(anchorOffset = frameOffset), compensatePx = drift)
 }
 
 /**
