@@ -418,6 +418,8 @@
     <string name="detail_aux_generate">生成辅助图</string>
     <string name="detail_aux_generating">生成中…</string>
     <string name="detail_aux_dismiss">知道了</string>
+    <string name="detail_aux_delete">删除配图</string>
+    <string name="detail_aux_delete_confirm">确认删除</string>
     <string name="detail_variant_title">变式题</string>
     <string name="detail_variant_generating">正在基于这道题出变式…</string>
     <string name="detail_variant_save">存为错题</string>
@@ -715,20 +717,22 @@
     <string name="capture_enhance_preview">增强预览</string>
     <string name="capture_enhance_computing">正在计算预览…</string>
     <string name="capture_enhance_confirm">确认，去裁切</string>    <string name="library_title">资料库</string>
-    <string name="library_desc">存放在 App 内的文本资料（.md / .txt / .json / .csv）。对话时可让 AI 参考或整理存入。</string>
+    <string name="library_desc">存放在 App 内的资料（.md / .txt / .json / .csv / .docx / .pdf）。对话时可让 AI 参考或整理存入；.docx 与 .pdf 自动提取文字，原文件保留。</string>
     <string name="library_empty">还没有资料。右下角导入或新建。</string>
     <string name="library_import">导入文件</string>
-    <string name="library_import_failed">导入失败：文件名不支持或读取失败（一期仅支持 .md / .txt / .json / .csv）</string>
+    <string name="library_import_failed">导入失败：文件名不支持或读取失败（支持 .md / .txt / .json / .csv / .docx / .pdf）</string>
     <string name="library_new">新建文档</string>
     <string name="library_new_name">文件名</string>
-    <string name="library_new_name_hint">支持 .md / .txt / .json / .csv</string>
+    <string name="library_new_name_hint">支持 .md / .txt / .json / .csv（新建仅限文本类）</string>
     <string name="library_new_content">内容</string>
     <string name="library_rename">重命名</string>
     <string name="library_delete">删除</string>
     <string name="library_delete_confirm_title">删除文件？</string>
     <string name="library_delete_confirm_body">「%1$s」将被删除，无法恢复。</string>
-    <string name="library_bad_name">文件名无效：只能用单一文件名，扩展名须为 .md / .txt / .json / .csv，且不与现有文件重名</string>
+    <string name="library_bad_name">文件名无效：只能用单一文件名，扩展名须为 .md / .txt / .json / .csv / .docx / .pdf，且不与现有文件重名</string>
     <string name="library_truncated">内容超过 50KB，已截断显示（保存会丢失被截断部分）</string>
+    <string name="library_loading">正在读取…</string>
+    <string name="library_binary_preview_hint">.docx / .pdf 只读预览：以下为自动提取的文字，原文件不受影响</string>
     <string name="settings_library_section">资料库</string>    <string name="chat_attach_library">@资料库</string>
     <string name="widget_no_exam">暂无考试</string>
     <string name="badge_title">成就墙</string>
@@ -737,4 +741,9 @@
     <string name="badge_progress">%1$d / %2$d</string>
     <string name="badge_locked">未达成</string>
     <string name="settings_badge_entry">成就墙</string>
-    <string name="badge_new_toast">解锁新成就：%1$s</string></resources>
+    <string name="badge_new_toast">解锁新成就：%1$s</string>
+    <string name="badge_prev_page">上一页</string>
+    <string name="badge_next_page">下一页</string>
+    <string name="badge_page_indicator">%1$d / %2$d</string>
+    <string name="badge_unlocked_count">已解锁 %1$d / %2$d</string>
+</resources>

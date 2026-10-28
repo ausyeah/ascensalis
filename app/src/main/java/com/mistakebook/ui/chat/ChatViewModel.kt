@@ -509,6 +509,15 @@ class ChatViewModel(
                         lastPromptTokens = if (snap.promptTokens > 0) snap.promptTokens
                         else current.lastPromptTokens
                     )
+                    // **自动压缩（500k 阈值）**：上次请求的输入 token 数到线就压，
+                    // 不等用户点。防连发：只有上下文重新长过上一次触发时的量
+                    // 才再次触发（压缩后下一轮请求必然大幅回落，不会连环压）。
+                    if (snap.promptTokens >= AUTO_COMPRESS_TOKENS &&
+                        snap.promptTokens > lastAutoCompressTokens
+                    ) {
+                        lastAutoCompressTokens = snap.promptTokens
+                        viewModelScope.launch { compressContext() }
+                    }
                     snap.errorText?.let { _events.trySend(ChatEvent.Error(it)) }
                 } else {
                     generationActive = true
@@ -1021,6 +1030,9 @@ class ChatViewModel(
      * 进行中连点直接返回，避免生成多份互相覆盖的摘要；
      * 进行中按钮本身会变成「压缩中…」并禁用。
      */
+    /** 上次自动压缩时的输入 token 数：只有上下文**重新长过**它才会再压，防止每一轮都触发。 */
+    private var lastAutoCompressTokens = 0
+
     fun compressContext() {
         val sessionId = _state.value.sessionId
         if (sessionId == 0L || _state.value.compressing) return
@@ -1321,5 +1333,20 @@ class ChatViewModel(
          * 自动发会白烧 token，而且用户十有八九想改问法。
          */
         const val PREFILL_QUESTION = "请讲解这道题，给出详细解题步骤、答案和易错点。"
+
+        /**
+         * 「是否压缩」按钮的出现阈值（按上次请求的输入 token 数）。
+         *
+         * 用户约定：200k 之前压缩按钮不出现——短会话没有压缩价值，
+         * 常驻按钮只会诱导人去按；到 200k 才交由用户决定压不压。
+         */
+        const val MANUAL_COMPRESS_TOKENS = 200_000
+
+        /**
+         * 自动压缩阈值。到 500k 不再等用户点，直接压——
+         * 这个量级的上下文再拖下去请求体与费用都会失控，
+         * 自动压缩是安全网不是可选项。
+         */
+        const val AUTO_COMPRESS_TOKENS = 500_000
     }
 }

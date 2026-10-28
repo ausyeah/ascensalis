@@ -21,19 +21,27 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,7 +55,6 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,8 +75,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -352,20 +361,44 @@ fun CaptureScreen(
             onDismiss = { showKeyGate = false }
         )
     }
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(CaptureScrim)) {
         if (hasCameraPermission) {
-            CameraPreview(
-                imageCapture = imageCapture,
-                flashMode = flashMode,
-                lensFacing = lensFacing,
-                onBound = { cameraBound = it },
-                onFlashAvailability = { available ->
-                    flashAvailable = available
-                    if (!available) flashMode = FLASH_OFF
-                },
-                onError = { errorText = it }
-            )
-            GridOverlay(modifier = Modifier.fillMaxSize())
+            // 取景器卡片：圆角 + 细描边浮在深色底上。
+            //
+            // 预览与网格都裁在卡片内——网格铺满全屏时，参考线会飘到
+            // 底部控制区上方，视觉上散成一片；裁进卡片才像「一个取景框」。
+            //
+            // 高度用「屏高 - 底部操作区预留」而不是 weight：底部控制区是
+            // 这个 Box 的**兄弟节点**（它要靠 align 贴在底边），weight 只
+            // 在 Column/Row 作用域里存在。控制区高度固定，预留一个常量即可。
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxSize()
+                    .padding(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 16.dp,
+                        bottom = BottomAreaReserve
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.Black)
+                    .border(1.dp, ViewfinderBorder, RoundedCornerShape(24.dp))
+            ) {
+                CameraPreview(
+                    imageCapture = imageCapture,
+                    flashMode = flashMode,
+                    lensFacing = lensFacing,
+                    onBound = { cameraBound = it },
+                    onFlashAvailability = { available ->
+                        flashAvailable = available
+                        if (!available) flashMode = FLASH_OFF
+                    },
+                    onError = { errorText = it }
+                )
+                GridOverlay(modifier = Modifier.fillMaxSize())
+                ViewfinderCorners(modifier = Modifier.fillMaxSize())
+            }
         } else {
             CameraPermissionRequest(
                 onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) },
@@ -374,122 +407,16 @@ fun CaptureScreen(
             )
         }
 
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 28.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            IconButton(
-                onClick = { flashMode = (flashMode + 1) % 3 },
-                enabled = flashAvailable != false
-            ) {
-                Icon(
-                    imageVector = when (flashMode) {
-                        FLASH_ON -> Icons.Default.FlashOn
-                        FLASH_OFF -> Icons.Default.FlashOff
-                        else -> Icons.Default.FlashAuto
-                    },
-                    contentDescription = stringResource(
-                        when (flashMode) {
-                            FLASH_ON -> R.string.capture_flash_on
-                            FLASH_OFF -> R.string.capture_flash_off
-                            else -> R.string.capture_flash_auto
-                        }
-                    ),
-                    tint = Color.White
-                )
-            }
-            IconButton(onClick = {
-                lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                    CameraSelector.LENS_FACING_FRONT
-                } else {
-                    CameraSelector.LENS_FACING_BACK
-                }
-            }) {
-                Icon(
-                    imageVector = Icons.Default.Cameraswitch,
-                    contentDescription = stringResource(R.string.capture_switch_camera),
-                    tint = Color.White
-                )
-            }
-        }
-
-        val strength = ocrStrength
-        if (strength != null) {
-            val options = listOf(
-                R.string.capture_ocr_off,
-                R.string.capture_ocr_light,
-                R.string.capture_ocr_standard,
-                R.string.capture_ocr_strong
-            )
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 90.dp)
-            ) {
-                options.forEachIndexed { index, titleRes ->
-                    SegmentedButton(
-                        selected = strength == index,
-                        onClick = {
-                            ocrStrength = index
-                            scope.launch { container.settingsStore.setOcrStrength(index) }
-                        },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                        colors = SegmentedButtonDefaults.colors(
-                            activeContainerColor = Color.Black.copy(alpha = 0.5f),
-                            inactiveContainerColor = Color.Black.copy(alpha = 0.3f),
-                            activeContentColor = Color.White,
-                            inactiveContentColor = Color.White,
-                            activeBorderColor = MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Text(stringResource(titleRes))
-                    }
-                }
-            }
-        }
-
-        if (errorText != null) {
-            Text(
-                text = errorText.orEmpty(),
-                color = Color.White,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(12.dp)
-            )
-        }
-
-        if (importing) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = Color.White
-                )
-                Spacer(Modifier.size(12.dp))
-                Text(stringResource(R.string.gallery_copying), color = Color.White)
-            }
-        }
-
         // F6：连拍批次悬浮计数 + 「完成」。QUESTION 与 CHAT（T2 对话连拍）都有批次；
         // 计数文案不同（本批 N 张），上限不同（12 / 9）。
         if (batchActive) {
             Row(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 128.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .align(Alignment.TopCenter)
+                    .padding(top = 96.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.92f))
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -499,12 +426,15 @@ fun CaptureScreen(
                         else R.string.capture_batch_count,
                         batchSize
                     ),
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.labelMedium
                 )
-                Button(
+                TextButton(
                     onClick = onStartBatchCrop,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
                 ) {
                     Text(
                         stringResource(
@@ -516,123 +446,266 @@ fun CaptureScreen(
             }
         }
 
-        Row(
+        if (errorText != null) {
+            CapturePill(
+                modifier = Modifier.align(Alignment.Center),
+                container = MaterialTheme.colorScheme.errorContainer
+            ) {
+                Text(
+                    text = errorText.orEmpty(),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+
+        if (importing) {
+            CapturePill(modifier = Modifier.align(Alignment.Center)) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.size(10.dp))
+                Text(stringResource(R.string.gallery_copying), color = Color.White)
+            }
+        }
+
+        // ---------------------------------------------------------- 底部操作区
+        //
+        // 三层结构：引导语 → 控制排 → 快门行。
+        // 控制排收编了原先散落在顶部的闪光灯/前后摄与 OCR 档位——
+        // 拍摄时眼睛盯着取景器，手边能摸到的才是入口，浮在预览上方的
+        // 细碎图标既难按也干扰取景。
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.35f))
-                .padding(horizontal = 32.dp, vertical = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            IconButton(onClick = {
-                if (isChatPurpose) {
-                    // T2 对话连拍：相册也多选入批（上限 9 由批次满员 toast 兜底）
-                    galleryChatMultiLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                } else {
-                    galleryMultiLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            Text(
+                text = "对准题目，光线充足识别更准",
+                color = Color.White.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelMedium
+            )
+            Spacer(Modifier.height(14.dp))
+
+            // 控制排：闪光灯 / OCR 增强档 / 前后摄
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                FrostyCircleButton(
+                    onClick = { flashMode = (flashMode + 1) % 3 },
+                    enabled = flashAvailable != false,
+                    active = flashMode != FLASH_AUTO
+                ) {
+                    Icon(
+                        imageVector = when (flashMode) {
+                            FLASH_ON -> Icons.Default.FlashOn
+                            FLASH_OFF -> Icons.Default.FlashOff
+                            else -> Icons.Default.FlashAuto
+                        },
+                        contentDescription = stringResource(
+                            when (flashMode) {
+                                FLASH_ON -> R.string.capture_flash_on
+                                FLASH_OFF -> R.string.capture_flash_off
+                                else -> R.string.capture_flash_auto
+                            }
+                        ),
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
                     )
                 }
-            }) {
-                Icon(
-                    imageVector = Icons.Default.PhotoLibrary,
-                    contentDescription = stringResource(R.string.capture_gallery),
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-            ShutterButton(
-                // 相机没绑成功时禁止按快门：否则 CameraX 立刻回 "Not bound to a valid Camera"
-                enabled = !capturing && hasCameraPermission && cameraBound,
-                onClick = {
-                    errorText = null
-                    val isQuestion =
-                        container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION
-                    // F6：批次满员时快门不再拍照，toast 引导去裁切/完成。
-                    // MinerU 串行解析，12 张已接近耐心极限，更大批量走 PDF 导入。
-                    if (batchFull) {
-                        Toast.makeText(
-                            context,
-                            context.getString(
-                                if (isQuestion) R.string.capture_batch_full
-                                else R.string.capture_chat_batch_full
-                            ),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    } else {
-                        capturing = true
-                        scope.launch {
-                            // CHAT 用途跳过 Key 门禁（T11），见 checkRecognitionKeys 处注释
-                            if (isQuestion && !checkRecognitionKeys()
-                            ) {
-                                capturing = false
-                                return@launch
-                            }
-                            // 看门狗：任何未预料的回调丢失都不能让快门永久禁用
-                            scope.launch {
-                                delay(15_000)
-                                if (capturing) {
-                                    capturing = false
-                                    errorText = context.getString(R.string.capture_failed)
-                                }
-                            }
-                            takePhoto(
-                                context = context,
-                                executor = executor,
-                                imageCapture = imageCapture,
-                                flashMode = flashMode,
-                                strength = ocrStrength ?: 2,
-                                onCaptured = { path ->
-                                    // 连拍模式拍完**不离开相机页**：capturing 必须在这里复位，
-                                    // 否则第二张按不动快门（旧流程直接导航走，页面销毁掩盖了这点）。
-                                    capturing = false
-                                    if (isQuestion) {
-                                        container.captureBatch.add(path, fromGallery = false)
-                                    } else {
-                                        // T2 对话连拍：CHAT 拍完入批不退出（与 QUESTION 共用批次容器），
-                                        // 「完成」后经 NavHost 进逐张裁切接力，全部裁完回会话。
-                                        // 无批次时保持单张原链路：直接 onCropped(path) 进裁切。
-                                        if (batchActive || !container.captureBatch.add(path, fromGallery = false)) {
-                                            if (!batchActive) {
-                                                // T5 拍照增强可调：单张拍完先进调节步（对刚拍的原图
-                                                // 重新 enhanceForOcr，可切「关」回到原像素），确认再进裁切。
-                                                adjustPath = path
-                                            } else {
-                                                Toast.makeText(
-                                                    context,
-                                                    context.getString(R.string.capture_chat_batch_full),
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    }
+
+                val strength = ocrStrength
+                if (strength != null) {
+                    Spacer(Modifier.width(10.dp))
+                    val options = listOf(
+                        R.string.capture_ocr_off,
+                        R.string.capture_ocr_light,
+                        R.string.capture_ocr_standard,
+                        R.string.capture_ocr_strong
+                    )
+                    // 不另设高度：SingleChoiceSegmentedButtonRow 内部会按
+                    // Material3 的默认档位高度自绘，外面再套一层固定高度
+                    // 只会被它覆盖（白写），档位按钮的自然高度与两侧圆钮
+                    // 已经够接近。
+                    SingleChoiceSegmentedButtonRow {
+                        options.forEachIndexed { index, titleRes ->
+                            SegmentedButton(
+                                selected = strength == index,
+                                onClick = {
+                                    ocrStrength = index
+                                    scope.launch { container.settingsStore.setOcrStrength(index) }
                                 },
-                                onError = {
-                                    capturing = false
-                                    errorText = context.getString(R.string.capture_failed)
-                                }
-                            )
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = options.size
+                                ),
+                                colors = SegmentedButtonDefaults.colors(
+                                    activeContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                                    inactiveContainerColor = Color.White.copy(alpha = 0.12f),
+                                    activeContentColor = Color.White,
+                                    inactiveContentColor = Color.White,
+                                    activeBorderColor = Color.White.copy(alpha = 0.35f),
+                                    inactiveBorderColor = Color.White.copy(alpha = 0.2f)
+                                )
+                            ) {
+                                Text(
+                                    stringResource(titleRes),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
                         }
                     }
                 }
-            )
-            IconButton(onClick = {
-                // F6：有未完成批次时先弹丢弃确认，别让误触丢掉刚拍的题
-                if (batchActive) {
-                    showDiscardDialog = true
-                } else {
-                    onBack()
+
+                Spacer(Modifier.width(10.dp))
+                FrostyCircleButton(
+                    onClick = {
+                        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                            CameraSelector.LENS_FACING_FRONT
+                        } else {
+                            CameraSelector.LENS_FACING_BACK
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Cameraswitch,
+                        contentDescription = stringResource(R.string.capture_switch_camera),
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
-            }) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = stringResource(R.string.capture_cancel),
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // 快门行：相册入口 / 大快门 / 关闭（有批次时先弹丢弃确认）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                FrostyCircleButton(
+                    onClick = {
+                        if (isChatPurpose) {
+                            // T2 对话连拍：相册也多选入批（上限 9 由批次满员 toast 兜底）
+                            galleryChatMultiLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        } else {
+                            galleryMultiLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    },
+                    size = 52.dp
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoLibrary,
+                        contentDescription = stringResource(R.string.capture_gallery),
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                ShutterButton(
+                    // 相机没绑成功时禁止按快门：否则 CameraX 立刻回 "Not bound to a valid Camera"
+                    enabled = !capturing && hasCameraPermission && cameraBound,
+                    onClick = {
+                        errorText = null
+                        val isQuestion =
+                            container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.QUESTION
+                        // F6：批次满员时快门不再拍照，toast 引导去裁切/完成。
+                        // MinerU 串行解析，12 张已接近耐心极限，更大批量走 PDF 导入。
+                        if (batchFull) {
+                            Toast.makeText(
+                                context,
+                                context.getString(
+                                    if (isQuestion) R.string.capture_batch_full
+                                    else R.string.capture_chat_batch_full
+                                ),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            capturing = true
+                            scope.launch {
+                                // CHAT 用途跳过 Key 门禁（T11），见 checkRecognitionKeys 处注释
+                                if (isQuestion && !checkRecognitionKeys()
+                                ) {
+                                    capturing = false
+                                    return@launch
+                                }
+                                // 看门狗：任何未预料的回调丢失都不能让快门永久禁用
+                                scope.launch {
+                                    delay(15_000)
+                                    if (capturing) {
+                                        capturing = false
+                                        errorText = context.getString(R.string.capture_failed)
+                                    }
+                                }
+                                takePhoto(
+                                    context = context,
+                                    executor = executor,
+                                    imageCapture = imageCapture,
+                                    flashMode = flashMode,
+                                    strength = ocrStrength ?: 2,
+                                    onCaptured = { path ->
+                                        // 连拍模式拍完**不离开相机页**：capturing 必须在这里复位，
+                                        // 否则第二张按不动快门（旧流程直接导航走，页面销毁掩盖了这点）。
+                                        capturing = false
+                                        if (isQuestion) {
+                                            container.captureBatch.add(path, fromGallery = false)
+                                        } else {
+                                            // T2 对话连拍：CHAT 拍完入批不退出（与 QUESTION 共用批次容器），
+                                            // 「完成」后经 NavHost 进逐张裁切接力，全部裁完回会话。
+                                            // 无批次时保持单张原链路：直接 onCropped(path) 进裁切。
+                                            if (batchActive || !container.captureBatch.add(path, fromGallery = false)) {
+                                                if (!batchActive) {
+                                                    // T5 拍照增强可调：单张拍完先进调节步（对刚拍的原图
+                                                    // 重新 enhanceForOcr，可切「关」回到原像素），确认再进裁切。
+                                                    adjustPath = path
+                                                } else {
+                                                    Toast.makeText(
+                                                        context,
+                                                        context.getString(R.string.capture_chat_batch_full),
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onError = {
+                                        capturing = false
+                                        errorText = context.getString(R.string.capture_failed)
+                                    }
+                                )
+                            }
+                        }
+                    }
                 )
+                FrostyCircleButton(
+                    onClick = {
+                        // F6：有未完成批次时先弹丢弃确认，别让误触丢掉刚拍的题
+                        if (batchActive) {
+                            showDiscardDialog = true
+                        } else {
+                            onBack()
+                        }
+                    },
+                    size = 52.dp
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.capture_cancel),
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
     }
@@ -674,21 +747,172 @@ private fun CameraPermissionRequest(
     }
 }
 
+/**
+ * 拍照页的沉浸底色。
+ *
+ * 不再用纯黑：取景器卡片浮在这层上时需要一点「纸面感」，
+ * 纯黑让卡片边缘的 1dp 描边完全看不见，卡片像贴错的图。
+ */
+private val CaptureScrim = Color(0xFF14151A)
+
+/** 取景器描边：白色 8% 不透明度，细到不抢内容，又足以勾出卡片边界。 */
+private val ViewfinderBorder = Color.White.copy(alpha = 0.08f)
+
+/**
+ * 底部操作区的高度预留（dp）。
+ *
+ * 引导语 ~20 + 控制排 44 + 快门 76 + 间距 ~50 ≈ 190，取 210 留余量。
+ * 取景器卡片高度 = 屏高 - 这个值，两者正好首尾相接不重叠。
+ */
+private val BottomAreaReserve = 210.dp
+
+/**
+ * 取景器四角的 L 形角标。
+ *
+ * 圆角卡片 + 九宫格已经够了，再补角标是因为「框」的边界感对拍照很重要：
+ * 用户要知道题目的哪一侧会被切出去。角标比四周边框更克制——
+ * 只有四个角有线，中间干干净净，不会和九宫格抢注意力。
+ */
 @Composable
-private fun ShutterButton(enabled: Boolean, onClick: () -> Unit) {
+private fun ViewfinderCorners(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val arm = size.minDimension * 0.09f
+        val thickness = arm * 0.18f
+        val inset = size.minDimension * 0.04f
+        val color = Color.White.copy(alpha = 0.85f)
+        val w = size.width
+        val h = size.height
+        val corners = listOf(
+            Triple(inset, inset, true),           // 左上：向右、向下
+            Triple(w - inset, inset, false),      // 右上：向左、向下
+            Triple(inset, h - inset, true),       // 左下：向右、向上
+            Triple(w - inset, h - inset, false)   // 右下：向左、向上
+        )
+        corners.forEach { (x, y, openRight) ->
+            val dirX = if (openRight) 1f else -1f
+            val dirY = if (y < h / 2f) 1f else -1f
+            drawLine(
+                color = color,
+                start = androidx.compose.ui.geometry.Offset(x, y),
+                end = androidx.compose.ui.geometry.Offset(x + dirX * arm, y),
+                strokeWidth = thickness
+            )
+            drawLine(
+                color = color,
+                start = androidx.compose.ui.geometry.Offset(x, y),
+                end = androidx.compose.ui.geometry.Offset(x, y + dirY * arm),
+                strokeWidth = thickness
+            )
+        }
+    }
+}
+
+/**
+ * 居中的半透明提示胶囊（错误 / 相册导入中）。
+ *
+ * 旧版是一块带 60% 黑底的裸 Text，宽度撑满内容且四角直角，
+ * 在取景器上像一块补丁。统一成胶囊 + surface 容器色，
+ * 错误态改用 errorContainer，颜色本身就是语义。
+ */
+@Composable
+private fun CapturePill(
+    modifier: Modifier = Modifier,
+    container: Color = Color.Black.copy(alpha = 0.65f),
+    content: @Composable RowScope.() -> Unit
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(container)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        content = content
+    )
+}
+
+/**
+ * 磨砂圆形控制钮（闪光灯 / 相册 / 关闭 / 前后摄）。
+ *
+ * 12% 白的容器在黑底上做出毛玻璃的层次；选中态（active）换成
+ * primary 容器 + onPrimary 图标，用户一眼能看出「闪光灯开着」。
+ * 尺寸给足 44~52dp：相机页的按钮都是在举着手机的情况下按的，
+ * 44dp 是触摸目标的底线。
+ */
+@Composable
+private fun FrostyCircleButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: androidx.compose.ui.unit.Dp = 44.dp,
+    enabled: Boolean = true,
+    active: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val container = when {
+        active -> MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+        else -> Color.White.copy(alpha = 0.12f)
+    }
     Box(
-        modifier = Modifier
-            .size(72.dp)
+        modifier = modifier
+            .size(size)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = if (enabled) 0.95f else 0.4f)),
+            .background(container)
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        IconButton(onClick = onClick, enabled = enabled) {
+        content()
+    }
+}
+
+/**
+ * 快门：外环白描边 + 白芯，按下整体缩到 0.92f。
+ *
+ * 按压反馈用 graphicsLayer 的 scale——不参与测量，不会因为缩放
+ * 让周围按钮的位置抖一下。禁用态降到 40% 白并失去交互。
+ */
+@Composable
+private fun ShutterButton(enabled: Boolean, onClick: () -> Unit) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.92f else 1f,
+        animationSpec = tween(durationMillis = 90),
+        label = "shutter-scale"
+    )
+    Box(
+        modifier = Modifier
+            .size(76.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(Color.Transparent)
+            .border(width = 4.dp, color = Color.White.copy(alpha = if (enabled) 0.95f else 0.4f), shape = CircleShape)
+            .clickable(
+                // 用自己的 interactionSource：按压态要驱动下面的缩放动画，
+                // 走默认源的话拿不到 pressed 状态。
+                interactionSource = interaction,
+                // 不要默认水波：快门是「按下去缩一下」的触感，
+                // 水波纹会在缩放动画之上再叠一层，视觉很脏。
+                indication = null,
+                enabled = enabled,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = if (enabled) 0.95f else 0.4f)),
+            contentAlignment = Alignment.Center
+        ) {
             Icon(
                 imageVector = Icons.Default.PhotoCamera,
                 contentDescription = stringResource(R.string.capture_shutter),
-                tint = Color.Black,
-                modifier = Modifier.size(36.dp)
+                tint = Color.Black.copy(alpha = if (enabled) 0.75f else 0.4f),
+                modifier = Modifier.size(26.dp)
             )
         }
     }

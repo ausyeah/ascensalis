@@ -191,12 +191,16 @@ class ChatGenerationService : Service() {
         val searchEnabled = settings.chatSearchEnabled
         val effort = settings.reasoningEffort
 
-        // 媒体工具按配置给：没配识图模型就不给 describe_image（给了也执行不了），
-        // 没配生图渠道就不给 generate_image。
+        // 媒体工具按配置给，且**优先级服从模型自身能力**：
+        // 当前模型本身支持识图（supportsVision，图片本体已随请求发出）时，
+        // 不给 describe_image / ocr_image——它们是给「看不见图」的模型准备的
+        // 降级路径。工具挂在多模态模型上会诱发绕路：模型放着眼睛不用，
+        // 转而去调识图模型 / MinerU，多烧一次按页计费的额度，还多一轮往返。
+        // 生图与识图无关，配了就给。
         val mediaTools = MediaTools.all(
-            visionConfigured = settings.visionConfigured,
+            visionConfigured = settings.visionConfigured && !profile.supportsVision,
             imageConfigured = settings.imageConfigured,
-            mineruConfigured = settings.mineruConfigured
+            mineruConfigured = settings.mineruConfigured && !profile.supportsVision
         )
 
         // 本次会话最近一张用户发的图（识图 / OCR 工具的输入）。

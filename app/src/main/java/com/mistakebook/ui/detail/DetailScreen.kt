@@ -322,7 +322,8 @@ fun DetailScreen(
                     AuxImageBlock(
                         auxState = auxImageState,
                         onGenerate = viewModel::generateAuxImage,
-                        onDismiss = viewModel::dismissAuxImage
+                        onDismiss = viewModel::dismissAuxImage,
+                        onDelete = viewModel::deleteAuxImage
                     )
                     // 备注：看题时就能直接改，不用进编辑页
                     Spacer(Modifier.height(12.dp))
@@ -568,12 +569,17 @@ private fun MasteredSection(
  *
  * 失败态可关闭：错误留在屏幕上会挡住解析正文，
  * 但图本身留在磁盘缓存里——下次进这道题还在。
+ *
+ * 已有图可**删除**：两步确认（先变红再执行，防误触）。删除删的是
+ * 磁盘缓存源文件——只清界面状态的话，下次进这道题图会原样回来，
+ * 等于没删（v0.0.54 用户反馈「辅助图无法删除」的根因）。
  */
 @Composable
 private fun AuxImageBlock(
     auxState: AuxImageState,
     onGenerate: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit = {}
 ) {
     when {
         auxState.generating -> {
@@ -614,6 +620,15 @@ private fun AuxImageBlock(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Spacer(Modifier.height(4.dp))
+                // 两步确认的删除：第一次点变红显示「确认删除」，再点才真删
+                com.mistakebook.ui.common.TwoStepConfirmButton(
+                    text = stringResource(R.string.detail_aux_delete),
+                    confirmText = stringResource(R.string.detail_aux_delete_confirm),
+                    onConfirm = onDelete,
+                    style = com.mistakebook.ui.common.DangerButtonStyle.Text,
+                    modifier = Modifier.align(Alignment.End)
+                )
             }
         }
 

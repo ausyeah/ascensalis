@@ -825,7 +825,14 @@ private fun InlineRow(
                                         //（约 3 倍），公式被挤在巨大空框的左上角。
                                         width = with(density) { w.toDp().toSp() },
                                         height = with(density) { h.toDp().toSp() },
-                                        placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom
+                                        // 基线对齐（AboveBaseline），不能用 TextBottom：
+                                        // 位图已按墨水包围盒裁齐，字母/上标这类**没有降部**
+                                        // 的公式墨水底边就是基线；TextBottom 把底边贴到
+                                        // 文字降部线（约低 0.2em），整条公式视觉上下沉——
+                                        // 用户反馈的「公式下沉/位置偏移」正是它。
+                                        // 高公式的顶边超出部分由 Compose 把行 ascent 撑大容纳，
+                                        // 不会再探出行框被裁（「显示不全/被遮挡」）。
+                                        placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline
                                     )
                                 ) { _ ->
                                     if (image != null && fitted != null) {

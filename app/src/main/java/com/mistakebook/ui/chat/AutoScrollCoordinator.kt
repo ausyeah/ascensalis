@@ -1,5 +1,6 @@
 package com.mistakebook.ui.chat
 
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
@@ -215,26 +216,113 @@ fun rememberAutoScrollEffect(
 
     // ③ 新消息到达 → 只有「本来就在底部」才回底。
     //
-    //    判据用**紧贴底的窄带**（[isFlushAtBottom]）：
-    // - 贴底时：最底部可见 item 的 offset ≈ 0 → 回底；
-    // - 新消息插入的瞬态：老的最底部可见 item 仍贴着视口底边 → 回底；
-    // - 用户上滑过：最底部可见 item 被切掉一截（offset 明显为负）→ 不回底。
-    //
-    //    只在 key 变化时做**一次**，流式期间 key 不变 → 不重启动画，
-    //    也就不会有「动画跟内容增长打架」的抖动。
+    //    判据用**跟随态本身**，而且必须在拿到 key 变化的那一刻读：
+    //    `wasFollowing` 在 effect 重启（= 新消息插入）时定格。
+    //    不能等到布局后再判 `isFlushAtBottom`：
+    //    - 用户在历史区恰好停在 item 边界时，最底部可见 item 的 offset
+    //      也是 0 → 旧判据会把它误判成「插入瞬态」，从历史区硬拽回底
+    //      （v0.0.54 用户反馈「未触底也会自动往下滚」的来源之一）；
+    //    - 反过来，真在底部时新 item 插入的瞬间 gap 会变成负的
+    //      （新气泡落在视口下沿之外），位置驱动那一路会先一步 pause——
+    //      布局后再读 following 就会错过这次回底。
+    //    所以：插入前的跟随态才是「用户本来在不在底部」的权威判据。
     LaunchedEffect(latestItemKey) {
         if (latestItemKey == null) return@LaunchedEffect
+        val wasFollowing = coordinator.following
         snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }
         // 等一帧：确保新消息已经进布局（index 0 已是最新那条），
         // 否则 animateScrollToItem(0) 会滚到「上一条」上。
         withFrameNanos { }
-        if (draggedNow || coordinator.programmaticScroll) return@LaunchedEffect
-        if (!isFlushAtBottom(state.layoutInfo)) return@LaunchedEffect
+        if (draggedNow || coordinator.programmaticScroll || !wasFollowing) return@LaunchedEffect
         coordinator.programmaticScroll = true
         try {
             state.animateScrollToItem(0)
         } finally {
             coordinator.programmaticScroll = false
+        }
+    }
+
+    // ④ 非跟随期间的**滚动锚定**：流式内容变长时视口保持视觉静止。
+    //
+    //    ## 为什么需要它
+    //
+    //    反向布局的滚动位置 =「第一个可见 item + 它在布局里的偏移」，
+    //    而布局坐标是从**最新一条**开始往下数的。最新一条每长高 Δ，
+    //    它上面所有历史 item 的布局坐标都 +Δ，屏幕位置整体上移 Δ——
+    //    用户正在读的段落被强行往上拽。用户反馈「没触底也在自动
+    //    往下滚」的正是这个（v0.0.54）。
+    //
+    //    ## 为什么用「最顶部可见 item 的 offset」当锚点
+    //
+    //    按仓库实测语义（见 [newestGapOf] 注释）：
+    //        offset = 该 item 的布局起点 - 滚动量
+    //    - 内容长高 Δ（最新一条长高 / 插入新消息）→ 历史 item 布局起点 +Δ
+    //          → offset **增加** Δ；
+    //    - 用户向前滚（手指上滑，看历史）→ 滚动量 +d → offset **减少** d。
+    //    两者符号相反，所以「offset 变正」几乎只能是内容增长造成的。
+    //    再叠一层 `isScrollInProgress == false`（列表静止）兜底：
+    //    用户手势 / 惯性滑动期间一律不插手，绝不跟手指打架。
+    //
+    //    选最顶部可见 item 而不是最新一条：用户翻进历史区后最新一条
+    //    早已不可见，拿它当锚点根本观察不到增长（v0.0.54 第一版补偿
+    //    就是这个漏洞——只覆盖「最新一条还可见」的情况）。
+    //    最顶部可见 item 是用户正在读的那条，它在不在视口里都能反映
+    //    上方内容的变化，两种情况一套逻辑全覆盖。
+    //
+    //    补偿量 = offset 增量，方向是 `scrollBy(+Δ)`：把长出来的部分
+    //    吃进滚动量里，锚点屏幕位置纹丝不动。
+    //
+    //    ## 为什么「刚静止的首帧只重取基线」
+    //
+    //    用户向下 fling（朝最新消息去）但停在半路时，offset 同样会变大
+    //    ——滚动量减少了。若不区分，补偿会把这个 offset 增量当成内容增长，
+    //    反向 scrollBy 把用户刚滑到的位置又推回去，等于跟惯性滑动打架。
+    //    所以凡是「上一帧还在动」的静止首帧，一律只重取基线不补偿：
+    //    手势的结果优先，内容增长的补偿从下一个静止帧开始。
+    LaunchedEffect(state, coordinator) {
+        var anchorKey: Any? = null
+        var anchorOffset = 0
+        var wasScrolling = false
+        snapshotFlow {
+            val topMost = state.layoutInfo.visibleItemsInfo.lastOrNull()
+            if (topMost == null) null else Triple(topMost.key, topMost.offset, state.isScrollInProgress)
+        }.collect { info ->
+            // 视口里一条都没有（极端短列表 / 正在重建）：无从锚定
+            if (info == null) return@collect
+            val (key, offset, scrolling) = info
+            // 列表正在动（用户手势 / 惯性 / 自己的回底动画）：不插手，
+            // 也不重取基线——动了之后的静止帧会重新取。
+            if (scrolling) {
+                wasScrolling = true
+                return@collect
+            }
+            // 刚停下来的第一帧：这是用户手势的落点，不是内容增长。
+            if (wasScrolling) {
+                wasScrolling = false
+                anchorKey = key
+                anchorOffset = offset
+                return@collect
+            }
+            // 手指按着 / 自己的回底动画进行中：同样不插手
+            if (draggedNow || coordinator.programmaticScroll) return@collect
+            // 跟随态下内容上推就是「跟随」本身，不能干扰。
+            if (coordinator.following) {
+                anchorKey = key
+                anchorOffset = offset
+                return@collect
+            }
+            if (key != anchorKey) {
+                // 锚点换了（滑着换了一条 / 列表结构变了）：重新取基线。
+                anchorKey = key
+                anchorOffset = offset
+                return@collect
+            }
+            val drift = offset - anchorOffset
+            anchorOffset = offset
+            // 只有「内容把锚点往上推」才补偿；offset 变小是用户在往上翻，
+            // 那正是他要的方向。
+            if (drift <= 0) return@collect
+            state.scrollBy(drift.toFloat())
         }
     }
 

@@ -539,12 +539,14 @@ fun ChatScreen(
             }
 
             // 上下文状态条：摘要生效提示 + 上次请求 token 数 + 手动压缩入口。
-            // 只在「有摘要」或「问过一轮」后出现，空会话不占地方。
+            // 压缩按钮只在上下文到线（200k，见 MANUAL_COMPRESS_TOKENS）后出现：
+            // 短会话没有压缩价值，常驻按钮只会诱导人去按。
             if (state.summaryActive || state.lastPromptTokens > 0) {
                 ContextStatusRow(
                     summaryActive = state.summaryActive,
                     compressing = state.compressing,
                     lastPromptTokens = state.lastPromptTokens,
+                    showCompress = state.lastPromptTokens >= ChatViewModel.MANUAL_COMPRESS_TOKENS,
                     onCompress = viewModel::compressContext
                 )
                 Spacer(Modifier.height(4.dp))
@@ -640,11 +642,12 @@ private fun MessageList(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (state.omittedCount > 0) {
-            item(key = "omitted-notice", contentType = "notice") {
-                OmittedNoticeRow(state.omittedCount)
-            }
-        }
+        // 「此前省略 N 轮」提示条声明在消息**之后**：reverseLayout 下最后
+        // 声明的 item 在屏幕顶部（对话开头）——省略的正是开头那些轮次，
+        // 放顶部语义才对。更关键的是几何契约：AutoScrollCoordinator 的
+        // 贴底判定/回底/增长补偿全部假定 **index 0 = 最新一条消息**；
+        // 早先声明在前面时它是 index 0，只要会话出现过省略提示，
+        // 整套触底几何就都在盯着这条小提示条而不是正在流式的那条消息。
         items(
             items = messages.asReversed(),
             // key 用消息 id：内容更新（流式 / 落库）时按 id 对齐，
@@ -675,6 +678,11 @@ private fun MessageList(
                 onSaveToNote = onSaveToNote
             )
         }
+        if (state.omittedCount > 0) {
+            item(key = "omitted-notice", contentType = "notice") {
+                OmittedNoticeRow(state.omittedCount)
+            }
+        }
     }
 }
 
@@ -704,13 +712,15 @@ private fun OmittedNoticeRow(count: Int) {
  * 显示两件事：**摘要是否生效**、**上次请求的输入 token 数**。
  * 后者是用户唯一能看到的上下文占用口径——不显示的话，
  * 「AI 开始失忆」和「请求里有 60K token」之间用户没有任何感知手段。
- * 压缩按钮常驻：自动压缩是安全网，用户想主动整理时随时可以按。
+ * 压缩按钮只在 [showCompress]（上下文 ≥ 200k）时出现，由用户决定压不压；
+ * 自动压缩进行中（compressing）按钮照常显示——「压缩中…」的反馈不能消失。
  */
 @Composable
 private fun ContextStatusRow(
     summaryActive: Boolean,
     compressing: Boolean,
     lastPromptTokens: Int,
+    showCompress: Boolean,
     onCompress: () -> Unit
 ) {
     Row(
@@ -738,6 +748,7 @@ private fun ContextStatusRow(
         if (compressing) {
             // 进行中状态直接长在按钮上（用户反馈：角落里 16dp 小圈根本看不见，
             // 「不知道是正在压缩还是没反应」）。按钮换成「压缩中…」并禁用防连点。
+            // 自动压缩触发时 showCompress 可能为 false，这个分支必须在显隐判断之外。
             TextButton(onClick = onCompress, enabled = false) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(6.dp))
@@ -746,7 +757,7 @@ private fun ContextStatusRow(
                     style = MaterialTheme.typography.labelMedium
                 )
             }
-        } else {
+        } else if (showCompress) {
             TextButton(onClick = onCompress) {
                 Icon(
                     Icons.Default.Compress,

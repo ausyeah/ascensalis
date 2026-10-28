@@ -104,7 +104,11 @@ class CaptureBatchContractTest {
         )
         val closeIdx = src.indexOf("imageVector = Icons.Default.Close")
         assertTrue("关闭按钮必须存在", closeIdx >= 0)
-        val closeBlock = src.substring(src.lastIndexOf("IconButton(onClick = {", closeIdx))
+        // 锚点随组件重构更新：v0.0.54 拍照页重设计后，底部圆形按钮统一走
+        // FrostyCircleButton（磨砂圆钮），不再是裸 IconButton。
+        // 断言的意图没变——**关闭按钮必须能拦住批次**。
+        // 只锚到组件名（不带参数）：参数换行/加参数都不影响定位。
+        val closeBlock = src.substring(src.lastIndexOf("FrostyCircleButton(", closeIdx))
         assertTrue(
             "有关闭批次时点关闭必须弹确认而不是直接返回",
             closeBlock.contains("if (batchActive)") && closeBlock.contains("showDiscardDialog = true")

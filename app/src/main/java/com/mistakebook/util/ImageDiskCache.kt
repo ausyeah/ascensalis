@@ -76,6 +76,19 @@ class ImageDiskCache(
     /** 只查存在性，不 touch（预加载 / 列表缩略图用，避免滚动时疯狂写时间戳）。 */
     fun peek(key: String): File? = candidates(key).firstOrNull { it.isFile && it.length() > 0L }
 
+    /**
+     * 删掉这个 key 的缓存文件（pin 与非 pin 两种候选都删）。
+     *
+     * ## 为什么必须有它
+     *
+     * 详情页的辅助图每次进页都会按 key 从缓存**回填**（DetailViewModel.init），
+     * 只清界面状态的话，下次进来图又原样出现——用户看到的「删除」
+     * 形同虚设。真正的删除必须落在这层：文件没了，回填自然找不到。
+     */
+    fun remove(key: String) {
+        candidates(key).forEach { file -> runCatching { file.delete() } }
+    }
+
     /** 超上限时按最旧优先淘汰——**只淘汰未 pin 的**。 */
     fun evictIfNeeded() {
         val files = dir.listFiles()?.filter { it.isFile && !it.name.startsWith(PIN_PREFIX) }

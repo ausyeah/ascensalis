@@ -138,6 +138,17 @@ object MarkdownParser {
         // `\left{`、`&` 于是漏进普通文本，整块渲染不出来。
         var bracketMath: StringBuilder? = null
 
+        // 跨行裸 `<svg> ... </svg>` 的状态。
+        //
+        // ```svg 围栏的约定只写在**错题识别**的提示词里（PromptTemplates），
+        // 聊天系统提示词没有教——而模型在对话正文里画图时经常直接输出
+        // `<svg>` 标签，不走任何围栏。只认围栏的话这段 XML 会掉进段落
+        // 分支，以源码形式躺在气泡里：用户看到的正是「思考里的 SVG 能
+        // 渲染（恰好带了围栏），正式回答里全是代码（裸标签）」。
+        // 这里兜底：行首 `<svg` 进入跨行收集，到 `</svg>` 为止整体出图形块，
+        // 与思考/正文共用同一条 RichText 渲染路径，两侧行为一致。
+        var rawSvg: StringBuilder? = null
+
         /**
          * 裸 LaTeX 救援（v0.0.51 用例 B1）：整段输出 LaTeX 却没有 `$$` 包裹。
          *
@@ -209,13 +220,30 @@ object MarkdownParser {
                     }
                 }
 
+                // 正在裸 SVG 块里：找闭合的 `</svg>`（同一行闭合也认）。
+                // 放在围栏分支之前：SVG 内容里出现 ``` 不应该截断图形。
+                rawSvg != null -> {
+                    val closeAt = line.indexOf("</svg>", ignoreCase = true)
+                    if (closeAt < 0) {
+                        rawSvg.appendLine(line)
+                    } else {
+                        rawSvg.append(line.substring(0, closeAt + "</svg>".length))
+                        val source = rawSvg.toString().trim()
+                        if (source.isNotEmpty()) blocks += Block.Svg(sanitizeSvg(source))
+                        rawSvg = null
+                        // 闭合之后同一行剩下的内容是正文，不能丢
+                        val rest = line.substring(closeAt + "</svg>".length)
+                        if (rest.isNotBlank()) paragraph.append(rest)
+                    }
+                }
+
                 line.trimStart().startsWith("```") -> {
                     if (inCode) {
                         // 闭合：按语言分流。svg 走图形块，其余（含无标记）
                         // 走等宽代码块——语言标记一并带出去，渲染层可据此
                         // 决定要不要显示语言标签。
                         val text = code.toString().trimEnd()
-                        blocks += if (codeLanguage.equals("svg", ignoreCase = true)) {
+                        blocks += if (isSvgFence(codeLanguage, text)) {
                             Block.Svg(sanitizeSvg(text))
                         } else {
                             Block.Code(text, codeLanguage)
@@ -238,6 +266,22 @@ object MarkdownParser {
                 }
 
                 inCode -> code.appendLine(line)
+
+                // 行首裸 `<svg`：进入跨行收集（见 [rawSvg] 声明处的说明）。
+                // 必须排在 `inCode` 之后：围栏代码块里的 `<svg` 是代码内容，不能拦。
+                line.trimStart().startsWith("<svg", ignoreCase = true) -> {
+                    flushParagraphWithRescue()
+                    val body = line.trimStart()
+                    val closeAt = body.indexOf("</svg>", ignoreCase = true)
+                    if (closeAt >= 0) {
+                        val source = body.substring(0, closeAt + "</svg>".length)
+                        blocks += Block.Svg(sanitizeSvg(source))
+                        val rest = body.substring(closeAt + "</svg>".length)
+                        if (rest.isNotBlank()) paragraph.append(rest)
+                    } else {
+                        rawSvg = StringBuilder(body)
+                    }
+                }
 
                 line.isBlank() -> flushParagraphWithRescue()
 
@@ -347,12 +391,36 @@ object MarkdownParser {
         // 同上：流式渲染期间围栏可能还没闭合，有内容就先渲染。
         if (inCode && code.isNotBlank()) {
             val text = code.toString().trimEnd()
-            blocks += if (codeLanguage.equals("svg", ignoreCase = true)) {
+            blocks += if (isSvgFence(codeLanguage, text)) {
                 Block.Svg(sanitizeSvg(text))
             } else {
                 Block.Code(text, codeLanguage)
             }
         }
+        // 同上：流式尾端 / 模型漏写闭合的裸 `<svg …`。有内容就出块——
+        // 渲染失败 SvgBlock 会按比例占位，等闭合后整段重解析自然修复。
+        rawSvg?.let { open ->
+            val source = open.toString().trim()
+            if (source.isNotEmpty()) blocks += Block.Svg(sanitizeSvg(source))
+        }
+    }
+
+    /**
+     * 围栏内容是否应按 SVG 图形块渲染。
+     *
+     * 三种形态都要认（模型输出不可控）：
+     * - 语言标记就是 `svg`（提示词约定的正路）；
+     * - 语言标记为 `xml` / `html` 或干脆为空，但内容以 `<svg` 开头——
+     *   模型「知道」自己写的是 SVG，只是语言标记随手写；
+     * - 其余（python、js 等）无论内容是什么都按代码块走，
+     *   避免把讲 SVG 的示例代码误渲染成图。
+     */
+    private fun isSvgFence(language: String, content: String): Boolean {
+        if (language.equals("svg", ignoreCase = true)) return true
+        if (!content.trimStart().startsWith("<svg", ignoreCase = true)) return false
+        return language.isBlank() ||
+            language.equals("xml", ignoreCase = true) ||
+            language.equals("html", ignoreCase = true)
     }
 
     private fun paragraphBlock(text: String): Block {

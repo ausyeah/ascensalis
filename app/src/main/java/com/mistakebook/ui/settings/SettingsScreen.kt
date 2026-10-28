@@ -12,6 +12,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -144,174 +147,143 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            // T8 重构：全部分组默认收起（CollapsibleSettingsGroup 手风琴卡片），
-            // 一屏看全目录；组内内容原样复用既有 Section 组件，功能零改动。
-            // 顺序：AI 服务 → 学习 → 资料库 → 用量与账户 → 网络（高级）→ 数据与关于。
-            // 各组现有设置项清单（重构后一项不丢）：
-            //   AI 服务: 主题、识别方式、MinerU Key、MinerU 参数、大模型配置（手风琴
-            //     互斥：大模型/识图/生图/联网搜索）、推理档位
-            //   学习: 番茄钟、复习提醒、打印默认
-            //   资料库: 入口行
-            //   用量与账户: LLM 用量、MinerU 用量
-            //   网络与代理（高级）: 网络代理
-            //   数据与关于: 数据管理（备份/恢复）、单词书数据重置
-
-            // ---- AI 服务（手风琴互斥：同一时刻只展开一张配置卡）----
-            CollapsibleSettingsGroup(
-                title = "主题外观",
+            // v0.0.54：设置页改成**三层目录**——分类卡（3 个，全局互斥）
+            // → 类内分组（沿用 CollapsibleSettingsGroup，全局互斥）→ 具体设置项。
+            //
+            // 为什么要多这一层：平铺 12 个等价的折叠卡时，用户仍要读完
+            // 每个标题才知道该点哪个，这是「臃肿、难理解」的真正来源。
+            // 分类卡带一句摘要 + 图标，把「找设置」压成两步：
+            // 3 选 1 定大类 → 类内再选分组。
+            //
+            // 分类与分组映射（一项不丢）：
+            //   AI 与识别: 识别方式、MinerU 配置、大模型配置、识图模型、
+            //     生图渠道、联网搜索
+            //   学习: 学习工具（资料库/成就墙/番茄钟）、复习提醒、打印默认
+            //   通用: 主题外观、用量统计、网络与代理（高级）、数据与备份、
+            //     单词书数据
+            SettingsCategoryCard(
+                title = "AI 与识别",
+                summary = "大模型、识图、生图、搜索的 Key 与参数",
+                icon = Icons.Default.Psychology
             ) {
-                ThemeModeSection(
-                    state = state,
-                    viewModel = viewModel
-                )
+                CollapsibleSettingsGroup(title = "识别方式", nested = true) {
+                    RecognitionModeSection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = "MinerU 配置", nested = true) {
+                    MineruKeySection(state = state, viewModel = viewModel)
+                    Spacer(Modifier.height(12.dp))
+                    MineruParamsSection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = "大模型配置", nested = true) {
+                    LlmProfilesSection(
+                        state = state,
+                        viewModel = viewModel,
+                        onAddProfileClick = { showAddProfile = true }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    ReasoningEffortSection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = "识图模型", nested = true) {
+                    VisionProfilesSection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = "生图渠道", nested = true) {
+                    ImageProfilesSection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = "联网搜索", nested = true) {
+                    SearchProviderSection(state = state, viewModel = viewModel)
+                }
             }
 
-            CollapsibleSettingsGroup(
-                title = "识别方式",
+            SettingsCategoryCard(
+                title = "学习",
+                summary = "番茄钟、复习提醒、打印与学习资料",
+                icon = Icons.AutoMirrored.Filled.MenuBook
             ) {
-                RecognitionModeSection(
-                    state = state,
-                    viewModel = viewModel
-                )
+                CollapsibleSettingsGroup(title = "学习工具", nested = true) {
+                    // 成就墙入口放设置「学习」组（而非首页图标行）：
+                    // 首页图标行每一寸都要留给刷题主流程入口（用户每天进来
+                    // 是为了做题，不是为了看徽章），成就墙是阶段性回访目标，
+                    // 与番茄钟/复习提醒同属「学习」分组更合理。
+                    LibraryEntrySection(onOpen = onOpenLibrary)
+                    Spacer(Modifier.height(12.dp))
+                    BadgeEntrySection(onOpen = onOpenBadgeWall)
+                    Spacer(Modifier.height(12.dp))
+                    PomodoroSection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = "复习提醒", nested = true) {
+                    ReviewReminderSection(
+                        state = state,
+                        viewModel = viewModel,
+                        onPickTimeClick = { showTimePicker = true }
+                    )
+                }
+
+                CollapsibleSettingsGroup(title = "打印默认", nested = true) {
+                    PrintDefaultsSection(state = state, viewModel = viewModel)
+                }
             }
 
-            CollapsibleSettingsGroup(
-                title = "MinerU 配置",
+            SettingsCategoryCard(
+                title = "通用",
+                summary = "外观、用量、网络与数据备份",
+                icon = Icons.Default.Settings
             ) {
-                MineruKeySection(
-                    state = state,
-                    viewModel = viewModel
-                )
-                Spacer(Modifier.height(12.dp))
-                MineruParamsSection(
-                    state = state,
-                    viewModel = viewModel
-                )
-            }
+                CollapsibleSettingsGroup(title = "主题外观", nested = true) {
+                    ThemeModeSection(state = state, viewModel = viewModel)
+                }
 
-            CollapsibleSettingsGroup(
-                title = "大模型配置",
-            ) {
-                LlmProfilesSection(
-                    state = state,
-                    viewModel = viewModel,
-                    onAddProfileClick = { showAddProfile = true }
-                )
-                Spacer(Modifier.height(12.dp))
-                ReasoningEffortSection(
-                    state = state,
-                    viewModel = viewModel
-                )
-            }
+                CollapsibleSettingsGroup(title = "用量统计", nested = true) {
+                    LlmUsageSection(container = container)
+                    Spacer(Modifier.height(12.dp))
+                    MineruUsageSection(container = container)
+                }
 
-            CollapsibleSettingsGroup(
-                title = "识图模型",
-            ) {
-                VisionProfilesSection(
-                    state = state,
-                    viewModel = viewModel
-                )
-            }
+                CollapsibleSettingsGroup(title = "网络与代理（高级）", nested = true) {
+                    NetworkProxySection(state = state, viewModel = viewModel)
+                }
 
-            CollapsibleSettingsGroup(
-                title = "生图渠道",
-            ) {
-                ImageProfilesSection(
-                    state = state,
-                    viewModel = viewModel
-                )
-            }
-
-            CollapsibleSettingsGroup(
-                title = "联网搜索",
-            ) {
-                SearchProviderSection(
-                    state = state,
-                    viewModel = viewModel
-                )
-            }
-
-            // ---- 学习 ----
-            CollapsibleSettingsGroup(title = "学习") {
-                // 成就墙入口放设置「学习」组（而非首页图标行）：
-                // 首页图标行每一寸都要留给刷题主流程入口（用户每天进来
-                // 是为了做题，不是为了看徽章），成就墙是阶段性回访目标，
-                // 与番茄钟/复习提醒同属「学习」分组更合理。
-                LibraryEntrySection(onOpen = onOpenLibrary)
-                Spacer(Modifier.height(12.dp))
-                BadgeEntrySection(onOpen = onOpenBadgeWall)
-                Spacer(Modifier.height(12.dp))
-                PomodoroSection(
-                    state = state,
-                    viewModel = viewModel
-                )
-                Spacer(Modifier.height(12.dp))
-                ReviewReminderSection(
-                    state = state,
-                    viewModel = viewModel,
-                    onPickTimeClick = { showTimePicker = true }
-                )
-            }
-
-            CollapsibleSettingsGroup(title = "打印默认") {
-                PrintDefaultsSection(
-                    state = state,
-                    viewModel = viewModel
-                )
-            }
-
-
-            // ---- 用量与账户 ----
-            CollapsibleSettingsGroup(title = "用量统计") {
-                LlmUsageSection(container = container)
-                Spacer(Modifier.height(12.dp))
-                MineruUsageSection(container = container)
-            }
-
-            // ---- 网络与代理（高级）----
-            CollapsibleSettingsGroup(title = "网络与代理（高级）") {
-                NetworkProxySection(
-                    state = state,
-                    viewModel = viewModel
-                )
-            }
-
-            // ---- 数据与关于 ----
-            CollapsibleSettingsGroup(title = "数据与备份") {
-                DataManageSection(
-                    container = container,
-                    viewModel = viewModel,
-                    onExportClick = {
-                        scope.launch {
-                            val result = container.backupManager.export()
-                            result.onSuccess { path ->
-                                snackbarHostState.showSnackbar(
-                                    context.getString(R.string.settings_backup_exported) + "：" + path
-                                )
-                            }
-                            result.onFailure { error ->
-                                snackbarHostState.showSnackbar(
-                                    context.getString(
-                                        R.string.settings_backup_failed,
-                                        error.message.orEmpty()
+                CollapsibleSettingsGroup(title = "数据与备份", nested = true) {
+                    DataManageSection(
+                        container = container,
+                        viewModel = viewModel,
+                        onExportClick = {
+                            scope.launch {
+                                val result = container.backupManager.export()
+                                result.onSuccess { path ->
+                                    snackbarHostState.showSnackbar(
+                                        context.getString(R.string.settings_backup_exported) + "：" + path
                                     )
-                                )
+                                }
+                                result.onFailure { error ->
+                                    snackbarHostState.showSnackbar(
+                                        context.getString(
+                                            R.string.settings_backup_failed,
+                                            error.message.orEmpty()
+                                        )
+                                    )
+                                }
                             }
-                        }
-                    },
-                    onRestoreClick = { showRestoreConfirm = true }
-                )
-            }
+                        },
+                        onRestoreClick = { showRestoreConfirm = true }
+                    )
+                }
 
-            CollapsibleSettingsGroup(title = "单词书数据") {
-                // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
-                // 都要留给题目），统一收到设置里，与数据管理相邻。
-                WordbookDataSection(
-                    container = container,
-                    onResetDone = { message ->
-                        scope.launch { snackbarHostState.showSnackbar(message) }
-                    }
-                )
+                CollapsibleSettingsGroup(title = "单词书数据", nested = true) {
+                    // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
+                    // 都要留给题目），统一收到设置里，与数据管理相邻。
+                    WordbookDataSection(
+                        container = container,
+                        onResetDone = { message ->
+                            scope.launch { snackbarHostState.showSnackbar(message) }
+                        }
+                    )
+                }
             }
 
             Spacer(Modifier.height(24.dp))

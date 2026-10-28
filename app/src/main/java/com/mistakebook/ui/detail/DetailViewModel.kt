@@ -137,6 +137,29 @@ class DetailViewModel(
     fun dismissAuxImage() {
         _auxImage.value = AuxImageState()
     }
+
+    /**
+     * **删除**辅助图：清掉磁盘缓存里的源文件，再清界面状态。
+     *
+     * 早先只有 [dismissAuxImage]（只清状态）——而 `init` 每次进页都按
+     * key 从缓存回填，文件还在图就永远会再出现，用户看到的「删除」
+     * 形同虚设（v0.0.54 用户反馈「辅助图无法删除」）。真正的删除
+     * 必须落在文件层：源文件没了，回填自然找不到，下次进来是「生成」按钮。
+     */
+    fun deleteAuxImage() {
+        viewModelScope.launch {
+            runCatching {
+                val question = uiState.value.question
+                val profile = container.settingsStore.snapshotNow().activeImageProfile
+                if (question != null && profile != null) {
+                    container.imageDiskCache.remove(
+                        container.imageDiskCache.keyFor(auxSeed(question), profile.model)
+                    )
+                }
+            }
+            _auxImage.value = AuxImageState()
+        }
+    }
     val uiState: StateFlow<DetailUiState> = combine(
         container.questionRepository.observeById(questionId),
         container.subjectRepository.observeAll(),
