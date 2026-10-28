@@ -73,6 +73,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -94,9 +98,21 @@ import java.io.FileOutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-private const val FLASH_AUTO = 0
-private const val FLASH_ON = 1
-private const val FLASH_OFF = 2
+internal const val FLASH_AUTO = 0
+internal const val FLASH_ON = 1
+internal const val FLASH_OFF = 2
+
+/**
+ * 闪光灯当前档位对应的 stateDescription 资源（供 TalkBack 朗读「开 / 关 / 自动」）。
+ * 与 contentDescription（固定「闪光灯」）分开：状态走 stateDescription，
+ * 避免把状态塞进 contentDescription 造成朗读冗长。提成纯函数是为了能在
+ * JVM 单测里校验三档各取到正确的字符串资源（拍照页无障碍，v0.0.54 后续优化）。
+ */
+internal fun flashStateDescriptionRes(flashMode: Int): Int = when (flashMode) {
+    FLASH_ON -> R.string.capture_flash_on
+    FLASH_OFF -> R.string.capture_flash_off
+    else -> R.string.capture_flash_auto
+}
 
 private const val GALLERY_MAX_ITEMS = 20
 
@@ -503,21 +519,20 @@ fun CaptureScreen(
                     enabled = flashAvailable != false,
                     active = flashMode != FLASH_AUTO
                 ) {
+                    // 无障碍：控件名固定为「闪光灯」，当前档位走 stateDescription，
+                    // 状态不塞进 contentDescription，朗读更干净（不会「闪光灯开按钮」）。
+                    val flashStateText = stringResource(flashStateDescriptionRes(flashMode))
                     Icon(
                         imageVector = when (flashMode) {
                             FLASH_ON -> Icons.Default.FlashOn
                             FLASH_OFF -> Icons.Default.FlashOff
                             else -> Icons.Default.FlashAuto
                         },
-                        contentDescription = stringResource(
-                            when (flashMode) {
-                                FLASH_ON -> R.string.capture_flash_on
-                                FLASH_OFF -> R.string.capture_flash_off
-                                else -> R.string.capture_flash_auto
-                            }
-                        ),
+                        contentDescription = stringResource(R.string.capture_flash),
                         tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier
+                            .size(22.dp)
+                            .semantics { stateDescription = flashStateText }
                     )
                 }
 
@@ -836,14 +851,18 @@ private fun CapturePill(
  *
  * 12% 白的容器在黑底上做出毛玻璃的层次；选中态（active）换成
  * primary 容器 + onPrimary 图标，用户一眼能看出「闪光灯开着」。
- * 尺寸给足 44~52dp：相机页的按钮都是在举着手机的情况下按的，
- * 44dp 是触摸目标的底线。
+ * 默认 48dp：相机页按钮都是举着手机按的，48dp 是 Android 触摸目标下限，
+ * 保证手指与 TalkBack 焦点都不误触。
+ *
+ * 无障碍：合并子节点语义（mergeDescendants），让内部图标的 contentDescription /
+ * stateDescription 成为按钮本身的朗读内容；禁用态打上 disabled 语义，
+ * TalkBack 能识别「不可用」。
  */
 @Composable
 private fun FrostyCircleButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: androidx.compose.ui.unit.Dp = 44.dp,
+    size: androidx.compose.ui.unit.Dp = 48.dp,
     enabled: Boolean = true,
     active: Boolean = false,
     content: @Composable () -> Unit
@@ -857,7 +876,8 @@ private fun FrostyCircleButton(
             .size(size)
             .clip(CircleShape)
             .background(container)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { if (!enabled) disabled() },
         contentAlignment = Alignment.Center
     ) {
         content()
@@ -897,8 +917,12 @@ private fun ShutterButton(enabled: Boolean, onClick: () -> Unit) {
                 // 水波纹会在缩放动画之上再叠一层，视觉很脏。
                 indication = null,
                 enabled = enabled,
+                role = Role.Button,
                 onClick = onClick
-            ),
+            )
+            // 合并子节点语义：让快门图标的 contentDescription 成为按钮朗读内容；
+            // 禁用（相机未就绪 / 拍摄中）时打上 disabled，TalkBack 能识别「不可用」。
+            .semantics(mergeDescendants = true) { if (!enabled) disabled() },
         contentAlignment = Alignment.Center
     ) {
         Box(

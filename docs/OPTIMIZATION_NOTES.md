@@ -99,3 +99,30 @@
 
 `app/src/test/java/com/mistakebook/markdown/SvgStreamPerfTest.kt`：8 条（缓存、闭合后不重复清洗、超长降级、
 裸 svg 降级、小 svg 保持、非 svg 代码保持、闭合不截断、流式各阶段安全）。既有 `SvgSanitizerTest` / `MarkdownSvgBlockTest` 不改、应全绿。
+
+---
+
+## Task C：拍照页无障碍（P1）
+
+### 审计结论（v0.0.54 重构后的拍照页）
+
+可点击图标按钮逐个过：快门 / 切换摄像头 / 相册 / 取消 / 闪光灯——**都已有 contentDescription 且走 `strings.xml`**（无硬编码中文）。
+OCR 增强档是分段按钮、带文字标签；取景角标 / 九宫格是装饰 Canvas（无交互，正确地为 null）。
+真正缺的是下面几项，本次补上：
+
+### 改动
+
+1. **触控目标 ≥ 48dp**：`FrostyCircleButton` 默认 44dp → **48dp**（Android 触摸目标下限；相册 / 关闭本就用 52dp，不动）。视觉仅 4dp 微调，不涉布局重构。
+2. **开关类控件的 stateDescription**：闪光灯由「状态塞进 contentDescription」改成——
+   contentDescription 固定「闪光灯」（新增 `capture_flash`），档位走 `stateDescription`（开 / 关 / 自动）。
+   朗读更干净（不再「闪光灯开按钮」这种把状态念进标签）。档位映射提成纯函数 `flashStateDescriptionRes`，可 JVM 单测。
+3. **禁用态可被 TalkBack 识别**：`FrostyCircleButton` / `ShutterButton` 在 `enabled = false`（无闪光灯硬件 / 相机未就绪 / 拍摄中）时打上 `disabled()` 语义，并设 `role = Role.Button`。
+4. **语义合并**：两个按钮加 `semantics(mergeDescendants = true)`，确保内部图标的 contentDescription / stateDescription 真的成为按钮节点的朗读内容。
+
+### 测试
+
+`app/src/test/java/com/mistakebook/ui/capture/CaptureA11yTest.kt`：4 条 JVM 契约测试（CI 可跑）——
+三档 stateDescription 各取对资源、档位资源互异、控件名与档位分开、五个图标标签非零且互异。
+
+**未覆盖 / 风险**：节点级语义（contentDescription 是否真被合并朗读、禁用态朗读文案）需真机 / androidTest 验证；
+本机与 CI 均无安卓设备、无 Robolectric（不新增依赖），故以资源契约测试 + 代码评审兜底，未加 androidTest（CI 不编译、无法验证，避免引入未验证代码）。
