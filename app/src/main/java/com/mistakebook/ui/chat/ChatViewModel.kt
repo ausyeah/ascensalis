@@ -867,16 +867,31 @@ class ChatViewModel(
     }
 
     /**
-     * 重试：删掉那条失败的助手消息，用**原来的问题**重发。
+     * 重试：删掉那条失败的助手消息，用它前面的**原问题**重发。
      *
      * 复用原问题而不是清空输入框——用户点了重试就是要看同一个答案。
+     *
+     * ## 为什么要按消息 id 定位（v0.0.61 修复）
+     *
+     * 重试按钮挂在**每条**失败消息上；旧实现永远删「最新一条助手消息」，
+     * 历史里有旧失败消息时，点它会删掉最新一次**成功**的回答、
+     * 重答的却是最后一问——答非所删。
+     *
+     * [failedMessageId] 传 null 时保持旧行为（重答最后一轮，通知栏等无上下文入口用）。
      */
-    fun retry() {
+    fun retry(failedMessageId: Long? = null) {
         val current = _state.value
-        if (current.isStreaming) return
-        val lastUser = current.messages.lastOrNull { it.role == ChatRole.USER && !it.injected }
-        val failed = current.messages.lastOrNull { it.role == ChatRole.ASSISTANT }
-        if (lastUser == null || failed == null) return
+        // 单飞守卫与 send() 同款：isStreaming 是服务回报的，点击到回报之间
+        // 有窗口期，快速双击重试会跑两个生成（双倍烧 token）。
+        if (current.isStreaming || generationActive) return
+        val failed = when (val id = failedMessageId) {
+            null -> current.messages.lastOrNull { it.role == ChatRole.ASSISTANT }
+            else -> current.messages.lastOrNull { it.id == id && it.role == ChatRole.ASSISTANT }
+        } ?: return
+        // 被点失败消息之前最近的用户消息，才是「要重答的那个问题」
+        val lastUser = current.messages.lastOrNull {
+            it.role == ChatRole.USER && !it.injected && it.id < failed.id
+        } ?: return
 
         viewModelScope.launch {
             val profile = settingsStore.settings.first().activeProfile
@@ -885,6 +900,8 @@ class ChatViewModel(
                 return@launch
             }
             repository.deleteMessage(failed.id)
+            // 在途标记的生命周期与 send() 一致：runOnce 内部置位（启动失败
+            // 自己复位），正常路径由服务回报链清除——这里不碰它。
             runOnce(profile, lastUser.content, emptyList(), isRetry = true)
         }
     }

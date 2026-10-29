@@ -490,7 +490,14 @@ object LatexSanitizer {
         return out.trim()
     }
 
-    /** KaTeX 支持的命令白名单。够用即可，不求覆盖全部。 */
+    /**
+     * KaTeX 支持的命令白名单。够用即可，不求覆盖全部。
+     *
+     * v0.0.61：补上模型爱写、KaTeX 实测支持但此前漏掉的命令
+     * （`\cancel \overbrace` 等——漏掉的后果是**合法公式被降级成乱码**，
+     * 与历史上 `\vec` 误删是同类事故），并清掉手维护积累的重复条目。
+     * 新增命令前先用仓库 assets/katex/katex.min.js 实测 renderToString 通过。
+     */
     private val KNOWN_COMMANDS = setOf(
         // 希腊字母
         "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
@@ -500,19 +507,26 @@ object LatexSanitizer {
         // 常用变体（模型爱写，KaTeX 都支持）
         "varepsilon", "varphi", "vartheta", "varsigma",
         // 运算符与关系
-        "pm", "mp", "times", "div", "cdot", "cdots", "ldots", "dots", "vdots", "ddots",
+        "pm", "mp", "times", "div", "cdot", "cdots", "ldots", "dots", "dotsc", "dotsb", "dotsi", "dotsm",
+        "vdots", "ddots", "ldotp", "cdotp",
         "leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "cong", "equiv",
         "propto", "ll", "gg", "subset", "subseteq", "supset", "supseteq", "in", "ni", "notin",
-        "cup", "cap", "emptyset", "varnothing", "forall", "exists", "nexists", "neg", "lnot",
+        "nleq", "ngeq", "nless", "ngtr", "nsubseteq", "nsubset", "subsetneq", "supsetneq",
+        "leqslant", "geqslant", "lesssim", "gtrsim", "lessgtr", "gtrless", "approxeq",
+        "backsim", "backsimeq",
+        "cup", "cap", "bigcup", "bigcap", "coprod", "bigoplus", "bigotimes", "bigvee", "bigwedge",
+        "emptyset", "varnothing", "forall", "exists", "nexists", "neg", "lnot",
         "land", "lor", "wedge", "vee", "oplus", "otimes", "odot", "perp", "parallel",
         "leftarrow", "rightarrow", "leftrightarrow", "Leftarrow", "Rightarrow", "Leftrightarrow",
         "longrightarrow", "longleftrightarrow", "Longrightarrow", "Longleftrightarrow",
         "to", "gets", "mapsto", "infty", "partial", "nabla", "sum", "prod", "int", "iint", "iiint", "oint",
-        "sqrt", "frac", "dfrac", "tfrac", "binom", "dbinom", "choose",
+        "sqrt", "frac", "dfrac", "tfrac", "binom", "dbinom", "tbinom", "choose",
         // 初等几何与推理符号（中文教学场景高频，KaTeX 支持）
-        "angle", "triangle", "circ", "degree", "because", "therefore",
+        "angle", "triangle", "square", "blacksquare", "blacktriangle",
+        "circ", "degree", "because", "therefore",
         "mid", "nmid", "lfloor", "rfloor", "lceil", "rceil", "langle", "rangle",
         "pmod", "bmod", "boxed", "frown", "prime", "hbar",
+        "checkmark", "mho", "Finv", "Game", "backprime",
         // 上下标与结构
         "left", "right", "big", "Big", "bigg", "Bigg",
         "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr", "Biggl", "Biggr",
@@ -521,26 +535,23 @@ object LatexSanitizer {
         "begin", "end", "text", "textbf", "textit", "mathrm", "mathbf", "mathit",
         "mathcal", "mathbb", "mathfrak", "mathscr", "mathsf", "mathtt",
         "boldsymbol", "operatorname", "bm",
-        // 重音/标记命令：实测 KaTeX 全部支持，原样保留（旧版删除是误伤，见 dropUnknownCommands 注释）
+        "mathopen", "mathclose",
+        // 重音/标记/划线命令：实测 KaTeX 全部支持，原样保留（旧版删除是误伤，见 dropUnknownCommands 注释）
         "bar", "hat", "vec", "tilde", "dot", "ddot", "widehat", "widetilde",
         "overline", "underline", "underbar",
-        "overrightarrow", "overleftarrow", "overset", "underset",
+        "overrightarrow", "overleftarrow", "overleftrightarrow",
+        "underleftarrow", "underrightarrow", "underleftrightarrow",
+        "overset", "underset", "substack", "stackrel",
+        "cancel", "bcancel", "sout",
+        "overbrace", "underbrace",
         "xrightarrow", "xleftarrow",
-        "substack", "stackrel",
         // 三角函数与常见函数名
         "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan",
         "sinh", "cosh", "tanh", "coth", "log", "ln", "lg", "exp", "lim", "max", "min", "sup", "inf", "arg", "det", "gcd", "deg",
         "limsup", "liminf", "hom", "ker", "dim", "Re", "Im",
         // 实测支持、但旧版白名单漏掉（会被误降级成纯文本）
         "lvert", "rvert", "lVert", "rVert", "lbrace", "rbrace",
-        "coloneqq", "iff", "implies", "leqslant", "geqslant", "lesssim", "lesssim",
-        "bigcup", "bigcap", "coprod", "bigoplus", "bigotimes", "bigvee", "bigwedge",
-        "vdots", "ddots", "dotsc", "dotsb", "dotsi", "dotsm",
-        "leqslant", "geqslant", "lessgtr", "gtrless", "nleq", "ngeq", "nless", "ngtr",
-        "nsubseteq", "nsubset", "supsetneq", "subsetneq", "approxeq", "backsim", "backsimeq",
-        "therefore", "because", "square", "blacksquare", "blacktriangle", "triangle",
-        "checkmark", "mho", "Finv", "Game", "backprime", "dots", "ldotp", "cdotp",
-        "substack", "stackrel", "overset", "underset",
+        "coloneqq", "iff", "implies",
         // 空格与符号
         ",", ";", ":", "!", " ",
         // 字体尺寸（少见但合法）

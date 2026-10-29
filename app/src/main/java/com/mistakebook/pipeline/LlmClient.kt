@@ -395,8 +395,18 @@ class LlmClient(
     }
 }
 
+/**
+ * 是否该换下一个请求变体重试（json_mode 降级阶梯）。
+ *
+ * 判等必须是 startsWith（v0.0.61 修复）：sendOnce 在 400 时会把 body 片段
+ * 拼进 detail（`"HTTP 400 | body=…"`，见 sendOnce 的注释——不带原文的话
+ * isMaxTokensLimitError 就瞎了），旧的 `== "HTTP 400"` 精确判等永远为 false，
+ * 阶梯第 2/3 步（去 json_mode / 去含字段）对拒绝 json_object 的服务商
+ * 永远走不到，白烧一次同阶梯重试后失败。
+ * 旧测试只喂手工构造的 `detail = "HTTP 400"`，绿测盖不住这条死路。
+ */
 internal fun shouldTryNextLlmVariant(error: ApiError): Boolean =
-    error.kind == ApiErrorKind.BAD_RESPONSE && error.detail == "HTTP 400"
+    error.kind == ApiErrorKind.BAD_RESPONSE && error.detail.startsWith("HTTP 400")
 
 internal fun shouldRetryLlmCall(kind: ApiErrorKind): Boolean = when (kind) {
     ApiErrorKind.AUTH,

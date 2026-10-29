@@ -224,23 +224,26 @@ object JsonExtractor {
     /**
      * 把模型输出的**字面量** `\n` 还原成真换行，并修复漏网的 LaTeX 控制字符。
      *
-     * ## 这个函数改过两次，两次都是因为它自己
+     * ## 这个函数改过三次，三次都是因为它自己
      *
      * 第一版无条件处理 `\n` `\t` `\r`。KDoc 里明明写着
      * 「那会把 LaTeX 里的 \nabla、\neq 之类命令毁掉」——然后代码正是这么干的。
      * 结果是 `\to` 变制表符、`\right` 被整段删掉，真机上表现为公式里冒出
      * `ight]`、`x∈0` 这种东西。
      *
-     * 现在只做两件事，且都限定范围：
-     * 1. `$...$` 数学区**之外**的字面 `\n` 还原成真换行
-     *    （数学区里的 `\n` 可能是 `\neq` `\nabla` `\nu` `\ne` `\not`，绝不能动）
-     * 2. 数学区里残留的控制字符还原成对应 LaTeX 命令
-     *    （JSON 解析本该处理干净，这里兜底，见 [LatexEscapes.restoreLatexControlChars]）
+     * 第二版引入了 `$` 逐字符翻转的「数学区」状态机，但 `$$` 是两个连续的
+     * `$`——连翻两次等于没翻，**显示公式内部被判成数学区外**，`$$a \neq b$$`
+     * 变成 `a␊eq b`（`\n` 被换行、`e` 落单）。`\neq \ne \nabla \nu \notin
+     * \nmid \nleq \ngeq` 全家中招，中文数学内容高频。
+     * 第三版（v0.0.61）：`$$` 作为一个整体翻转一次，`\[ \]` 显示定界符
+     * 也纳入状态机。
      *
-     * 制表符与回车**完全不再单独处理**：它们在 LaTeX 里没有意义，
-     * 而 `\t` `\r` 是极常见的命令首字母，一碰就坏。
+     * 其余行为不变：
+     * 1. 数学区**之外**的字面 `\n` 还原成真换行
+     *    （数学区里的 `\n` 可能是 `\neq` `\nabla` `\nu` `\ne` `\not`，绝不能动）
+     * 2. 制表符与回车完全不再单独处理：`\t` `\r` 是极常见的命令首字母，一碰就坏
      */
-    private fun normalizeBreaks(raw: String): String {
+    internal fun normalizeBreaks(raw: String): String {
         val restored = LatexEscapes.repairForDisplay(raw)
         if (!restored.contains("\\n")) return restored
         val out = StringBuilder(restored.length)
@@ -249,15 +252,38 @@ object JsonExtractor {
         while (i < restored.length) {
             val ch = restored[i]
             if (ch == '$') {
+                if (i + 1 < restored.length && restored[i + 1] == '$') {
+                    // $$ 显示公式定界符：整体只翻转一次，绝不能逐字符连翻两次
+                    inMath = !inMath
+                    out.append("$$")
+                    i += 2
+                    continue
+                }
                 inMath = !inMath
                 out.append(ch)
                 i++
                 continue
             }
-            if (ch == '\\' && i + 1 < restored.length && restored[i + 1] == 'n' && !inMath) {
-                out.append('\n')
-                i += 2
-                continue
+            if (ch == '\\' && i + 1 < restored.length) {
+                val next = restored[i + 1]
+                if (next == '[') {
+                    // \[ 显式进入显示数学区
+                    inMath = true
+                    out.append("\\[")
+                    i += 2
+                    continue
+                }
+                if (next == ']') {
+                    inMath = false
+                    out.append("\\]")
+                    i += 2
+                    continue
+                }
+                if (next == 'n' && !inMath) {
+                    out.append('\n')
+                    i += 2
+                    continue
+                }
             }
             out.append(ch)
             i++

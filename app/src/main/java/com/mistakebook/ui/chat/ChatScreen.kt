@@ -482,7 +482,7 @@ fun ChatScreen(
                             cm.setPrimaryClip(ClipData.newPlainText("copied", text))
                             viewModel.notifyCopied()
                         },
-                        onRetry = viewModel::retry,
+                        onRetry = { id -> viewModel.retry(id) },
                         onDelete = { id ->
                             pendingDeleteId = id
                             showDeleteDialog = true
@@ -590,7 +590,9 @@ private fun MessageList(
     bubbleFiles: Map<Long, List<BubbleFile>>,
     truncatedMessageId: Long?,
     onCopy: (String) -> Unit,
-    onRetry: () -> Unit,
+    // 重试必须带上被点消息的 id：重试按钮挂在每条失败消息上，
+    // 无 id 的「重试最后一轮」在历史里有旧失败消息时会删错目标。
+    onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：批改结果「存入题目备注」入口；自由会话传 null 不展示。 */
     onSaveToNote: ((Long) -> Unit)? = null
@@ -752,7 +754,7 @@ private fun MessageBubble(
     truncated: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer,
     onCopy: (String) -> Unit,
-    onRetry: () -> Unit,
+    onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：把助手回复存入题目备注。null = 当前会话不展示该入口（自由会话）。 */
     onSaveToNote: ((Long) -> Unit)? = null
@@ -1116,7 +1118,7 @@ private fun StatusRow(
     message: ChatMessage,
     isUser: Boolean,
     onCopy: (String) -> Unit,
-    onRetry: () -> Unit,
+    onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：非空时对完成态助手消息展示「存入题目备注」入口。 */
     onSaveToNote: ((Long) -> Unit)? = null
@@ -1133,7 +1135,10 @@ private fun StatusRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error
                 )
-                TextButton(onClick = onRetry, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                TextButton(
+                    onClick = { onRetry(message.id) },
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                ) {
                     Text(stringResource(R.string.chat_retry), style = MaterialTheme.typography.labelSmall)
                 }
             }

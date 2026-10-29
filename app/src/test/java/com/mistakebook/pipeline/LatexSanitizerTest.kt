@@ -16,6 +16,22 @@ import org.junit.Test
 class LatexSanitizerTest {
 
     @Test
+    fun katexSupportedCommandsStayInWhitelist() {
+        // v0.0.61 回归：这些命令 KaTeX 实测支持（assets/katex/katex.min.js
+        // renderToString 全部通过），漏出白名单会把**合法公式降级成乱码**
+        // （\cancel{2} → "cancel{2}"，字母直接印进公式），与历史 \vec 误删同类。
+        val samples = listOf(
+            "\\cancel{2}", "\\bcancel{2}", "\\sout{错误}",
+            "x + \\overbrace{a+b}^{n}", "\\underbrace{a+b}_{n}",
+            "\\tbinom{n}{k}", "\\mathopen( x \\mathclose)",
+            "\\overleftrightarrow{AB}", "\\underbrace{x}_{\\text{原因}}"
+        )
+        samples.forEach { latex ->
+            assertEquals("$latex 不应被清洗", latex, LatexSanitizer.dropUnknownCommands(latex))
+        }
+    }
+
+    @Test
     fun unclosedBraceIsClosed() {
         // 真机案例：模型输出 F\left(\frac{y}{x} 后就断了
         assertEquals("\\frac{1}{2}", LatexSanitizer.balanceBraces("\\frac{1}{2"))
