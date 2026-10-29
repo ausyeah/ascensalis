@@ -8,6 +8,7 @@ import com.mistakebook.net.llm.ChatResponse
 import com.mistakebook.net.llm.Choice
 import com.mistakebook.net.llm.ChoiceMessage
 import com.mistakebook.net.llm.LlmApi
+import com.mistakebook.net.llm.isMaxTokensLimitError
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
