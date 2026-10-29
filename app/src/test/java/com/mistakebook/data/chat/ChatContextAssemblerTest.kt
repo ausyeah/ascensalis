@@ -243,26 +243,33 @@ class ChatContextAssemblerTest {
     @Test
     fun `图片张数超上限时保留最近的`() {
         val img = listOf("data:image/jpeg;base64,AAA")
-        val history = listOf(
-            OutgoingMessage(1, ChatRole.USER, "问1", images = img),
-            assistant(2, "答1"),
-            OutgoingMessage(3, ChatRole.USER, "问3", images = img),
-            assistant(4, "答4"),
-            OutgoingMessage(5, ChatRole.USER, "问5", images = img),
-            assistant(6, "答6")
-        )
+        // 带图消息数 = 上限 + 1，保证「名额不够」的前提随上限调整（v0.0.58 由 2 调 4）仍成立
+        val count = ChatContextAssembler.MAX_IMAGES_PER_REQUEST + 1
+        val history = (1..count).flatMap { n ->
+            val base = (n - 1) * 2L
+            listOf(
+                OutgoingMessage(base + 1, ChatRole.USER, "问$n", images = img),
+                assistant(base + 2, "答$n")
+            )
+        }
         val result = assemble(history)
         val withImages = result.body().filter { it.images.isNotEmpty() }
-        assertEquals(2, withImages.size)
-        // 输出按时间排序；这里要验的是「拿到名额的是最近两条」，不是名额的分配顺序
-        assertEquals(setOf(3L, 5L), withImages.map { it.id }.toSet())
+        assertEquals(ChatContextAssembler.MAX_IMAGES_PER_REQUEST, withImages.size)
+        // 输出按时间排序；这里要验的是「拿到名额的是最近 N 条」，不是名额的分配顺序
+        assertEquals(
+            (2..count).map { (it - 1) * 2L + 1 }.toSet(),
+            withImages.map { it.id }.toSet()
+        )
         // 反向用例：最旧那条必须没有图（正序遍历会让它抢光名额）
         assertTrue(result.body().none { it.id == 1L && it.images.isNotEmpty() })
     }
 
     @Test
     fun `一条消息里多张图只取前几张并占满剩余名额`() {
-        val img = listOf("A", "B", "C")
+        // 旧消息带 上限+1 张图，最新一条带 1 张：最新占走 1 个名额，
+        // 旧消息只剩 上限-1 个名额，且必须从头截（A、B、C…）而不是留尾巴
+        val img = (0 until ChatContextAssembler.MAX_IMAGES_PER_REQUEST + 1)
+            .map { (it + 'A'.code).toChar().toString() }
         val history = listOf(
             OutgoingMessage(1, ChatRole.USER, "问1", images = img),
             assistant(2, "答2"),
@@ -270,8 +277,7 @@ class ChatContextAssemblerTest {
         )
         val result = assemble(history)
         val first = result.body().first { it.id == 1L }
-        // 上限 2：最新那条占 1 个，旧消息只剩 1 个名额
-        assertEquals(1, first.images.size)
+        assertEquals(ChatContextAssembler.MAX_IMAGES_PER_REQUEST - 1, first.images.size)
         assertEquals("A", first.images.first())
     }
 

@@ -22,16 +22,19 @@ class CaptureBatchContractTest {
             "CaptureScreen.kt",
             "src/main/java/com/mistakebook/ui/capture/CaptureScreen.kt"
         )
+        val onCapturedIdx = src.indexOf("onCaptured = { path ->")
+        assertTrue("onCaptured 回调必须存在", onCapturedIdx >= 0)
+        val block = src.substring(onCapturedIdx, src.indexOf("onError = {", onCapturedIdx))
         assertTrue(
             "QUESTION 用途拍完必须加入批次",
-            src.contains("container.captureBatch.add(path, fromGallery = false)")
+            block.contains("if (isQuestion) {") &&
+                block.contains("container.captureBatch.add(path, fromGallery = false)")
         )
         assertTrue(
-            "QUESTION 用途不得直接 onCropped 导航（留在相机页攒批）",
-            src.contains("if (isQuestion) {") &&
-                src.contains("container.captureBatch.add(path, fromGallery = false)") &&
-                src.contains("} else {") &&
-                src.contains("onCropped(path)")
+            "CHAT 用途（v0.0.58）同样入批留在相机页，" +
+                "快门不得调 onCropped（那会把对话拍照接回裁切/识别后端）",
+            block.contains("container.captureBatch.add(path, fromGallery = false)") &&
+                !block.contains("onCropped(")
         )
     }
 
