@@ -198,6 +198,15 @@ data class ChatUiState(
     val lastPromptTokens: Int = 0,
 
     /**
+     * 上下文疑似超限（服务端 400 且错误原文命中超限判据）。
+     *
+     * 超限会话每轮必失败、promptTokens 永远是 0——压缩按钮若只按
+     * token 数显示，死会话一次都不会出现（v0.0.62 长会话死区修复）。
+     * 置位后压缩按钮常驻，用户随时可压；压缩完成或下一轮成功后复位。
+     */
+    val contextOverflow: Boolean = false,
+
+    /**
      * 正在后台用 MinerU 识别图片时的阶段文案。
      *
      * 非空时输入栏上方显示一条进度提示。
@@ -497,6 +506,7 @@ class ChatViewModel(
                 if (snap.finished) {
                     generationActive = false
                     trackedStreamingId = null
+                    val overflow = isContextOverflowError(snap.errorText)
                     _state.value = current.copy(
                         isStreaming = false,
                         streamingContent = snap.content,
@@ -505,7 +515,11 @@ class ChatViewModel(
                         truncatedMessageId = if (snap.truncated) snap.assistantId else null,
                         canRetry = snap.failed,
                         lastPromptTokens = if (snap.promptTokens > 0) snap.promptTokens
-                        else current.lastPromptTokens
+                        else current.lastPromptTokens,
+                        // 失败原因命中超限判据 → 置位（压缩按钮常驻）；成功 → 复位
+                        contextOverflow = if (snap.failed) {
+                            current.contextOverflow || overflow
+                        } else false
                     )
                     // **自动压缩（500k 阈值）**：上次请求的输入 token 数到线就压，
                     // 不等用户点。防连发：只有上下文重新长过上一次触发时的量
@@ -516,6 +530,15 @@ class ChatViewModel(
                         lastAutoCompressTokens = snap.promptTokens
                         viewModelScope.launch { compressContext() }
                     }
+                    // **超限自动压缩（v0.0.62 长会话死区修复）**：超限会话每轮必
+                    // 失败，token 数永远到不了自动压缩的线——只能靠失败原因触发。
+                    // 每轮失败只自动压一次（防连环：压缩是异步的，失败期间用户
+                    // 可能连点重试），压缩完成后用户重试即可恢复。
+                    if (overflow && !overflowCompressTriggered) {
+                        overflowCompressTriggered = true
+                        viewModelScope.launch { compressContext() }
+                    }
+                    if (!snap.failed) overflowCompressTriggered = false
                     snap.errorText?.let { _events.trySend(ChatEvent.Error(it)) }
                 } else {
                     generationActive = true
@@ -1070,6 +1093,9 @@ class ChatViewModel(
     /** 上次自动压缩时的输入 token 数：只有上下文**重新长过**它才会再压，防止每一轮都触发。 */
     private var lastAutoCompressTokens = 0
 
+    /** 超限自动压缩的本会话触发标记：失败期间只压一次，成功后复位（防连环压缩）。 */
+    private var overflowCompressTriggered = false
+
     fun compressContext() {
         val sessionId = _state.value.sessionId
         if (sessionId == 0L || _state.value.compressing) return
@@ -1083,13 +1109,18 @@ class ChatViewModel(
                     return@launch
                 }
                 val summary = compressor.compress(sessionId, profile)
-                _state.value = _state.value.copy(
-                    compressing = false,
-                    summaryActive = summary != null || _state.value.summaryActive
-                )
                 if (summary != null) {
+                    // 真压成功才解除超限标记：旧内容已滚进摘要，下一轮输入大幅回落；
+                    // 「历史太短」的空压缩不动标记（此时会话可能仍超限，按钮得留着）
+                    overflowCompressTriggered = false
+                    _state.value = _state.value.copy(
+                        compressing = false,
+                        summaryActive = true,
+                        contextOverflow = false
+                    )
                     _events.trySend(ChatEvent.Info("已生成上文摘要，更早的对话已压缩进去"))
                 } else {
+                    _state.value = _state.value.copy(compressing = false)
                     _events.trySend(ChatEvent.Info("历史还很短，暂时没有可压缩的内容"))
                 }
             } catch (cancelled: CancellationException) {
@@ -1415,10 +1446,13 @@ class ChatViewModel(
         /**
          * 「是否压缩」按钮的出现阈值（按上次请求的输入 token 数）。
          *
-         * 用户约定：200k 之前压缩按钮不出现——短会话没有压缩价值，
-         * 常驻按钮只会诱导人去按；到 200k 才交由用户决定压不压。
+         * 用户约定：门槛之前压缩按钮不出现——短会话没有压缩价值，
+         * 常驻按钮只会诱导人去按。v0.0.62 从 200k 降到 100k：
+         * promptTokens 只在请求**成功**时才回报，主流 128k 上下文的模型
+         * 长会话在 100k~128k 之间就会开始 400（context length exceeded），
+         * 200k 门槛下失败会话永远到不了线，压缩按钮一次都不会出现。
          */
-        const val MANUAL_COMPRESS_TOKENS = 200_000
+        const val MANUAL_COMPRESS_TOKENS = 100_000
 
         /**
          * 自动压缩阈值。到 500k 不再等用户点，直接压——
@@ -1426,5 +1460,27 @@ class ChatViewModel(
          * 自动压缩是安全网不是可选项。
          */
         const val AUTO_COMPRESS_TOKENS = 500_000
+
+        /**
+         * 错误文本是否「上下文超限」（纯函数，可单测）。
+         *
+         * 覆盖主流服务端原文（OpenAI / Anthropic / 网关中转 / 国产系）：
+         * 超限会话每轮必 400、promptTokens 永远拿不到，压缩入口靠
+         * token 数判定会双双失效（长会话死区，v0.0.62 修复）——
+         * 只能从**失败原因**识别。
+         */
+        fun isContextOverflowError(text: String?): Boolean {
+            if (text.isNullOrBlank()) return false
+            val t = text.lowercase()
+            return t.contains("context length") ||
+                t.contains("maximum context") ||
+                t.contains("prompt is too long") ||
+                t.contains("too many tokens") ||
+                t.contains("input length exceeds") ||
+                t.contains("上下文长度") ||
+                t.contains("输入过长") ||
+                t.contains("超出长度") ||
+                t.contains("请求过长")
+        }
     }
 }

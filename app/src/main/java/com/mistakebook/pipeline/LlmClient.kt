@@ -12,6 +12,7 @@ import com.mistakebook.net.llm.ChatMessage
 import com.mistakebook.net.llm.ChatRequest
 import com.mistakebook.net.llm.ImageUrl
 import com.mistakebook.net.llm.LlmApi
+import com.mistakebook.net.llm.isMaxTokensLimitError
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -418,19 +419,8 @@ internal fun shouldRetryLlmCall(kind: ApiErrorKind): Boolean = when (kind) {
 /** 降档下限：再低很多模型连一段解析都装不下，降了也没意义。 */
 internal const val MIN_MAX_TOKENS = 2048
 
-/**
- * 是否「输出上限超限」型 400（T8）。
- *
- * 必须是 HTTP 400（detail 以 "HTTP 400" 开头，body 片段已由 sendOnce 带入），
- * 且错误文本提到 max_tokens 或 maximum context length（忽略大小写）——
- * 两种常见服务端原文都覆盖。其他 400（如 prompt 超限、参数非法）不降档：
- * 那些降了也一样 400。
- */
-internal fun isMaxTokensLimitError(error: ApiError): Boolean {
-    if (!error.detail.startsWith("HTTP 400")) return false
-    val haystack = "${error.serverMessage}\n${error.detail}".lowercase()
-    return haystack.contains("max_tokens") || haystack.contains("maximum context length")
-}
+// isMaxTokensLimitError 已上移到 net.llm（v0.0.62）：对话路径也要用同一判据做
+// 输出上限自适应降档，两处共享一份正负判据，改口径只改一处。
 
 /** 降档后仍失败的中文报错（T8）：N 是原始请求的 max_tokens。 */
 internal fun maxTokensDowngradeMessage(originalMaxTokens: Int): String =

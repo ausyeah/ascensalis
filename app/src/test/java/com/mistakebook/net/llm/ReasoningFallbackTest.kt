@@ -82,9 +82,61 @@ class ReasoningFallbackTest {
     }
 
     @Test
- fun `400 才判定为字段不被识别`() {
-        val bad = ApiError(kind = ApiErrorKind.UNKNOWN, detail = "HTTP 400")
-        assertTrue(ReasoningFallback.isUnknownFieldError(bad))
+    fun `400 且提到思考字段名才判定为字段不被识别`() {
+        // 生产形态：请求层把 body 片段拼进 detail，服务端不认字段时几乎都会回显字段名
+        assertTrue(
+            ReasoningFallback.isUnknownFieldError(
+                ApiError(
+                    kind = ApiErrorKind.UNKNOWN,
+                    detail = "HTTP 400 | body={\"error\":\"Unrecognized request argument supplied: reasoning_effort\"}"
+                )
+            )
+        )
+        assertTrue(
+            ReasoningFallback.isUnknownFieldError(
+                ApiError(kind = ApiErrorKind.UNKNOWN, detail = "HTTP 400 | body=unknown field 'thinking'")
+            )
+        )
+    }
+
+    @Test
+    fun `无字段名线索的裸 400 不再换字段盲发`() {
+        // v0.0.62 收紧：max_tokens 超限 / prompt 超长 / 模型名错误等一切其他 400，
+        // 旧实现都会走完整条候选链（最多 7 次全量 prompt 重发）。
+        listOf(
+            "HTTP 400",
+            "HTTP 400 | body={\"error\":\"max_tokens is too large\"}",
+            "HTTP 400 | body=this model's maximum context length is 8192 tokens",
+            "HTTP 400 | body=model gpt-99 not found",
+            "HTTP 400 | body=response_format is not supported"
+        ).forEach { detail ->
+            assertFalse(
+                "$detail 不该被判成字段名问题",
+                ReasoningFallback.isUnknownFieldError(ApiError(kind = ApiErrorKind.UNKNOWN, detail = detail))
+            )
+        }
+    }
+
+    @Test
+    fun `max_tokens 判据与识别路径同口径`() {
+        assertTrue(
+            isMaxTokensLimitError(
+                ApiError(kind = ApiErrorKind.UNKNOWN, detail = "HTTP 400 | body=max_tokens is too large: 131072")
+            )
+        )
+        assertTrue(
+            isMaxTokensLimitError(
+                ApiError(
+                    kind = ApiErrorKind.UNKNOWN,
+                    detail = "HTTP 400 | body=this model's maximum context length is 8192 tokens"
+                )
+            )
+        )
+        assertFalse(
+            isMaxTokensLimitError(
+                ApiError(kind = ApiErrorKind.UNKNOWN, detail = "HTTP 400 | body=unrecognized argument")
+            )
+        )
     }
 
     @Test

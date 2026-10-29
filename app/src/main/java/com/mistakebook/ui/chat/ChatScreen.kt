@@ -506,14 +506,16 @@ fun ChatScreen(
             }
 
             // 上下文状态条：摘要生效提示 + 上次请求 token 数 + 手动压缩入口。
-            // 压缩按钮只在上下文到线（200k，见 MANUAL_COMPRESS_TOKENS）后出现：
-            // 短会话没有压缩价值，常驻按钮只会诱导人去按。
-            if (state.summaryActive || state.lastPromptTokens > 0) {
+            // 压缩按钮在上下文到线（见 MANUAL_COMPRESS_TOKENS）或**服务端报上下文超限**
+            // （contextOverflow：超限会话 token 数永远拿不到，只按 token 数显示的话
+            // 死会话一次都不会出现——v0.0.62 长会话死区修复）后出现。
+            if (state.summaryActive || state.lastPromptTokens > 0 || state.contextOverflow) {
                 ContextStatusRow(
                     summaryActive = state.summaryActive,
                     compressing = state.compressing,
                     lastPromptTokens = state.lastPromptTokens,
-                    showCompress = state.lastPromptTokens >= ChatViewModel.MANUAL_COMPRESS_TOKENS,
+                    showCompress = state.lastPromptTokens >= ChatViewModel.MANUAL_COMPRESS_TOKENS ||
+                        state.contextOverflow,
                     onCompress = viewModel::compressContext
                 )
                 Spacer(Modifier.height(4.dp))

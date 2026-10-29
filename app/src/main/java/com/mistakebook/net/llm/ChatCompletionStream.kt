@@ -198,6 +198,24 @@ class ChatCompletionStream(
         request: ChatRequest,
         effort: ReasoningEffort = ReasoningEffort.OFF
     ): Flow<ChatStreamEvent> = flow {
+        emitAll(runStreamAttempts(profile, request, effort, allowMaxTokensHalve = true))
+    }
+
+    /**
+     * 流式尝试链主体（[complete] 的实现）。
+     *
+     * @param allowMaxTokensHalve 输出上限自适应降档的开关（只递归一次）。
+     *   对话默认 max_tokens 是「不设上限」口径（131072，用户明确要求），
+     *   但输出上限只有 8k 的中转站会直接 400。一帧未吐且错误体明确是
+     *   max_tokens 类 → 减半重试一次，自动适配低上限渠道，用户无需换模型。
+     *   减半后仍失败就如实报错——盲降多次只会拖长失败时间。
+     */
+    private suspend fun FlowCollector<ChatStreamEvent>.runStreamAttempts(
+        profile: LlmProfile,
+        request: ChatRequest,
+        effort: ReasoningEffort,
+        allowMaxTokensHalve: Boolean
+    ) {
         var deltas = 0
         var thinkings = 0
         var failure: ApiError? = null
@@ -243,7 +261,7 @@ class ChatCompletionStream(
                         is RawEvent.Failed -> attemptFailure = event.error
                     }
                 }
-                if (ended) return@flow
+                if (ended) return
                 // 已经吐过内容：绝不换字段重发（用户会看到重复输出或长停顿）
                 if (deltas + thinkings > 0) {
                     failure = attemptFailure
@@ -262,18 +280,27 @@ class ChatCompletionStream(
             failure = HttpFactory.throwableError(t)
         }
 
-        if (ended) return@flow
+        if (ended) return
 
         // 一帧都没解出来：可能是服务端忽略了 stream 参数、返回体不是 SSE、
         // 或者连不上。只要思考或正文吐出过任何一帧，就绝不能降级重发（否则会看到重复输出或长停顿）。
         val totalEmitted = deltas + thinkings
         val reason = failure
             ?: if (totalEmitted == 0) ApiError(ApiErrorKind.BAD_RESPONSE, "模型未返回流式内容")
-            else return@flow
+            else return
+
+        // 输出上限自适应降档：见 KDoc。放在非流式降级**之前**——
+        // 非 stream 模式下同样会被 max_tokens 打 400，降档重发非流式纯属多烧一次。
+        if (allowMaxTokensHalve && totalEmitted == 0 && request.max_tokens > CHAT_MIN_MAX_TOKENS &&
+            isMaxTokensLimitError(reason)
+        ) {
+            val halved = request.copy(max_tokens = request.max_tokens / 2)
+            return runStreamAttempts(profile, halved, effort, allowMaxTokensHalve = false)
+        }
 
         if (!StreamFallback.shouldFallback(reason, totalEmitted)) {
             if (failure != null) emit(ChatStreamEvent.Failed(reason))
-            return@flow
+            return
         }
 
         emitAll(nonStreaming(profile, request, totalEmitted, attempts.first()))
@@ -602,11 +629,14 @@ class ChatCompletionStream(
          * 事实确实如此——`max_tokens` 只是上限，服务端按实际生成量计费；
          * 我们设小了反而会在模型还能写的时候被硬切（v0.0.56 的 16K 就是这样）。
          *
-         * 撞上服务端更低的硬上限时不会炸：请求会带上「max_tokens is too large」
-         * 一类错误，[com.mistakebook.pipeline.LlmClient] 捕获后按半数降档重试
-         * （见 `maxTokensDowngradeMessage`），最坏情况是回落到服务端允许的档位。
+         * 撞上服务端更低的硬上限时不会炸：错误体是「max_tokens too large」一类
+         * 400，[runStreamAttempts] 会按半数降档重试一次，最坏情况回落到服务端
+         * 允许的档位。
          */
         const val MAX_TOKENS = 131_072
+
+        /** 对话路径的输出上限降档下限（与识别路径 MIN_MAX_TOKENS 同口径，避免反向依赖 pipeline 包）。 */
+        private const val CHAT_MIN_MAX_TOKENS = 2048
 
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 

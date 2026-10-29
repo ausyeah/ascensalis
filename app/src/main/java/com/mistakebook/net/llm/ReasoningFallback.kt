@@ -62,10 +62,43 @@ object ReasoningFallback {
     /**
      * 这个失败是不是「服务端不认思考字段」——是才值得换下一个候选。
      *
-     * 判据收紧到 **HTTP 400**：鉴权(401/403)、限流(429)、服务端(5xx)
-     * 换字段名再发一次还是同样结果，白烧一次配额；
-     * 而 400 且一帧内容都没吐出时，换字段名正是对症的解法。
+     * ## 判据为什么不能只看 HTTP 400（v0.0.62 收紧）
+     *
+     * 旧实现「400 即换字段」把**一切** 400 都当成字段名问题：
+     * max_tokens 超限、prompt 超长、模型名写错……每一种都会把整条候选链
+     * （最多 7 个）重发一遍全量 prompt，烧 7 倍 token 后失败，还可能再走
+     * 一次非流式降级。收紧为两层：
+     *
+     * 1. **负向排除**：错误体明确是「输出上限 / 上下文超长」的，换字段毫无意义；
+     * 2. **正向要求**：错误体确实提到思考字段名，或出现 unrecognized /
+     *    unknown field 措辞——服务端不认字段时几乎都会回显字段名
+     *    （OpenAI 系："Unrecognized request argument supplied: reasoning_effort"）。
+     *    两层都不满足的 400，一次失败就报错，比盲发 7 次更省钱也更可读。
      */
-    fun isUnknownFieldError(error: ApiError): Boolean =
-        error.detail.startsWith("HTTP 400")
+    fun isUnknownFieldError(error: ApiError): Boolean {
+        if (!error.detail.startsWith("HTTP 400")) return false
+        val haystack = "${error.serverMessage}\n${error.detail}".lowercase()
+        if (isMaxTokensLimitError(error) || haystack.contains("context length") ||
+            haystack.contains("prompt is too long") || haystack.contains("too many tokens")
+        ) {
+            return false
+        }
+        val mentionsField = FIELD_CANDIDATES.any { haystack.contains(it) }
+        val mentionsUnknownField = haystack.contains("unrecognized") ||
+            haystack.contains("unknown field")
+        return mentionsField || mentionsUnknownField
+    }
+}
+
+/**
+ * 是否「输出上限超限」型 400（与识别路径 pipeline.LlmClient 同判据，两处共用）。
+ *
+ * 必须是 HTTP 400（detail 以 "HTTP 400" 开头，body 片段已由请求层拼入），
+ * 且错误文本提到 max_tokens 或 maximum context length（忽略大小写）——
+ * 两种常见服务端原文都覆盖。
+ */
+internal fun isMaxTokensLimitError(error: ApiError): Boolean {
+    if (!error.detail.startsWith("HTTP 400")) return false
+    val haystack = "${error.serverMessage}\n${error.detail}".lowercase()
+    return haystack.contains("max_tokens") || haystack.contains("maximum context length")
 }
