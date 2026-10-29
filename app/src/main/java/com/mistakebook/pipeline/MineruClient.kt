@@ -188,6 +188,11 @@ class MineruClient(
         // 状态计时器：记录最后一次变化时刻，判断是否停滞。
         // 抽成对象是为了可测——见 [MineruStallTracker]。
         val stallTracker = MineruStallTracker()
+        // 轮询瞬断容忍（v0.0.68）：一次网络抖动 / 5xx 就整体判死的话，
+        // 服务端多半还在解析（文件已上传、额度已计入），用户重试 =
+        // 重新上传 + 再烧一份额度。连续 [MAX_POLL_ERRORS] 次轮询错误才判死；
+        // 4xx（鉴权 / 参数错）不属于瞬断，立即失败不浪费等待。
+        var pollErrors = 0
         while (System.currentTimeMillis() - startedAt < TOTAL_TIMEOUT_MS) {
             val waitMs = when {
                 first -> {
@@ -203,11 +208,17 @@ class MineruClient(
             delay(waitMs)
 
             val response = rethrowCancellation { api.extractResults(auth, batchId) }
-                .getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
             val body = response.body()
             if (!response.isSuccessful || body == null) {
-                return fail(HttpFactory.httpError(response.code(), response.errorBody()?.string().orEmpty()))
+                val pollError = HttpFactory.httpError(response.code(), response.errorBody()?.string().orEmpty())
+                pollErrors++
+                val is4xx = response.code() in 400..499 && response.code() != 429
+                if (is4xx || pollErrors >= MAX_POLL_ERRORS) {
+                    return fail(pollError)
+                }
+                continue
             }
+            pollErrors = 0
             if (!body.isOk()) {
                 // -60012 task not found 结合 ping 语义即可判断 Key 有效性，这里一律按错误处理
                 return fail(ApiError(kind = ApiErrorKind.AUTH, serverMessage = body.msg))
@@ -438,6 +449,9 @@ class MineruClient(
         const val FIRST_DELAY_MS = 2_000L
         const val POLL_INTERVAL_MS = 3_000L
         val BACKOFF = longArrayOf(3_000L, 5_000L, 8_000L, 10_000L)
+
+        /** 轮询瞬断容忍上限：连续这么多次网络/5xx 错误才判死（4xx 不容忍）。 */
+        const val MAX_POLL_ERRORS = 3
     }
 
 /**

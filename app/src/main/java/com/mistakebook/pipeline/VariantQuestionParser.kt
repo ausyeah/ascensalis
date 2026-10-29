@@ -28,7 +28,11 @@ object VariantQuestionParser {
      */
     fun parse(raw: String): RefinedQuestionDto? {
         if (raw.isBlank()) return null
+        // 与 [JsonExtractor] 同一道保护（v0.0.68）：模型把 LaTeX 直接写进
+        // JSON 字符串时，`\t \f \b` 系命令会被 JSON 转义吃成控制字符，
+        // 公式在渲染层就救不回来了。先保护、解码后再还原。
         val candidates = listOf(raw, stripFences(raw), sliceBraces(raw), sliceBraces(stripFences(raw)))
+            .map { LatexEscapes.protectLatexEscapes(it) }
         for (candidate in candidates) {
             if (candidate.isBlank()) continue
             val dto = runCatching { json.decodeFromString<RefinedQuestionDto>(candidate) }

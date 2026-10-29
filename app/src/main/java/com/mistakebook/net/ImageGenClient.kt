@@ -123,8 +123,15 @@ class ImageGenClient(
             )
         }
 
-        // 1) 明确的字段名（各家文档里出现过的写法）
-        firstStringByKey(root, B64_KEYS)?.let { return decodeBase64(it) }
+        // 1) 明确的字段名（各家文档里出现过的写法）。
+        // b64 分支解码失败时**继续尝试 URL**（v0.0.68）：`"image"` 同时在
+        // B64_KEYS 与 URL_KEYS 的启发式集合里，有些渠道直接把 http 链接
+        // 塞进 image 键——旧实现在 b64 分支直接 return「解码失败」，
+        // 永远到不了 URL 分支。
+        firstStringByKey(root, B64_KEYS)?.let { b64 ->
+            val decoded = decodeBase64(b64)
+            if (decoded is ApiResult.Success) return decoded
+        }
         firstStringByKey(root, URL_KEYS)?.let { return download(it) }
 
         // 2) 启发式：整棵树里找一段像图片的长 base64，或一个 http(s) 链接

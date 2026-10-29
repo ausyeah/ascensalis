@@ -166,13 +166,21 @@ class LlmClient(
             max_tokens = maxTokens,
             responseFormat = if (useJsonMode) com.mistakebook.net.llm.ResponseFormat("json_object") else null
         )
-        val response = runCatching {
+        // 取消必须**原样上抛**（v0.0.68，与 MineruClient.rethrowCancellation 对齐）：
+        // runCatching 会把 CancellationException 转成普通 Failure 返回，
+        // 协程继续跑到结束——用户点「取消」却落一条「识别失败，请重试」，
+        // 重试又烧一次 LLM 额度。为一个取消按钮供应事故更多额度。
+        val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
                 authorization = "Bearer ${profile.resolveKey(profile.model)}",
                 request = request
             )
-        }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (t: Throwable) {
+            return ApiResult.Failure(HttpFactory.throwableError(t))
+        }
         if (!response.isSuccessful) {
             val body = response.errorBody()?.string().orEmpty()
             val error = HttpFactory.httpError(response.code(), body)
@@ -333,13 +341,21 @@ class LlmClient(
             responseFormat = null,
             stream = false
         )
-        val response = runCatching {
+        // 取消必须**原样上抛**（v0.0.68，与 MineruClient.rethrowCancellation 对齐）：
+        // runCatching 会把 CancellationException 转成普通 Failure 返回，
+        // 协程继续跑到结束——用户点「取消」却落一条「识别失败，请重试」，
+        // 重试又烧一次 LLM 额度。为一个取消按钮供应事故更多额度。
+        val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
                 authorization = "Bearer ${profile.resolveKey(profile.model)}",
                 request = request
             )
-        }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (t: Throwable) {
+            return ApiResult.Failure(HttpFactory.throwableError(t))
+        }
         if (!response.isSuccessful) {
             return fail(HttpFactory.httpError(response.code(), response.errorBody()?.string().orEmpty()))
         }

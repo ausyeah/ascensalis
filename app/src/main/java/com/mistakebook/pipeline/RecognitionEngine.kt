@@ -37,6 +37,14 @@ class RecognitionEngine(
     private val mutex = Mutex()
     private val jobs = ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
 
+    /**
+     * 已取消代（v0.0.68）：cancel() 对**还在队列里**的任务只能落库
+     * FAILED（job 要等消费循环取出才注册），不加标记的话出队后照常
+     * 复活跑完整条流水线——重烧一份 MinerU 额度。submit（用户重试）
+     * 会清掉标记，已取消任务的重试不受影响。
+     */
+    private val cancelledIds: MutableSet<Long> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     init {
         scope.launch {
             for (taskId in queue) {
@@ -51,12 +59,17 @@ class RecognitionEngine(
 
  /** 提交任务队列；同一次导入可批量提交，按 orderInGroup 顺序执行。 */
     fun submit(taskIds: List<Long>) {
-        taskIds.forEach { queue.trySend(it) }
+        taskIds.forEach {
+            // 用户重试 = 主动重新入队：清掉可能残留的取消标记
+            cancelledIds.remove(it)
+            queue.trySend(it)
+        }
     }
 
     fun submit(taskId: Long) = submit(listOf(taskId))
 
     fun cancel(taskId: Long) {
+        cancelledIds.add(taskId)
         // jobs 的取消照常执行（幂等）：把还在跑的协程停掉总没错。
         // 但**落库要挑状态**（T6）：任务恰好已经 DONE（或早就 FAILED）时，
         // 无条件的 fail() 会把已完成覆写成「已取消」——用户盯着编辑页
@@ -77,6 +90,9 @@ class RecognitionEngine(
     }
 
     private suspend fun execute(taskId: Long) {
+        // 取消后复活守卫：cancel() 时任务还在队列里的话，标记会在出队时
+        // 被这里消费掉——直接放弃执行（用户重试会重新 submit 并清标记）
+        if (cancelledIds.remove(taskId)) return
         val task = taskRepository.findById(taskId) ?: return
         val file = File(task.photoPath)
         if (!file.exists()) {
