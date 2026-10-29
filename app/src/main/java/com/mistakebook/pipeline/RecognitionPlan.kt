@@ -62,16 +62,16 @@ sealed interface RecognitionPlan {
          * | VISION | 没配识图模型 | Unavailable |
          * | AUTO | 见下 | Chain |
          *
-         * AUTO 的链条顺序（用户诉求）：
-         * 「检测 mineru 是否可用，可用就用；如果失败就不要显示失败，
-         *   而是优先用当前默认大模型；如果当前大模型不可识图，
-         *   就去用识图配置的大模型，最后再返回给大模型来处理。」
+         * AUTO 的链条（用户诉求，v0.0.55 反馈收敛）：
+         * 「MinerU 加超时，超时就转大模型；大模型识别一次就够了，不转给
+         *   另一个大模型再来一次；当前模型不能识图，就让配置好的识图模型
+         *   跑全程。」
          *
-         * 落到链上就是：
-         * ① MINERU（配了才进链）→ ② CURRENT_LLM（当前模型识图才进链）
-         * → ③ VISION_LLM（配了识图模型才进链）。
-         * 链上任意一条产出了文字，后面都由大模型整理——
-         * 「最后再返回给大模型来处理」就是指这个。
+         * 落到链上：① MINERU（配了才进链，执行层带超时，超时/失败即往下）
+         * → ② 大模型**只出一条**：当前模型能识图 → CURRENT_LLM，否则 →
+         * VISION_LLM（配了识图模型才进链）。不再把「当前模型」和「识图模型」
+         * 串成两条连续重试。
+         * 链上 MinerU 产出的文字，后面仍由大模型整理。
          */
         fun decide(
             mode: RecognitionMode,
@@ -108,8 +108,12 @@ sealed interface RecognitionPlan {
             RecognitionMode.AUTO -> {
                 val routes = buildList {
                     if (mineruConfigured) add(Route.MINERU)
-                    if (supportsVision) add(Route.CURRENT_LLM)
-                    if (visionConfigured) add(Route.VISION_LLM)
+                    // 大模型只出一条：当前能识图用当前，否则用识图模型；不二者连试
+                    // （用户诉求：大模型识别一次就够了，不转给另一个大模型再来一次）
+                    when {
+                        supportsVision -> add(Route.CURRENT_LLM)
+                        visionConfigured -> add(Route.VISION_LLM)
+                    }
                 }
                 if (routes.isEmpty()) {
                     Unavailable(

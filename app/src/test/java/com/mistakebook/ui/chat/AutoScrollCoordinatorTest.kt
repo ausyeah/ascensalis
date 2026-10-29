@@ -213,4 +213,86 @@ class AutoScrollCoordinatorTest {
         assertFalse(coordinator.following)
         assertTrue(coordinator.showJumpButton)
     }
+
+    // ---- v0.0.55：gap == null 时区分「插入瞬态」与「用户停在 item 边界」----
+
+    /**
+     * 插入瞬态：新消息插到 index 0、还在视口下方，原最新一条（现在是 index 1）
+     * 仍贴底。此时贴底的那条的 key 正是上一个最新一条 → 判为瞬态，继续跟随。
+     */
+    @Test
+    fun insertionTransientWhenFlushItemIsThePreviousNewest() {
+        assertTrue(
+            isInsertionTransient(
+                bottomMostKey = "m0",
+                bottomMostFlush = true,
+                lastNewestKey = "m0"
+            )
+        )
+    }
+
+    /**
+     * **本次修复的核心用例**：用户在历史区恰好停在 item 边界上，最底部可见 item
+     * 的 offset 同样是 0（与插入瞬态几何上不可区分），但它不是上一个最新一条。
+     * 旧实现只凭 `isFlushAtBottom` 就当成瞬态并提前返回，`following` 一直保持
+     * true，下一条新消息到达就把人从历史区拽回底部——用户反馈的
+     * 「没有触底仍然会跟随」。
+     */
+    @Test
+    fun notTransientWhenUserRestsOnAnItemBoundaryInHistory() {
+        assertFalse(
+            isInsertionTransient(
+                bottomMostKey = "m3",
+                bottomMostFlush = true,
+                lastNewestKey = "m0"
+            )
+        )
+    }
+
+    /** 贴底的那条被切掉一截 → 用户已经离开底部，绝不是瞬态。 */
+    @Test
+    fun notTransientWhenBottomMostItemIsCutOff() {
+        assertFalse(
+            isInsertionTransient(
+                bottomMostKey = "m0",
+                bottomMostFlush = false,
+                lastNewestKey = "m0"
+            )
+        )
+    }
+
+    /**
+     * 从没见过最新一条（视口为空 / 刚进页面）时不能判瞬态：
+     * `null == null` 会把「空视口」误判成瞬态，从此再也不 pause。
+     */
+    @Test
+    fun notTransientWhenNewestWasNeverSeen() {
+        assertFalse(
+            isInsertionTransient(
+                bottomMostKey = null,
+                bottomMostFlush = false,
+                lastNewestKey = null
+            )
+        )
+        // 贴底 + 两侧都是 null：同样不能算瞬态（没有证据表明贴底的是旧最新一条）
+        assertFalse(
+            isInsertionTransient(
+                bottomMostKey = null,
+                bottomMostFlush = true,
+                lastNewestKey = null
+            )
+        )
+    }
+
+    /** newestKeyOf：index 0 在可见集里取它的 key，不在则 null。 */
+    @Test
+    fun newestKeyOfReadsIndexZeroKey() {
+        assertEquals(
+            "m0",
+            newestKeyOf(layoutInfo(listOf(Triple(0, "m0", 0), Triple(1, "m1", 138))))
+        )
+        assertNull(
+            newestKeyOf(layoutInfo(listOf(Triple(3, "m3", 0), Triple(4, "m4", 138))))
+        )
+    }
 }

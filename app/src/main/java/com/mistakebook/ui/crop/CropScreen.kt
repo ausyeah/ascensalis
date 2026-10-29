@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.TopAppBarDefaults
 import com.mistakebook.R
+import com.mistakebook.data.ImageNormalizer
 import com.mistakebook.di.AppContainer
 import com.mistakebook.ui.common.ApiKeyRequiredDialog
 import com.mistakebook.domain.TaskStatus
@@ -273,10 +274,31 @@ fun CropScreen(
     var mineruMissing by remember { mutableStateOf(false) }
     var llmMissing by remember { mutableStateOf(false) }
 
+    // 对比度增强档位（0 关 / 1 轻 / 2 标准 / 3 强），v0.0.55 反馈。
+    //
+    // **增强是裁剪页的权威操作**：拍照/相册导入只把方向烘进像素、不增强
+    // （见 CaptureScreen.captureToFile 与 ImageImporter 的注释），档位在这里定。
+    // 之所以必须这样分工：enhanceForOcr 不幂等——在导入时就增强一遍、
+    // 这里再增强一遍就是叠加强化，而且「关」档没有原像素可回。
+    //
+    // -1 = 还没初始化（等会话/设置读回来），此时不派生增强基图。
+    var enhanceStrength by remember(imagePath) { mutableStateOf(-1) }
+    // 增强档位条默认收起：工具栏已经有一排模式切换和一排操作，
+    // 再常驻一排四档会把裁剪区压得很小。点「增强」才展开。
+    var enhancePanelOpen by remember { mutableStateOf(false) }
+
     // 涂鸦遮蔽：把不想识别的区域（红笔批注、旁边的题、草稿）涂白
     var maskMode by remember { mutableStateOf(false) }
     var strokes by remember { mutableStateOf<List<MaskStroke>>(emptyList()) }
     var activeStroke by remember { mutableStateOf<List<Offset>>(emptyList()) }
+
+    // 屏幕上实际显示的位图 = 旋转基图再过一遍对比度增强（见下方派生逻辑）。
+    // 用 State 而不是派生值：增强是在 IO 上算的，要能「算完前继续显示上一档」。
+    // 跟着 imagePath 重置——换一张图就不能再拿上一张的位图显示。
+    var displayBitmap by remember(imagePath) { mutableStateOf<Bitmap?>(null) }
+    // 增强是否正在算（切档时为真）。只用于那层「计算中」提示——
+    // 位图本身继续显示上一档，不闪回。
+    var enhancing by remember(imagePath) { mutableStateOf(false) }
 
     // T14：双指缩放/平移。zoom 是**视图级**变换，与 [rotationQuarter]（bitmap 级）正交：
     // 坐标链 = 屏幕 → zoom 逆变换 → 现有旋转换算（见 screenToBase/baseToScreen）。
@@ -304,13 +326,27 @@ fun CropScreen(
      *
      * 现在位图不再被旋转（见 [rotationQuarter]），笔迹与裁剪框本来就存在
      * 原图坐标系，所以恢复只是**原样赋值**，没有任何需要重放的东西。
+     *
+     * 增强档位也在这里恢复（v0.0.55 反馈）：它和裁剪框一样属于这张图的
+     * 编辑状态。没有会话记录时（首次进入）按入口分三种默认：
+     * - 重新裁剪 / 重新识别：图上的增强是上一轮裁剪页烘进去的，**默认 0（不再增强）**
+     *   ——否则等于在已增强的图上再增强一遍，纸面会被推成一片死白；
+     * - 拍照 / 相册 / 批次 / 对话附件：图是未增强的原始像素，回退到设置里的
+     *   `ocrStrength`，也就是用户上次选定的档位。
      */
     LaunchedEffect(imagePath, decodedBitmap) {
-        val session = sessionStore.load(imagePath) ?: return@LaunchedEffect
-        rotationQuarter = ((session.rotationQuarter % MASK_ROTATION_PERIOD) + MASK_ROTATION_PERIOD) %
+        val session = sessionStore.load(imagePath)
+        rotationQuarter = ((session?.rotationQuarter ?: 0) % MASK_ROTATION_PERIOD + MASK_ROTATION_PERIOD) %
             MASK_ROTATION_PERIOD
-        rect = CropRect(session.left, session.top, session.right, session.bottom)
-        strokes = session.strokes.toMaskStrokes()
+        rect = session?.let { CropRect(it.left, it.top, it.right, it.bottom) } ?: CropRect.Default
+        strokes = session?.strokes?.toMaskStrokes() ?: emptyList()
+        enhanceStrength = when {
+            session != null -> session.enhanceStrength.coerceIn(0, 3)
+            recropOnly || reRecognizeQuestionId != null -> 0
+            else -> runCatching { container.settingsStore.snapshotNow().ocrStrength }
+                .getOrDefault(2)
+                .coerceIn(0, 3)
+        }
     }
 
     // 每一步操作后都落盘：用户要求「裁切后涂鸦、涂鸦后裁切，
@@ -320,6 +356,7 @@ fun CropScreen(
     //
     // 注意存的是**原图坐标系**的 rect / strokes + 圈数，两者都是原样落盘，
     // 不做任何旋转变换。旋转由 [rotationQuarter] 单独表达。
+    // 增强档位同理原样存（它作用在未旋转的基图上，与朝向无关）。
     suspend fun persistSession() {
         sessionStore.save(
             imagePath,
@@ -330,9 +367,27 @@ fun CropScreen(
                 bottom = rect.bottom,
                 rotationQuarter = ((rotationQuarter % MASK_ROTATION_PERIOD) + MASK_ROTATION_PERIOD) %
                     MASK_ROTATION_PERIOD,
-                strokes = strokes.toStrokePoints()
+                strokes = strokes.toStrokePoints(),
+                enhanceStrength = enhanceStrength.coerceIn(0, 3)
             )
         )
+    }
+
+    /**
+     * 增强档位改动：落盘到本图的会话，同时写回设置里的 `ocrStrength`。
+     *
+     * 写回设置是为了让「这次调好的档位」成为下一张的默认值——原先这个
+     * 写入发生在拍照页的档位条上（v0.0.55 反馈后该入口已移到裁剪页），
+     * 不写回的话用户的偏好就无处安放，每次拍新图都回到标准档。
+     */
+    fun onEnhanceStrengthChange(newStrength: Int) {
+        val strength = newStrength.coerceIn(0, 3)
+        if (strength == enhanceStrength) return
+        enhanceStrength = strength
+        scope.launch {
+            persistSession()
+            runCatching { container.settingsStore.setOcrStrength(strength) }
+        }
     }
 
     val density = LocalDensity.current
@@ -343,18 +398,15 @@ fun CropScreen(
     var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var previewing by remember { mutableStateOf(false) }
 
-    if (decoding || decodedBitmap == null) {
+    val decodeFailed = !decoding && decodedBitmap == null
+    // 只在这里挡「解码中 / 解码失败」。增强首帧的等待放在下面**派生完之后**再挡——
+    // 提前 return 会让负责给 displayBitmap 赋值的 LaunchedEffect 根本进不了组合，
+    // 于是一直卡在转圈（这是本次改动第一版的真实 bug）。
+    if (decoding || decodeFailed) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             when {
-                decoding -> Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    CircularProgressIndicator()
-                    Text(stringResource(R.string.crop_decoding))
-                }
-
-                else -> Column(
+                // 解码失败：给原因 + 出口（批次里还要能跳过这一张）
+                decodeFailed -> Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.padding(32.dp)
@@ -383,6 +435,15 @@ fun CropScreen(
                         Text(stringResource(R.string.crop_back), color = Color.White)
                     }
                 }
+
+                // 解码中：转圈
+                else -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text(stringResource(R.string.crop_decoding))
+                }
             }
         }
         return
@@ -391,7 +452,7 @@ fun CropScreen(
     val base = decodedBitmap ?: return
 
     /**
-     * 屏幕上显示的位图 = 原图转 [rotationQuarter] 圈。
+     * 旋转基图 = 原图转 [rotationQuarter] 圈。
      *
      * ## 为什么用朝向缓存，而不是每次旋转都新建 + 立刻回收旧的
      * 「新建即回收旧图」有个致命竞态：用户点旋转时，如果正好有一次
@@ -401,9 +462,12 @@ fun CropScreen(
      * 缓存按圈数存，最多 4 张，且**只有用户真正转到的朝向才会被创建**。
      * 同一朝向反复旋转（转 4 圈回到原位再转）复用同一张，不产生额外分配。
      * 回收推迟到离开页面时，那时组合作用域的协程已取消，不会有任务在读。
+     *
+     * 键是**不变的 base**（不是增强后的图）：增强只是逐像素映射，
+     * 见 [displayBitmap] 上方关于「为什么增强放在旋转之后」的说明。
      */
     val rotatedCache = remember(base) { HashMap<Int, Bitmap>() }
-    val displayBitmap = remember(base, rotationQuarter) {
+    val rotatedBase = remember(base, rotationQuarter) {
         val quarters = rotationQuarter
         rotatedCache.getOrPut(quarters) {
             var current = base
@@ -413,14 +477,65 @@ fun CropScreen(
     }
     DisposableEffect(base) {
         onDispose {
-            // base 本身不归这里管（displayBitmap 在未旋转时就等于 base）
+            // base 本身不归这里管（quarters=0 时 rotatedBase 就是 base）
             rotatedCache.values.forEach { if (it !== base) it.recycle() }
             rotatedCache.clear()
         }
     }
 
+    /**
+     * [displayBitmap] = [rotatedBase] 再过一遍对比度增强（v0.0.55 反馈）。
+     *
+     * ## 为什么增强放在旋转之后、而不是之前
+     * [ImageNormalizer.enhanceForOcr] 是逐像素映射，Otsu 阈值按整张图的灰度
+     * 直方图算——旋转只是把像素重新排列，直方图一个数都不变，所以
+     * 「先转再增强」与「先增强再转」结果逐像素相同。
+     * 而旋转缓存因此可以继续按**不变的 base** 做键（最多 4 张），增强只额外
+     * 持有当前档位那一张；反过来做的话每切一档都要重建整套旋转缓存，
+     * 峰值内存翻几倍，还要面对「切档时回收旧位图 vs IO 上正在读它」的竞态。
+     *
+     * ## 切档不闪回
+     * 增强在 IO 上算（1600px 长边约几百毫秒）。算完前 [displayBitmap] 保留
+     * 上一档的结果继续显示，配一层「计算中」提示，不闪回未增强的原图。
+     */
+    LaunchedEffect(rotatedBase, enhanceStrength) {
+        // 档位还没从会话/设置读回来（-1）时不派生，等种子赋值后自然重跑
+        if (enhanceStrength < 0) return@LaunchedEffect
+        val strength = enhanceStrength.coerceIn(0, 3)
+        enhancing = true
+        val result = withContext(Dispatchers.IO) {
+            // 档位 0：原样返回，不产生新位图——「关」就是原像素。
+            // 这正是把增强权威位置放在裁剪页的全部意义：拍照/导入不再预先增强，
+            // 用户在这里选「关」拿到的就是传感器拍到的原始像素。
+            if (strength == 0) rotatedBase
+            else runCatching { ImageNormalizer.enhanceForOcr(rotatedBase, strength) }
+                .getOrDefault(rotatedBase)
+        }
+        displayBitmap = result
+        enhancing = false
+    }
+
+    // 首帧增强还在算（displayBitmap 尚未赋值）：挡在这里，且必须在上面那个
+    // LaunchedEffect **之后**——提前 return 会让它进不了组合，永远等不到赋值。
+    // 切档时 displayBitmap 有上一档的值，不会被这道门挡住，照常显示旧图。
+    if (displayBitmap == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                CircularProgressIndicator()
+                Text(stringResource(R.string.crop_enhancing))
+            }
+        }
+        return
+    }
+
+    // 到这里 displayBitmap 必然非空，之后统一用 shown（本地 val，可智能转换）
+    val shown = displayBitmap ?: return
+
     // 图片在 FIT 布局下实际占据的区域（按**显示朝向**的尺寸算）
-    val imageSize = computeFitSize(displayBitmap.width, displayBitmap.height, viewport)
+    val imageSize = computeFitSize(shown.width, shown.height, viewport)
     val imageLeft = (viewport.width - imageSize.width) / 2f
     val imageTop = (viewport.height - imageSize.height) / 2f
 
@@ -483,7 +598,7 @@ fun CropScreen(
                                 previewing = true
                                 val preview = withContext(Dispatchers.IO) {
                                     buildPreviewBitmap(
-                                        displayBitmap,
+                                        shown,
                                         rect.rotatedQuarters(rotationQuarter),
                                         strokes.map { it.rotated(rotationQuarter) },
                                         brushWidthPx,
@@ -549,6 +664,10 @@ fun CropScreen(
                     zoomPan = Offset.Zero
                     scope.launch { persistSession() }
                 },
+                enhanceStrength = enhanceStrength.coerceAtLeast(0),
+                enhancePanelOpen = enhancePanelOpen,
+                onEnhancePanelOpenChange = { enhancePanelOpen = it },
+                onEnhanceStrengthChange = { newStrength -> onEnhanceStrengthChange(newStrength) },
                 onSkipCurrent = if (chatMode && container.captureBatch.hasPending) {
                     { onBatchSkip() }
                 } else {
@@ -562,7 +681,7 @@ fun CropScreen(
                         if (recropOnly) {
                             val saved = withContext(Dispatchers.IO) {
                                 saveCrop(
-                                    displayBitmap, cropRect, container, cropStrokes,
+                                    shown, cropRect, container, cropStrokes,
                                     brushWidthPx, imageSize.width.toFloat()
                                 )
                             }
@@ -580,7 +699,7 @@ fun CropScreen(
                         if (chatMode) {
                             val saved = withContext(Dispatchers.IO) {
                                 saveCrop(
-                                    displayBitmap, cropRect, container, cropStrokes,
+                                    shown, cropRect, container, cropStrokes,
                                     brushWidthPx, imageSize.width.toFloat()
                                 )
                             }
@@ -630,7 +749,7 @@ fun CropScreen(
                             }
                             val saved = withContext(Dispatchers.IO) {
                                 saveCrop(
-                                    displayBitmap, cropRect, container, cropStrokes,
+                                    shown, cropRect, container, cropStrokes,
                                     brushWidthPx, imageSize.width.toFloat()
                                 )
                             }
@@ -667,7 +786,7 @@ fun CropScreen(
 
                         val saved = withContext(Dispatchers.IO) {
                             saveCrop(
-                                displayBitmap, cropRect, container, cropStrokes,
+                                shown, cropRect, container, cropStrokes,
                                 brushWidthPx, imageSize.width.toFloat()
                             )
                         }
@@ -706,7 +825,7 @@ fun CropScreen(
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             CropOverlay(
-                displayBitmap = displayBitmap.asImageBitmap(),
+                displayBitmap = shown.asImageBitmap(),
                 rawBitmap = base,
                 viewport = viewport,
                 onViewportChange = { viewport = it },
@@ -790,6 +909,22 @@ fun CropScreen(
                     onOpenSettings = onOpenSettings,
                     onManualEntry = onManualEntry,
                     onDismiss = { showKeyGate = false }
+                )
+            }
+
+            // 增强计算中：位图继续显示上一档（不闪回），只叠一层提示。
+            // 没有这层提示的话，用户点完档位看到画面没动静会以为按钮坏了而连点——
+            // 连点会真的多烧几次 CPU（每次都重算一整张 1600px 的图）。
+            if (enhancing) {
+                Text(
+                    text = stringResource(R.string.crop_enhancing),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp)
+                        .background(Color.Black.copy(alpha = 0.7f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
 

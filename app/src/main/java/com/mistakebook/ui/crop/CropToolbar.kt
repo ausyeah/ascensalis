@@ -4,8 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -37,7 +39,13 @@ internal fun CropToolbar(
     onReset: () -> Unit,
     onConfirm: () -> Unit,
     /** T2 对话连拍：非空时显示「不裁切，下一张」跳过入口（本张用原图）。 */
-    onSkipCurrent: (() -> Unit)? = null
+    onSkipCurrent: (() -> Unit)? = null,
+    /** 对比度增强档位（0 关 / 1 轻 / 2 标准 / 3 强），v0.0.55 反馈。 */
+    enhanceStrength: Int = 2,
+    /** 增强档位条是否展开。默认收起，点「增强」才展开——见下方注释。 */
+    enhancePanelOpen: Boolean = false,
+    onEnhancePanelOpenChange: (Boolean) -> Unit = {},
+    onEnhanceStrengthChange: (Int) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -53,23 +61,85 @@ internal fun CropToolbar(
             style = MaterialTheme.typography.labelSmall
         )
 
-        SingleChoiceSegmentedButtonRow(
-            modifier = Modifier.fillMaxWidth(0.6f)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            SegmentedButton(
-                selected = !maskMode,
-                onClick = { onMaskModeChange(false) },
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier.weight(1f)
             ) {
-                Text(stringResource(R.string.crop_selection))
+                SegmentedButton(
+                    selected = !maskMode,
+                    onClick = { onMaskModeChange(false) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                ) {
+                    Text(stringResource(R.string.crop_selection))
+                }
+                SegmentedButton(
+                    selected = maskMode,
+                    onClick = { onMaskModeChange(true) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                ) {
+                    Text(stringResource(R.string.crop_mask))
+                }
             }
-            SegmentedButton(
-                selected = maskMode,
-                onClick = { onMaskModeChange(true) },
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+            Spacer(Modifier.width(8.dp))
+            // 增强入口（v0.0.55 反馈）：单独一颗按钮，点开展开四档档位条。
+            //
+            // 为什么不常驻：工具栏已经有一排模式切换 + 一排操作，再常驻一排四档
+            // 会把裁剪区压得很小——而裁切区正是这个页面的主战场。档位条按需展开，
+            // 展开时当前档位写在按钮上，用户随时知道现在用的是哪档。
+            TextButton(
+                onClick = { onEnhancePanelOpenChange(!enhancePanelOpen) },
+                modifier = Modifier.weight(0.62f)
             ) {
-                Text(stringResource(R.string.crop_mask))
+                Text(
+                    text = stringResource(
+                        when (enhanceStrength.coerceIn(0, 3)) {
+                            0 -> R.string.capture_ocr_off
+                            1 -> R.string.capture_ocr_light
+                            3 -> R.string.capture_ocr_strong
+                            else -> R.string.capture_ocr_standard
+                        }
+                    ),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
+        }
+
+        if (enhancePanelOpen) {
+            // 四档档位条：与拍照页原先那颗档位条同一套资源与顺序，
+            // 只是搬到了「能同时看到裁切结果」的地方。
+            val options = listOf(
+                R.string.capture_ocr_off,
+                R.string.capture_ocr_light,
+                R.string.capture_ocr_standard,
+                R.string.capture_ocr_strong
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, titleRes ->
+                    SegmentedButton(
+                        selected = enhanceStrength.coerceIn(0, 3) == index,
+                        onClick = { onEnhanceStrengthChange(index) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = Color.White.copy(alpha = 0.9f),
+                            inactiveContainerColor = Color.Black.copy(alpha = 0.3f),
+                            activeContentColor = Color.Black,
+                            inactiveContentColor = Color.White,
+                            activeBorderColor = Color.White
+                        )
+                    ) {
+                        Text(stringResource(titleRes))
+                    }
+                }
+            }
+            Text(
+                text = stringResource(R.string.crop_enhance_hint),
+                color = Color.White.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelSmall
+            )
         }
 
         Row(

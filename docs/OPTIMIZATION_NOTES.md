@@ -186,3 +186,84 @@ Paparazzi 不模拟系统 fontScale，故 **fontScale 1.3 / 2.0 与「320dp+font
 ### CI 状态
 
 本地无 Android SDK，`testDebugUnitTest` / `lintDebug` / `assembleDebug` 均以 CI 为准（分支推送不触发 CI，需开 PR 或 `workflow_dispatch`）。
+
+---
+
+## v0.0.55 反馈轮（资料库上传修复 + 成就墙重设计：从 wip/library-and-badge 移入）
+
+### 为什么不能直接 merge
+`wip/library-and-badge`（03ef546）是基于 **v0.0.54**（fcd1baa）的单个 squash 提交。直接 merge 会把 v0.0.55 的全部成果**回退**掉： Tasks A–E（公式裁切 / SVG 流式 / 拍照页无障碍 / 设置页窄屏）、滚动锚定加固、版本号，以及它删掉的 `.gitattributes`、`SvgSanitizer`、`MathRendererTrimTest`、`ScrollAnchorLogicTest` 等。所以只**移入**库/徽章相关的 6 个文件，其余一律不碰。
+
+已核对：这 6 个文件在 main 上与 v0.0.54 **逐字节相同**（`git rev-parse` 比对），移入是纯前进、无回退风险。
+
+### 1. 资料库上传失败（根因）
+SAF `OpenDocument()` 返回的 `uri.lastPathSegment` 在多数文档提供方那里是**数字文档 id**（Downloads 是 `msf:100` 一类），旧代码直接拿它当文件名 → `resolveLibraryPath` 必然拒绝 → 一律「导入失败」。
+改为优先查 `OpenableColumns.DISPLAY_NAME`，查不到再回退 `lastPathSegment`。
+
+### 2. docx / pdf 支持（随移入）
+- 新增 `DocumentTextExtractor`：docx 当 zip 读 `word/document.xml`，pdf 解 FlateDecode 对象流后从 `Tj`/`TJ` 算符捞字符串。**零新增依赖**（纯 JDK `java.util.zip` + `javax.xml`），符合 AGENTS.md。
+- `LibraryStore` 扩展名加入 docx/pdf，二进制文档读取走提取 + `truncateUtf8`（UTF-8 字符边界安全截断）。
+- 二进制文档**禁止模型写入与编辑保存**（`LibraryTool` 与 `LibraryScreen` 双层挡死）——编辑保存会把二进制原文件冲掉。
+- 预览改异步读取（大文档提取耗时，不卡 UI 线程），二进制文档只读 + `SelectionContainer` 可复制。
+
+### 3. 成就墙重设计
+原页面是 2 列网格卡片（已解锁亮色 / 未解锁置灰 + 进度文字）。改为：顶部聚光灯（Canvas 画三道梯形光束）+ 柔和渐变背景 + 3×3 分页网格；徽章用**专属手绘素材**，未解锁置灰压暗并挂锁角标；点任意徽章弹详情（达成条件 / 进度条 / 解锁日期）。
+
+### 4. 徽章素材是怎么来的（重要）
+WIP 代码引用 `drawable-nodpi/badge_*.png` 共 10 张，但**仓库里从来没有这些文件**——这正是它标注「未经编译验证，勿合并」的原因（`R.drawable.*` 解析不到，编译直接失败）。
+
+本次用生图模型补齐 10 张，并写了 `scripts/process_badge_art.ps1` 做后处理，因为模型输出有两个必然问题：
+1. **无视 transparent 指令**：输出 `Format24bppRgb`（无 alpha 通道）的方形图，四角是不透明浅底；
+2. **右下角带「日日新 sensenova」水印**。
+
+后处理三件事：圆形遮罩（半径 0.488，盖住徽章圆盘、切掉四角——水印正在四角）→ 2px 边缘平滑 → 降采样到 512px（单张 1.2MB → ~320KB，10 张共约 3.4MB）。
+
+已验证：10 张全部 `Format32bppArgb`、四角 alpha=0、中心 alpha=255、完全透明像素占比 24%（圆内切于方的理论值 21.5% + 2px 羽化）。
+
+> 判题逻辑一行未动（仍由 `BadgeEngine` 纯函数计算），只换呈现层。
+
+---
+
+## v0.0.55 反馈轮（对话触底跟随修复）
+
+### 背景（用户反馈）
+「裁剪涂鸦页面仍然不能调整这个增强黑白强度」。原设计的入口在**拍照前**（相机页一颗四档档位条）与 CHAT 单张拍完后的一层覆盖窗，裁剪页本身没有——用户拍完进裁剪页才发现增强过度/不足，只能退出去重拍。且那层覆盖窗（`EnhanceAdjustOverlay`）实际是**死代码**：见下。
+
+### 核心决策：增强的权威位置移到裁剪页
+`enhanceForOcr` **不幂等**（Otsu 阈值按已增强的直方图再算一次）。原先拍照/导入时就按设置档位增强一遍，裁剪页若再增强就是叠加强化，且「关」档没有原像素可回。所以：
+
+1. **拍照/导入不再预先增强**：`captureToFile` / `captureInMemory` / `ImageImporter` 全部改成 `strength = 0` 的归一化——只把 EXIF 方向烘进像素、转 JPEG。顺带删掉 `AppContainer.ocrStrengthCache` 这套为「非挂起上下文读档位」而设的缓存（不再有人读）。
+2. **裁剪页成为唯一增强点**：新增 `enhanceStrength`（0 关 / 1 轻 / 2 标准 / 3 强），工具栏「增强」按钮展开四档档位条，实时预览，档位随 `CropSession` 持久化，并写回设置的 `ocrStrength` 作为下一张的默认值。
+3. **删除 `EnhanceAdjustOverlay`**：裁剪页现在提供同一套控制且能看到裁切结果，留着它等于两级增强。
+
+### 顺手修掉的两个真 bug
+- **CHAT 单张拍照链路是死的**：原代码 `if (batchActive || !add(path)) { if (!batchActive) adjustPath = path else toast }`——批次已有时**短路**，既不入队也不导航，只弹「批次已满」（快门处早已挡过满员）；批次为空时 `add()` 返回 true 使条件为假，同样什么都不做。于是覆盖窗永远进不去，第二张起每次按快门都是「提示满 + 照片被丢弃」。改为按有无批次分明分流：空批次 = 入队后直接进裁切，有批次 = 只入队留在相机页。
+- **两处 strings.xml 串行**（`crop_chat_skip` 与 `capture_enhance_title` 挤在同一行等），删除死字符串时一并修正。
+
+### 关键实现细节：增强放在旋转**之后**
+`enhanceForOcr` 是逐像素映射、Otsu 阈值按整图灰度直方图算，而旋转只是重排像素、直方图一个数都不变——所以「先转再增强」与「先增强再转」**逐像素相同**。选前者是为了让旋转缓存继续按**不变的 base** 做键（最多 4 张），增强只额外持有当前档位那一张；反过来每切一档都要重建整套旋转缓存，峰值内存翻几倍，还要面对「切档回收旧位图 vs IO 上正在读它」的竞态。
+
+> ⚠️ 踩过的坑：第一版把「首帧增强等待」的 early-return 放在了派生 `displayBitmap` 的 `LaunchedEffect` **之前**——`return` 让那个 effect 根本进不了组合，`displayBitmap` 永远等不到赋值，页面卡在转圈。已改为两道门：第一道只挡解码中/解码失败，第二道挡在派生之后。
+
+### 兼容性
+`CropSession.enhanceStrength` 有默认值 2 且 `Json { ignoreUnknownKeys = true }`，旧会话 JSON 缺字段时解出标准档，不会让用户的裁剪框/涂鸦/旋转丢回默认。新增 `CropSessionEnhanceStrengthTest` 钉住往返与缺字段回退。
+
+> 同轮还有「配置删除二次确认」与「识别流水线收敛」（MinerU 180s 超时 + 大模型只出一次），见上。
+
+---
+
+## v0.0.55 反馈轮（识别流水线收敛）
+
+### 背景（用户反馈）
+自动识别原链条是 MinerU → 当前大模型 → 识图模型，会把大模型转给另一个大模型重试；MinerU 卡住时没有超时、一直挂住。
+
+### 改动
+1. `RecognitionPlan.decide`（AUTO）：大模型**只出一条**——当前模型能识图 → `CURRENT_LLM`，否则 → `VISION_LLM`；不再把两者串成连续重试。
+2. `RecognitionEngine`：AUTO 链里 MinerU 路线整体加 `MINERU_RECOGNIZE_TIMEOUT_MS = 180s` 超时，超时按 `TIMEOUT` 失败往链上下一条（大模型）回落，不再干等。
+3. 更新 AUTO 提示文案（`settings_recognition_hint_auto`）与 `RecognitionPlanTest`（原「三条路排序」用例改为断「大模型只出一条」，新增识图模型独立兜底用例）。
+
+### 效果
+- 自动识别最多两条路：MinerU（带 180s 超时）+ 一次大模型（当前能识图用当前，否则识图模型跑全程）。
+- MinerU 拥堵/卡住 → 超时后自动转大模型出结果。
+
+> 同轮还有「配置删除二次确认」（单独 PR）：设置页大模型/识图/生图三类配置删除前弹确认框。

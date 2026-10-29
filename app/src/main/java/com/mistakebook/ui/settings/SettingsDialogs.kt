@@ -130,3 +130,31 @@ internal fun SettingsRestoreConfirmDialog(
         }
     )
 }
+
+/**
+ * 通用二次确认对话框（删除配置等不可恢复操作前弹一次）。
+ *
+ * 删除类操作误触一次就不可挽回；与 [com.mistakebook.ui.common.TwoStepConfirmButton]
+ * 的「清零重算」同属删除前的二次确认，只是删除入口是图标按钮，用弹窗更直观。
+ */
+@Composable
+internal fun ConfirmDialog(
+    title: String,
+    text: String,
+    confirmText: String,
+    dismissText: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(confirmText) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(dismissText) }
+        }
+    )
+}

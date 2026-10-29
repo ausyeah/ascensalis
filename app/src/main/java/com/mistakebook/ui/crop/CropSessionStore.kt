@@ -32,7 +32,18 @@ data class CropSession(
     val bottom: Float,
     val rotationQuarter: Int,
     /** 外层 = 第几笔，内层 = 该笔的点序列。双层才能完整还原「撤销」语义。 */
-    val strokes: List<List<StrokePoint>> = emptyList()
+    val strokes: List<List<StrokePoint>> = emptyList(),
+    /**
+     * 对比度增强档位（0 关 / 1 轻 / 2 标准 / 3 强），v0.0.55 反馈新增。
+     *
+     * 增强是裁剪页的权威操作（拍照/导入只做方向归一化，不增强），
+     * 所以档位和裁剪框一样属于「这张图的编辑状态」，要跟着图持久化——
+     * 否则用户调好档位、涂鸦两笔之后离开再回来，档位回到默认值，
+     * 而图上的增强效果还在，两者就对不上了。
+     *
+     * 默认 2（标准）与 [com.mistakebook.data.prefs.SettingsSnapshot.ocrStrength] 一致。
+     */
+    val enhanceStrength: Int = 2
 )
 
 @Serializable

@@ -1120,6 +1120,9 @@ internal fun LlmProfilesSection(
     // 展开权统一放在 Section 层：这里记「当前展开的是哪一个 id」，
     // 卡片只负责上报「我要展开 / 我要收起」。
     var expandedProfileId by remember { mutableStateOf<String?>(null) }
+    // 删除二次确认：先记下待删的 id/名字并弹确认框，确认才真删（防误触不可恢复）
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteName by remember { mutableStateOf("") }
     SettingsGroup(title = stringResource(R.string.settings_llm_profiles)) {
         state.snapshot.llmProfiles.forEach { profile ->
             ProfileRow(
@@ -1132,7 +1135,7 @@ internal fun LlmProfilesSection(
                 },
                 onCollapsed = { expandedProfileId = null },
                 onSelect = { viewModel.selectProfile(profile.id) },
-                onDelete = { viewModel.deleteProfile(profile.id) },
+                onDelete = { pendingDeleteId = profile.id; pendingDeleteName = profile.name },
                 onSave = { draft -> viewModel.saveProfile(draft) },
                 onDraftChanged = { viewModel.clearLlmTestResult(profile.id) },
                 onFetchModels = { draft, onDone ->
@@ -1170,6 +1173,16 @@ internal fun LlmProfilesSection(
             text = stringResource(R.string.settings_vision_profile_moved),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    pendingDeleteId?.let { id ->
+        ConfirmDialog(
+            title = stringResource(R.string.settings_delete_profile_title),
+            text = stringResource(R.string.settings_delete_profile_body, pendingDeleteName),
+            confirmText = stringResource(R.string.action_confirm),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = { viewModel.deleteProfile(id); pendingDeleteId = null },
+            onDismiss = { pendingDeleteId = null }
         )
     }
 }
@@ -1232,6 +1245,9 @@ internal fun ImageProfilesSection(
     var forceExpandId by remember { mutableStateOf<String?>(null) }
     // 同上：生图渠道之间互斥展开
     var expandedImageId by remember { mutableStateOf<String?>(null) }
+    // 删除二次确认（同大模型配置）
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteName by remember { mutableStateOf("") }
     SettingsGroup(title = stringResource(R.string.settings_image_profiles)) {
         Text(
             text = stringResource(R.string.settings_image_profiles_desc),
@@ -1251,7 +1267,7 @@ internal fun ImageProfilesSection(
                 },
                 onCollapsed = { expandedImageId = null },
                 onSelect = { viewModel.selectImageProfile(profile.id) },
-                onDelete = { viewModel.deleteImageProfile(profile.id) },
+                onDelete = { pendingDeleteId = profile.id; pendingDeleteName = profile.name },
                 onSave = { draft -> viewModel.saveImageProfile(draft) }
             )
             Spacer(Modifier.height(8.dp))
@@ -1272,6 +1288,16 @@ internal fun ImageProfilesSection(
             Spacer(Modifier.height(8.dp))
             FirstRunHint(R.string.settings_hint_image_key)
         }
+    }
+    pendingDeleteId?.let { id ->
+        ConfirmDialog(
+            title = stringResource(R.string.settings_delete_profile_title),
+            text = stringResource(R.string.settings_delete_profile_body, pendingDeleteName),
+            confirmText = stringResource(R.string.action_confirm),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = { viewModel.deleteImageProfile(id); pendingDeleteId = null },
+            onDismiss = { pendingDeleteId = null }
+        )
     }
 }
 
@@ -1436,6 +1462,9 @@ internal fun VisionProfilesSection(
     var forceExpandId by remember { mutableStateOf<String?>(null) }
     // 同上：识图模型之间互斥展开
     var expandedVisionId by remember { mutableStateOf<String?>(null) }
+    // 删除二次确认（同大模型配置）
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteName by remember { mutableStateOf("") }
     SettingsGroup(title = stringResource(R.string.settings_vision_profiles)) {
         Text(
             text = stringResource(R.string.settings_vision_profiles_desc),
@@ -1455,7 +1484,7 @@ internal fun VisionProfilesSection(
                 },
                 onCollapsed = { expandedVisionId = null },
                 onSelect = { viewModel.selectVisionProfile(profile.id) },
-                onDelete = { viewModel.deleteVisionProfile(profile.id) },
+                onDelete = { pendingDeleteId = profile.id; pendingDeleteName = profile.name },
                 onSave = { draft -> viewModel.saveVisionProfile(draft) }
             )
             Spacer(Modifier.height(8.dp))
@@ -1476,6 +1505,16 @@ internal fun VisionProfilesSection(
             Spacer(Modifier.height(8.dp))
             FirstRunHint(R.string.settings_hint_vision_key)
         }
+    }
+    pendingDeleteId?.let { id ->
+        ConfirmDialog(
+            title = stringResource(R.string.settings_delete_profile_title),
+            text = stringResource(R.string.settings_delete_profile_body, pendingDeleteName),
+            confirmText = stringResource(R.string.action_confirm),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = { viewModel.deleteVisionProfile(id); pendingDeleteId = null },
+            onDismiss = { pendingDeleteId = null }
+        )
     }
 }
 
