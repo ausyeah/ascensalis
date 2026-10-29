@@ -178,6 +178,15 @@ android {
             // 在那之前正式发布的包一律不混淆。
             isMinifyEnabled = enforceR8
             isShrinkResources = enforceR8
+
+            // **必须显式挂上规则文件（v0.0.66 灰度第一轮的教训）**：
+            // 之前从没配过 proguardFiles——R8 开启时 AGP 只用默认规则，
+            // proguard-rules.pro 里的 keep/dontwarn **一条都没生效**
+            // （第一轮探针构建因此报 errorprone 缺类失败）。
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 
