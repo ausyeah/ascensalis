@@ -30,9 +30,20 @@ object DocumentTextExtractor {
 
     fun extract(file: File): String = when (file.extension.lowercase()) {
         "docx" -> extractDocx(file)
+        "xlsx" -> extractXlsx(file)
+        // 老版 .xls（OLE2 二进制）零依赖解不开单元格，返回空串，
+        // 由调用方给出统一的「无法提取」提示（见 LibraryStore.BINARY_EMPTY_HINT）。
+        "xls" -> ""
         "pdf" -> extractPdf(file)
         else -> ""
     }
+
+    // ---- xlsx：复用对话附件的抽取器，口径一致 ----
+
+    private fun extractXlsx(file: File): String = runCatching {
+        if (file.length() > MAX_INPUT_BYTES) return@runCatching ""
+        com.mistakebook.data.chat.XlsxText.extract(file.readBytes()).take(MAX_OUTPUT_CHARS)
+    }.getOrDefault("")
 
     // ---- docx：zip 里的 word/document.xml ----
 

@@ -157,6 +157,10 @@ private const val CHAT_GALLERY_MAX = 9
 private val DOCUMENT_MIME_TYPES = arrayOf(
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    // Excel（v0.0.57）：不加进来，文件管理器里根本选不中 xlsx/xls。
+    // 用户反馈的「xls 不支持」很大一部分就卡在这一层。
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
     "text/plain",
     "text/markdown",
     "text/csv"

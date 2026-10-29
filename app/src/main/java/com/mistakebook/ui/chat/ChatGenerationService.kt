@@ -98,6 +98,9 @@ class ChatGenerationService : Service() {
         val questionId = intent?.getLongExtra(EXTRA_QUESTION_ID, -1L) ?: -1L
         // 本次请求用的模型；空表示用配置里的默认模型
         val modelOverride = intent?.getStringExtra(EXTRA_MODEL)?.takeIf { it.isNotBlank() }
+        // @资料库 选中的文件路径（v0.0.57）：由服务自己读原文，避免
+        // 在 Intent 里塞几十 KB 正文（可能撞 binder 大小上限）。
+        val libraryPaths = intent?.getStringArrayListExtra(EXTRA_LIBRARY_PATHS).orEmpty()
         if (sessionId == 0L) {
             stopSelf()
             return START_NOT_STICKY
@@ -109,7 +112,7 @@ class ChatGenerationService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
 
         job = scope.launch {
-            runGeneration(sessionId, questionId.takeIf { it >= 0 }, modelOverride)
+            runGeneration(sessionId, questionId.takeIf { it >= 0 }, modelOverride, libraryPaths)
         }
         // 记到**进程级**的静态槽位：停止动作是静态方法，拿不到服务实例。
         //
@@ -139,7 +142,9 @@ class ChatGenerationService : Service() {
     private suspend fun runGeneration(
         sessionId: Long,
         questionId: Long?,
-        modelOverride: String? = null
+        modelOverride: String? = null,
+        /** @资料库 选中的文件路径；服务自己读原文注入本轮 system 上下文。 */
+        libraryPaths: List<String> = emptyList()
     ) {
         val app = application as? MistakeBookApp ?: return
         val container = app.container
@@ -171,7 +176,12 @@ class ChatGenerationService : Service() {
             questionId = questionId,
             supportsVision = profile.supportsVision,
             visionToolAvailable = container.settingsStore.snapshotNow().visionConfigured,
-            ocrToolAvailable = container.settingsStore.snapshotNow().mineruConfigured
+            ocrToolAvailable = container.settingsStore.snapshotNow().mineruConfigured,
+            // @资料库 文件原文：读盘在这里（服务跑在 IO 线程），拼进 system。
+            // 不落库、不进用户气泡（v0.0.57 修复「发 docx 文字倒进气泡」）。
+            extraContext = com.mistakebook.data.library.LibraryStore.buildContextBlock(
+                libraryPaths.map { java.io.File(it) }.filter { it.isFile }
+            )
         )
         val assistantId = repository.insertStreamingAssistantMessage(sessionId, profile.model)
 
@@ -304,6 +314,9 @@ class ChatGenerationService : Service() {
                     tools = buildList {
                         if (searchEnabled) addAll(SearchTools.all())
                         addAll(mediaTools)
+                        // 资料库只读工具（v0.0.57）：模型可自行列出 / 读取资料。
+                        // 与 web_search 同一条 tool loop，无副作用，始终提供。
+                        addAll(com.mistakebook.data.library.LibraryTools.all())
                     }.takeIf { it.isNotEmpty() }
                 )
                 // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）。
@@ -407,12 +420,22 @@ class ChatGenerationService : Service() {
                     // ——正在流的回答瞬间清空、只剩一行「正在联网搜索…」，
                     // 用户看到的就是「调用搜索之后断输出」。内容一直在，只是去搜了个索。
                     val currentText = joinThinkingAndAnswer(rounds.answer, rounds.thinking)
+                    // stage 文案按工具类型给：早先固定写「正在联网搜索…」，
+                    // 传图 / 生图 / 读资料时也这么显示，用户会以为在搜网页。
+                    val stageLabel = when {
+                        call.name == SearchTools.WEB_SEARCH -> "正在联网搜索…"
+                        com.mistakebook.data.library.LibraryTools.handles(call.name) -> "正在读取资料库…"
+                        call.name == MediaTools.DESCRIBE_IMAGE ||
+                            call.name == MediaTools.OCR_IMAGE -> "正在查看图片…"
+                        call.name == MediaTools.GENERATE_IMAGE -> "正在生成图片…"
+                        else -> "正在调用工具…"
+                    }
                     ChatGenerationBus.publish(
                         ChatGenerationBus.Snapshot(
                             assistantId = assistantId,
                             content = currentText,
                             sessionId = sessionId,
-                            stage = "正在联网搜索…"
+                            stage = stageLabel
                         )
                     )
                     val result = when (call.name) {
@@ -463,6 +486,17 @@ class ChatGenerationService : Service() {
                             generated = generatedImages,
                             stage = { stage -> publishStage(currentText, stage) }
                         )
+
+                        // 资料库只读工具（v0.0.57）。目录在这里解析：
+                        // AppFiles.rootDir + "library"，与资料库页面同一处。
+                        com.mistakebook.data.library.LibraryTools.LIST,
+                        com.mistakebook.data.library.LibraryTools.READ ->
+                            com.mistakebook.data.library.LibraryTools.execute(
+                                root = com.mistakebook.data.library.LibraryStore
+                                    .ensureDir(container.files.rootDir),
+                                name = call.name,
+                                arguments = call.arguments
+                            )
 
                         else -> "未识别的工具「${call.name}」，请改用你确定存在的工具。"
                     }
@@ -976,6 +1010,15 @@ class ChatGenerationService : Service() {
         const val EXTRA_MODEL = "model"
 
         /**
+         * @资料库 选中的文件路径列表（v0.0.57）。
+         *
+         * 传路径而不是正文：正文最大可达多份 × 50KB，塞进 Intent 会撞
+         * binder 事务大小上限（约 1MB）并抛 `TransactionTooLargeException`。
+         * 服务在 IO 线程里自己读盘。
+         */
+        const val EXTRA_LIBRARY_PATHS = "libraryPaths"
+
+        /**
          * 进程级的「在途生成」标记。
          *
          * 「停止」是静态入口（通知栏动作 / 界面按钮），拿不到服务实例，
@@ -1022,11 +1065,21 @@ class ChatGenerationService : Service() {
          * 用 `startForegroundService`：生成要活过界面生命周期，
          * 而普通 `startService` 在后台会被系统立刻掐掉。
          */
-        fun start(context: Context, sessionId: Long, questionId: Long?, model: String? = null) {
+        fun start(
+            context: Context,
+            sessionId: Long,
+            questionId: Long?,
+            model: String? = null,
+            /** @资料库 选中的文件路径；服务据此读原文注入本轮上下文。 */
+            libraryPaths: List<String> = emptyList()
+        ) {
             val intent = Intent(context, ChatGenerationService::class.java).apply {
                 putExtra(EXTRA_SESSION_ID, sessionId)
                 putExtra(EXTRA_QUESTION_ID, questionId ?: -1L)
                 if (!model.isNullOrBlank()) putExtra(EXTRA_MODEL, model)
+                if (libraryPaths.isNotEmpty()) {
+                    putStringArrayListExtra(EXTRA_LIBRARY_PATHS, ArrayList(libraryPaths))
+                }
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }

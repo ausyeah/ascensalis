@@ -116,6 +116,7 @@ class ChatAttachmentPreparer(
                     AttachmentKind.PDF -> processPdf(target, fileName, size)
                     AttachmentKind.TEXT -> processPlainText(target, fileName, size)
                     AttachmentKind.DOCX -> processDocx(target, fileName, size)
+                    AttachmentKind.XLSX -> processSpreadsheet(target, fileName, size)
                     AttachmentKind.OTHER -> PreparedAttachment(
                         localPath = target.absolutePath,
                         fileName = fileName,
@@ -194,6 +195,38 @@ class ChatAttachmentPreparer(
     }
 
     /**
+     * Excel 表格（v0.0.57）。
+     *
+     * - `.xlsx`（zip 包）：[XlsxText] 抽成 `\t`/`\n` 的文本表；
+     * - 老版 `.xls`（OLE2 二进制，魔数 `D0 CF 11 E0`）：零依赖解不开单元格，
+     *   给一条**可操作**的提示而不是「处理失败」。用户看到「请另存为 .xlsx」
+     *   就知道下一步怎么做；只说「不支持」只会让人卡住。
+     */
+    private fun processSpreadsheet(file: File, fileName: String, size: Long): PreparedAttachment {
+        val bytes = file.readBytes()
+        val excelMime = if (fileName.lowercase().endsWith(".xlsx")) {
+            XLSX_MIME
+        } else {
+            XLS_MIME
+        }
+        val isOle2 = bytes.size >= 4 &&
+            bytes[0] == 0xD0.toByte() && bytes[1] == 0xCF.toByte() &&
+            bytes[2] == 0x11.toByte() && bytes[3] == 0xE0.toByte()
+        if (isOle2) {
+            return PreparedAttachment(
+                localPath = file.absolutePath,
+                fileName = fileName,
+                mimeType = excelMime,
+                kind = AttachmentKind.XLSX,
+                sizeBytes = size,
+                errorMessage = "老版 .xls 暂不支持直接读取，请用 Excel/WPS 另存为 .xlsx 或 .csv 后重新发送"
+            )
+        }
+        val text = XlsxText.extract(bytes)
+        return excerpt(file, fileName, excelMime, AttachmentKind.XLSX, size, text)
+    }
+
+    /**
      * 统一处理「抽出来的文本」：优先保留完整内容，最多限制为 [MAX_EXCERPT_CHARS] 字符。
      * 长文档仍不能独占整段会话上下文，但短于上限的题目、讲义和源码不再被过早截断。
      */
@@ -243,6 +276,11 @@ class ChatAttachmentPreparer(
                 lower.endsWith(".docx") || mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ->
                     AttachmentKind.DOCX
 
+                // Excel（v0.0.57）：xlsx 原生抽取；xls 也归这里，处理时再按
+                // OLE2 魔数给「请另存为」的提示（见 processSpreadsheet）。
+                lower.endsWith(".xlsx") || lower.endsWith(".xls") ||
+                    mime == XLSX_MIME || mime == XLS_MIME -> AttachmentKind.XLSX
+
                 // .doc 是老二进制格式，零依赖解不开——归 OTHER 而不是 DOCX，
                 // 因为归错类型会让 UI 显示「就绪」但模型什么也收不到
                 mime.startsWith("text/") || lower.endsWith(".txt") || lower.endsWith(".md") ||
@@ -257,6 +295,7 @@ class ChatAttachmentPreparer(
             AttachmentKind.IMAGE -> "jpg"
             AttachmentKind.PDF -> "pdf"
             AttachmentKind.DOCX -> "docx"
+            AttachmentKind.XLSX -> "xlsx"
             AttachmentKind.TEXT -> if (fileName.lowercase().endsWith(".md")) "md" else "txt"
             AttachmentKind.OTHER -> fileName.substringAfterLast('.', "bin").ifBlank { "bin" }
         }
@@ -266,6 +305,12 @@ class ChatAttachmentPreparer(
         const val JPEG_QUALITY = 80
 
         const val DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+        /** xlsx 的 MIME（OpenXML 表格）。 */
+        const val XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+        /** 老版 xls 的 MIME（OLE2 二进制表格）。 */
+        const val XLS_MIME = "application/vnd.ms-excel"
 
         /** 单个文本附件最多保留 20,000 字符，避免极大文件占满会话上下文。 */
         const val MAX_EXCERPT_CHARS = 20_000

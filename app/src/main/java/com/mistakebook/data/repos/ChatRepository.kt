@@ -389,13 +389,33 @@ class ChatRepository(
          *
          * 普通对话传空串：不注入任何额外内容，行为与 v0.0.33 逐字一致。
          */
-        gradingInstruction: String = ""
+        gradingInstruction: String = "",
+        /**
+         * 本轮临时附加的上下文（v0.0.57）：目前用于 @资料库 选中的文件原文。
+         *
+         * 拼在 system 消息末尾，**不落库、不进用户气泡**——下一轮自然消失。
+         * 见函数体内「本轮临时资料」那段的解释。
+         */
+        extraContext: String = ""
     ): AssembledContext {
         val systemContext = buildString {
             if (questionId != null) append(buildQuestionContext(questionId).orEmpty())
             if (gradingInstruction.isNotBlank()) {
                 if (isNotBlank()) append("\n\n")
                 append(gradingInstruction)
+            }
+            // 本轮临时资料（@资料库 选中的文件原文，v0.0.57）。
+            //
+            // 以前这段内容是**直接拼进用户消息正文**的：气泡里糊一大段
+            // 资料原文（用户反馈「发 docx 直接把文字倒进气泡里」），
+            // 而且下一轮还留在历史里重复占上下文。现在改走 system 侧：
+            // 只影响本轮请求，气泡里仍是用户真正打的那句话。
+            //
+            // 放 system 而不是 user：资料是「参考资料」，模型应把它当成
+            // 背景知识而不是用户说的话；这也避免模型模仿资料里的语气作答。
+            if (extraContext.isNotBlank()) {
+                if (isNotBlank()) append("\n\n")
+                append(extraContext)
             }
         }
         // 失败的、取消的消息**都保留**：它们的内容是有效的对话上下文。

@@ -50,6 +50,14 @@ enum class AttachmentKind {
     TEXT,
     DOCX,
 
+    /**
+     * Excel 表格（xlsx；老版 xls 走同一分支但会给「请另存为」提示）。
+     *
+     * 抽成以 `\t` 分列、`\n` 分行的文本，见 [com.mistakebook.data.chat.XlsxText]。
+     * v0.0.57 新增——此前 xlsx 归 OTHER，界面显示就绪但模型收不到任何内容。
+     */
+    XLSX,
+
     /** 认不出的类型：仍可在 UI 上显示文件名，但不参与构造请求。 */
     OTHER
 }

@@ -20,10 +20,10 @@ import java.io.File
 object LibraryStore {
 
     /** 支持的扩展名（小写比较）。 */
-    val SUPPORTED_EXTENSIONS = setOf("md", "txt", "json", "csv", "docx", "pdf")
+    val SUPPORTED_EXTENSIONS = setOf("md", "txt", "json", "csv", "docx", "pdf", "xlsx", "xls")
 
     /** 二进制文档扩展名：读取需提取正文，写入/追加一律拒绝（防损坏原文件）。 */
-    val BINARY_EXTENSIONS = setOf("docx", "pdf")
+    val BINARY_EXTENSIONS = setOf("docx", "pdf", "xlsx", "xls")
 
     /** 二进制文档提取不出正文时返回的提示（预览与对话共用）。 */
     const val BINARY_EMPTY_HINT =
@@ -123,4 +123,34 @@ object LibraryStore {
 
     /** 删除文件；返回是否删除成功。 */
     fun delete(file: File): Boolean = file.exists() && file.delete()
+
+    /**
+     * 把若干资料库文件拼成一段「资料原文」上下文（v0.0.57）。
+     *
+     * ## 为什么单独成函数
+     *
+     * 原先这段拼接写在 `ChatViewModel` 里，并且**直接插进用户消息正文**——
+     * 于是资料原文原样出现在气泡里，用户还以为自己发的是一整篇文档。
+     * 搬到 [LibraryStore] 后：一是纯逻辑、可单测；二是对话服务与 ViewModel
+     * 共用同一份格式，不会两边各拼一套。
+     *
+     * 输出格式（每个文件一段）：
+     * ```
+     * 【资料库文件：xxx.docx】
+     * （内容超 50KB 已截断）   ← 仅截断时出现
+     * 正文……
+     * ```
+     * 抬头用「【】」包住来源，模型能把它与用户的话区分开。
+     *
+     * 读不出的文件（不存在 / 空）跳过，不产生空抬头。
+     */
+    fun buildContextBlock(files: List<File>): String = buildString {
+        files.forEach { file ->
+            val (content, truncated) = read(file) ?: return@forEach
+            if (isNotEmpty()) append("\n\n")
+            append("【资料库文件：").append(file.name).append("】\n")
+            if (truncated) append("（内容超 50KB 已截断）\n")
+            append(content.trim())
+        }
+    }
 }

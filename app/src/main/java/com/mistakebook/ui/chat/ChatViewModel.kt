@@ -845,29 +845,25 @@ class ChatViewModel(
                 messageText = sb.toString().trimEnd()
             }
 
-            // T6 降级注入：@资料库 选中的文件内容（50KB 截断）前置为本轮上下文。
-            // 标签包住来源，模型能区分「资料原文」与「用户问题」。
-            if (pendingLibraryFiles.isNotEmpty()) {
-                val sb = StringBuilder(messageText)
-                pendingLibraryFiles.forEach { f ->
-                    val (content, truncated) =
-                        com.mistakebook.data.library.LibraryStore.read(f) ?: return@forEach
-                    val note = if (truncated) "（内容超 50KB 已截断）" else ""
-                    sb.insert(0, "\n\n")
-                    sb.insert(0, content)
-                    sb.insert(0, note)
-                    sb.insert(0, "【资料库文件：${f.name}】\n")
-                }
-                messageText = sb.toString().trim()
-                pendingLibraryFiles.clear()
-            }
+            // T6 资料库注入（v0.0.57 重做）：@资料库 选中的文件**不再拼进正文**。
+            //
+            // 旧实现把文件原文插进 `messageText`，于是：
+            //   1. 气泡里糊一大段资料原文（用户反馈「发 docx 直接把文字倒进气泡」）；
+            //   2. 这段原文随消息落库，下一轮还被当成用户说过的话重复带上。
+            // 现在只把**路径**交给生成服务，由服务读原文注入本轮 system 上下文
+            // （见 ChatGenerationService.runGeneration 的 extraContext）。
+            // 气泡里只留用户真正输入的那句话。
+            val libraryPaths = pendingLibraryFiles.map { it.absolutePath }
+            pendingLibraryFiles.clear()
+            _state.value = _state.value.copy(libraryInjectionNames = emptyList())
 
             runOnce(
                 profile = profile,
                 text = messageText,
                 attachments = ready.mapNotNull { it.prepared },
                 isRetry = false,
-                grading = current.gradingMode
+                grading = current.gradingMode,
+                libraryPaths = libraryPaths
             )
         }
     }
@@ -918,7 +914,9 @@ class ChatViewModel(
         attachments: List<PreparedAttachment>,
         isRetry: Boolean,
         /** 手写过程批改模式（T13）：true 时向题目上下文注入批改指令。 */
-        grading: Boolean = false
+        grading: Boolean = false,
+        /** @资料库 选中的文件路径；透传给生成服务，不进气泡、不落库。 */
+        libraryPaths: List<String> = emptyList()
     ) {
         val sessionId = _state.value.sessionId
         if (sessionId == 0L) return
@@ -1008,7 +1006,8 @@ class ChatViewModel(
                 context = appContext,
                 sessionId = sessionId,
                 questionId = questionId,
-                model = effectiveProfile.model
+                model = effectiveProfile.model,
+                libraryPaths = libraryPaths
             )
         }.onFailure {
             // 起不来（比如系统拦了前台服务启动）：解除在途标记并提示，
