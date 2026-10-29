@@ -107,6 +107,8 @@
     <string name="crop_preview_title_chat">这张图将作为对话附件发送</string>
     <string name="crop_preview_hint">确认裁剪范围与涂白位置无误。涂白部分不会被识别。</string>
     <string name="crop_decoding">正在加载照片…</string>
+    <string name="crop_enhancing">正在增强对比度…</string>
+    <string name="crop_enhance_hint">增强只影响送识别的图：纸面压白、字迹压黑，红笔批注会保留颜色。选「关」就是相机原始像素。</string>
 <string name="crop_decode_failed">图片加载失败：%1$s</string>
     <string name="crop_decode_missing">照片文件已丢失</string>
     <string name="crop_decode_oom">照片太大，内存不足</string>
@@ -718,10 +720,8 @@
     <string name="capture_chat_batch_full">一次最多 9 张，本批已满</string>
     <string name="capture_chat_batch_discard_title">丢弃本批照片？</string>
     <string name="capture_chat_batch_discard_body">本批 %1$d 张将丢弃</string>
-    <string name="crop_chat_skip">不裁切，下一张</string>    <string name="capture_enhance_title">拍照增强调节</string>
-    <string name="capture_enhance_preview">增强预览</string>
-    <string name="capture_enhance_computing">正在计算预览…</string>
-    <string name="capture_enhance_confirm">确认，去裁切</string>    <string name="library_title">资料库</string>
+    <string name="crop_chat_skip">不裁切，下一张</string>
+    <string name="library_title">资料库</string>
     <string name="library_desc">存放在 App 内的资料（.md / .txt / .json / .csv / .docx / .pdf）。对话时可让 AI 参考或整理存入；.docx 与 .pdf 自动提取文字，原文件保留。</string>
     <string name="library_empty">还没有资料。右下角导入或新建。</string>
     <string name="library_import">导入文件</string>

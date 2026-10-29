@@ -343,14 +343,7 @@ class AppContainer(context: Context) {
         com.mistakebook.mindmap.MindmapGenerator(database, llmClient, settingsStore)
     }
 
-    val imageImporter: ImageImporter by lazy {
-        // 增强开关每次导入时读一次当前设置，改设置后无需重启即可生效。
-        // snapshotNow() 是挂起函数，这里在 appScope 里起个协程取值。
-        ImageImporter(appContext, files) { ocrStrengthCache.get() }
-    }
-
-    /** 缓存的增强开关，供非挂起上下文（ImageImporter 的同步回调）读取。 */
-    private val ocrStrengthCache = java.util.concurrent.atomic.AtomicInteger(2)
+    val imageImporter: ImageImporter by lazy { ImageImporter(appContext, files) }
 
     val recognitionSubmitter: RecognitionSubmitter by lazy {
         RecognitionSubmitter(captureTaskRepository, recognitionEngine)
@@ -492,12 +485,6 @@ class AppContainer(context: Context) {
         // 默认错题本 + 把历史题目归入其中。必须在任何写入之前跑完，
         // 否则新题会以「未归类」入库，首页按默认本筛选时就看不到它们。
         appScope.launch { notebookRepository.seedDefault() }
-        // 缓存增强开关，供 ImageImporter 的同步回调读取
-        appScope.launch {
-            ocrStrengthCache.set(
-                runCatching { settingsStore.snapshotNow().ocrStrength }.getOrDefault(2)
-            )
-        }
         // 网络出口模式喂给 NetworkRouter：设置页改完后下一个请求就走新规则。
         // 客户端（含 ChatCompletionStream 的派生副本）共享同一个 ProxySelector，
         // 不需要重建。放在最后：settingsStore 是直接属性，此时必然已初始化。

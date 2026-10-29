@@ -12,12 +12,20 @@ import java.io.File
  * 关键改动：不再做「裸字节拷贝」。
  * 裸拷贝会把 EXIF 方向标记原封不动带进新文件，而 BitmapFactory 不认 EXIF，
  * 导致「明明调正了却又歪回去」。这里统一走 [ImageNormalizer]：
- * 方向烘进像素 + OCR 对比度增强 + 统一转 JPEG。
+ * 方向烘进像素 + 统一转 JPEG。
+ *
+ * ## 为什么不在这里做对比度增强（v0.0.55 反馈）
+ *
+ * 增强的权威位置是**裁剪页**：那里有 0~3 档实时预览，用户裁完框选、转正之后
+ * 能直接看到增强效果再定档。若在导入时就按设置的档位增强，裁剪页再增强就是
+ * 叠加强化——[ImageNormalizer.enhanceForOcr] 不幂等（Otsu 阈值会按已增强的
+ * 直方图再算一次），而且「关」档也没有原像素可回。
+ *
+ * 所以这里只做 `strength = 0` 的归一化：方向烘进像素 + 转 JPEG。
  */
 class ImageImporter(
     private val context: Context,
-    private val files: AppFiles,
-    private val ocrStrength: () -> Int = { 2 }
+    private val files: AppFiles
 ) {
 
     suspend fun importUris(uris: List<Uri>): List<File> = withContext(Dispatchers.IO) {
@@ -39,7 +47,8 @@ class ImageImporter(
             return null
         }
 
-        val ok = ImageNormalizer.normalize(staging, target, ocrStrength())
+        // 只归一化方向、不增强：增强档位由裁剪页决定（见类注释）
+        val ok = ImageNormalizer.normalize(staging, target, 0)
         staging.delete()
         if (!ok) {
             // 归一化失败（极端损坏的图片）不该让整批导入作废，退回原始字节

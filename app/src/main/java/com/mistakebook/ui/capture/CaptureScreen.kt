@@ -59,9 +59,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -164,12 +161,6 @@ fun CaptureScreen(
     var lensFacing by remember { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
     var capturing by remember { mutableStateOf(false) }
 
-    // 照片对比度增强开关：进页面读一次设置，改设置后重进页面生效
-    var ocrStrength by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(Unit) {
-        ocrStrength = runCatching { container.settingsStore.snapshotNow().ocrStrength }
-            .getOrDefault(2)
-    }
     var importing by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var cameraBound by remember { mutableStateOf(false) }
@@ -308,8 +299,6 @@ fun CaptureScreen(
     }
     var showDiscardDialog by remember { mutableStateOf(false) }
 
-    // T5：单张拍完待调节的原图路径；非空时显示增强调节覆盖层。
-    var adjustPath by remember { mutableStateOf<String?>(null) }
     BackHandler(enabled = batchActive) { showDiscardDialog = true }
 
     if (showDiscardDialog) {
@@ -347,25 +336,6 @@ fun CaptureScreen(
                 }
             }
         )
-    }
-
-    // T5：单张增强调节覆盖层（CHAT 单张链路）。确认后进裁切；取消丢弃本次拍摄。
-    if (adjustPath != null) {
-        EnhanceAdjustOverlay(
-            imagePath = adjustPath.orEmpty(),
-            initialStrength = ocrStrength ?: 2,
-            onConfirmed = { adjustedPath ->
-                adjustPath = null
-                onCropped(adjustedPath)
-            },
-            onDiscarded = {
-                // 丢弃：删掉刚拍的临时原图
-                runCatching { java.io.File(adjustPath.orEmpty()).delete() }
-                adjustPath = null
-            }
-        )
-        // 覆盖层盖住整页时不再渲染相机控制（提前 return 不行——Composable 结构，
-        // 用 Box 层级覆盖即可；快门等控件在覆盖层之下不可点）
     }
 
     if (showKeyGate) {
@@ -536,49 +506,6 @@ fun CaptureScreen(
                     )
                 }
 
-                val strength = ocrStrength
-                if (strength != null) {
-                    Spacer(Modifier.width(10.dp))
-                    val options = listOf(
-                        R.string.capture_ocr_off,
-                        R.string.capture_ocr_light,
-                        R.string.capture_ocr_standard,
-                        R.string.capture_ocr_strong
-                    )
-                    // 不另设高度：SingleChoiceSegmentedButtonRow 内部会按
-                    // Material3 的默认档位高度自绘，外面再套一层固定高度
-                    // 只会被它覆盖（白写），档位按钮的自然高度与两侧圆钮
-                    // 已经够接近。
-                    SingleChoiceSegmentedButtonRow {
-                        options.forEachIndexed { index, titleRes ->
-                            SegmentedButton(
-                                selected = strength == index,
-                                onClick = {
-                                    ocrStrength = index
-                                    scope.launch { container.settingsStore.setOcrStrength(index) }
-                                },
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = index,
-                                    count = options.size
-                                ),
-                                colors = SegmentedButtonDefaults.colors(
-                                    activeContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                                    inactiveContainerColor = Color.White.copy(alpha = 0.12f),
-                                    activeContentColor = Color.White,
-                                    inactiveContentColor = Color.White,
-                                    activeBorderColor = Color.White.copy(alpha = 0.35f),
-                                    inactiveBorderColor = Color.White.copy(alpha = 0.2f)
-                                )
-                            ) {
-                                Text(
-                                    stringResource(titleRes),
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                        }
-                    }
-                }
-
                 Spacer(Modifier.width(10.dp))
                 FrostyCircleButton(
                     onClick = {
@@ -668,7 +595,6 @@ fun CaptureScreen(
                                     executor = executor,
                                     imageCapture = imageCapture,
                                     flashMode = flashMode,
-                                    strength = ocrStrength ?: 2,
                                     onCaptured = { path ->
                                         // 连拍模式拍完**不离开相机页**：capturing 必须在这里复位，
                                         // 否则第二张按不动快门（旧流程直接导航走，页面销毁掩盖了这点）。
@@ -678,19 +604,27 @@ fun CaptureScreen(
                                         } else {
                                             // T2 对话连拍：CHAT 拍完入批不退出（与 QUESTION 共用批次容器），
                                             // 「完成」后经 NavHost 进逐张裁切接力，全部裁完回会话。
-                                            // 无批次时保持单张原链路：直接 onCropped(path) 进裁切。
-                                            if (batchActive || !container.captureBatch.add(path, fromGallery = false)) {
-                                                if (!batchActive) {
-                                                    // T5 拍照增强可调：单张拍完先进调节步（对刚拍的原图
-                                                    // 重新 enhanceForOcr，可切「关」回到原像素），确认再进裁切。
-                                                    adjustPath = path
-                                                } else {
-                                                    Toast.makeText(
-                                                        context,
-                                                        context.getString(R.string.capture_chat_batch_full),
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                }
+                                            //
+                                            // 原来这里是 `if (batchActive || !add(path)) { if (!batchActive)
+                                            // adjustPath = path else toast }`：批次已有时**直接短路**，
+                                            // 既不入队也不导航，只弹一句「批次已满」——而快门处早已挡过
+                                            // 满员，于是第二张起每次按快门都是「提示满 + 照片被丢弃」；
+                                            // 批次为空时 add() 返回 true，条件为假，同样什么都不做。
+                                            // 两条路都走不通，单张链路实际上是死的。改成按「有没有批次」
+                                            // 分明分流：空批次 = 单张，入队后直接进裁切；有批次 = 只入队，
+                                            // 留在相机页继续拍。
+                                            val added = container.captureBatch.add(path, fromGallery = false)
+                                            if (!added) {
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.capture_chat_batch_full),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else if (!batchActive) {
+                                                // 单张链路：拍完直接进裁切。对比度增强的 0~3 档在裁切页里调——
+                                                // 那里能同时看到裁切结果与增强效果，比按快门前盲选更准
+                                                // （v0.0.55 反馈：裁剪页原先没有这个入口）。
+                                                onCropped(path)
                                             }
                                         }
                                     },
@@ -1097,7 +1031,6 @@ private fun takePhoto(
     executor: ExecutorService,
     imageCapture: ImageCapture,
     flashMode: Int,
-    strength: Int,
     onCaptured: (String) -> Unit,
     onError: () -> Unit
 ) {
@@ -1112,24 +1045,22 @@ private fun takePhoto(
         context = context,
         executor = executor,
         imageCapture = imageCapture,
-        strength = strength,
         onCaptured = onCaptured,
         onFallback = {
             Log.w(TAG, "文件输出失败，改走内存捕获", it)
-            captureInMemory(context, executor, imageCapture, strength, onCaptured, onError)
+            captureInMemory(context, executor, imageCapture, onCaptured, onError)
         }
     )
 }
 
 // 主链路：OutputFileOptions 写 JPEG。CameraX 只写 EXIF 方向标记、不转像素，
-// 所以落盘后立刻过一遍 ImageNormalizer：把方向烘进像素 + 对比度增强。
+// 所以落盘后立刻过一遍 ImageNormalizer：把方向烘进像素。
 // 不这么做的话，同一张照片在裁剪页（不读 EXIF）和别的路径（读 EXIF）朝向会不一致，
 // 表现为「明明已经摆正了，识别时莫名其妙转了 90 度」。
 private fun captureToFile(
     context: Context,
     executor: ExecutorService,
     imageCapture: ImageCapture,
-    strength: Int,
     onCaptured: (String) -> Unit,
     onFallback: (ImageCaptureException) -> Unit
 ) {
@@ -1146,11 +1077,14 @@ private fun captureToFile(
                     onUi { onFallback(ImageCaptureException(ImageCapture.ERROR_FILE_IO, "空文件", null)) }
                     return
                 }
-                // 方向烘进像素 + 对比度增强。归一化失败仍把原文件交出去，
-                // 顶多少一次增强，不能因为增强失败就不让用户拍照。
+                // 方向烘进像素。**不做对比度增强**（strength=0）：增强的权威位置是
+                // 裁剪页（v0.0.55 反馈），那里有 0~3 档实时预览，用户裁完能直接
+                // 看到效果再定档。若在这里就增强，裁剪页再增强就是叠加强化——
+                // enhanceForOcr 不幂等，且「关」档也无法回到原像素。
+                // 归一化失败仍把原文件交出去，不能因为归一化失败就不让用户拍照。
                 val normalized = File(out.parentFile, "capture_norm_${System.currentTimeMillis()}.jpg")
                 val ok = runCatching {
-                    com.mistakebook.data.ImageNormalizer.normalize(out, normalized, strength)
+                    com.mistakebook.data.ImageNormalizer.normalize(out, normalized, 0)
                 }.getOrDefault(false)
                 if (ok && normalized.length() > 0) {
                     out.delete()
@@ -1175,7 +1109,6 @@ private fun captureInMemory(
     context: Context,
     executor: ExecutorService,
     imageCapture: ImageCapture,
-    strength: Int,
     onCaptured: (String) -> Unit,
     onError: () -> Unit
 ) {
@@ -1192,12 +1125,11 @@ private fun captureInMemory(
                     }
                     val rotated = rotate(bitmap, rotation.toFloat())
                     val out = File(context.cacheDir, "capture_${System.currentTimeMillis()}.jpg")
-                    // 这条路径已经手动转过像素了，只需做对比度增强
-                    val final = com.mistakebook.data.ImageNormalizer.enhanceForOcr(rotated, strength)
+                    // 这条路径已经手动转过像素了，直接落盘。
+                    // 不做对比度增强：增强的权威位置是裁剪页（见 captureToFile 注释）。
                     FileOutputStream(out).use { stream ->
-                        final.compress(Bitmap.CompressFormat.JPEG, 92, stream)
+                        rotated.compress(Bitmap.CompressFormat.JPEG, 92, stream)
                     }
-                    if (final !== rotated) final.recycle()
                     image.close()
                     onUi { onCaptured(out.absolutePath) }
                 } catch (error: Exception) {
