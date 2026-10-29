@@ -84,8 +84,10 @@ class ExamPlannerTest {
 
     @Test
     fun `已掌握轮次的题被排除`() {
+        // stage = MAX_STAGE（毕业态）才被排除；stage5 是 15 天档待确认，仍在计划内
         val plan = ExamPlanner.plan(
-            listOf(PlanQuestion(1, 5), PlanQuestion(2, 0)), today, today.plusDays(40)
+            listOf(PlanQuestion(1, com.mistakebook.domain.ReviewRules.MAX_STAGE), PlanQuestion(2, 0)),
+            today, today.plusDays(40)
         )
         assertEquals(1, plan.dueCount)
         assertEquals(setOf(2L), plan.newSchedule.keys)

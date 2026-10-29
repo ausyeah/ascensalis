@@ -88,7 +88,7 @@ object ExamPlanner {
 
     /** stage s 走到 MASTERED 还需要的自然天数（第 s 轮间隔 + … + 第 4 轮间隔）。 */
     internal fun remainingNaturalDays(stage: Int): Int =
-        ReviewRules.INTERVALS_DAYS.drop(stage.coerceIn(0, ReviewRules.MAX_STAGE))
+        ReviewRules.INTERVALS_DAYS.drop(stage.coerceIn(0, ReviewRules.INTERVALS_DAYS.lastIndex))
             .sum().toInt()
 
     // ===== 考试日期预置 =====

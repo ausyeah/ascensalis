@@ -74,20 +74,32 @@ class ReviewProgressionTest {
         assertFalse(ReviewRules.isMastered(ReviewRules.MAX_STAGE - 1))
     }
 
-    // ---------- 连续答对五轮的完整推进（验收 3） ----------
+    // ---------- 连续答对的完整推进（验收 3） ----------
 
     @Test
-    fun `连续答对五轮走完全部间隔并掌握`() {
+    fun `五档间隔全部走完后还需期末确认才毕业`() {
+        // 六个复习节点：新学 → +1 → +2 → +4 → +7 → +15（期末确认）→ 毕业。
+        // 旧实现 MAX_STAGE=5：第 5 次复习答对直接毕业，15 天档从未发生
+        // （文档写的五档实际只走了四档）。
         var stage = 0
         var day = today
-        for (round in 0 until ReviewRules.MAX_STAGE) {
+        val intervals = mutableListOf<Long>()
+        while (!ReviewRules.isMastered(stage)) {
             day = ReviewRules.nextReviewDay(stage, ReviewResult.CORRECT, day)
+            intervals += day.toEpochDay() - today.toEpochDay()
             stage = ReviewRules.nextStage(stage, ReviewResult.CORRECT)
         }
         assertEquals(ReviewRules.MAX_STAGE, stage)
-        // 五轮间隔合计 1+2+4+7+15 = 29 天后掌握
+        // 间隔阶梯 1/2/4/7/15 全部真实发生
+        assertEquals(listOf(1L, 2L, 4L, 7L, 15L), intervals)
         assertEquals(today.plusDays(29), day)
         assertEquals(MasteryStatus.MASTERED, ReviewRules.statusFor(stage))
+    }
+
+    @Test
+    fun `stage5 答对排 15 天期末确认而不立即毕业`() {
+        assertEquals(ReviewRules.MAX_STAGE, ReviewRules.nextStage(5, ReviewResult.CORRECT))
+        assertEquals(today.plusDays(15), ReviewRules.nextReviewDay(5, ReviewResult.CORRECT, today))
     }
 
     // ---------- 间隔表 ----------

@@ -237,8 +237,22 @@ class MineruClient(
             }
             pollErrors = 0
             if (!body.isOk()) {
-                // -60012 task not found 结合 ping 语义即可判断 Key 有效性，这里一律按错误处理
-                return fail(ApiError(kind = ApiErrorKind.AUTH, serverMessage = body.msg))
+                // 业务 code!=0 不一定 Key 失效（v0.0.69）：额度不足、排队满、
+                // 任务不存在都走这里——旧实现一律映射 AUTH，界面显示「Key 无效」，
+                // 引导用户反复换 Key。msg 原文透传，仅当含鉴权特征词才映射 AUTH。
+                val msg = body.msg.orEmpty()
+                val looksAuth = listOf("unauthorized", "token", "认证", "鉴权", "key")
+                    .any { msg.contains(it, ignoreCase = true) }
+                return fail(
+                    if (looksAuth) {
+                        ApiError(kind = ApiErrorKind.AUTH, serverMessage = msg)
+                    } else {
+                        ApiError(
+                            kind = ApiErrorKind.BAD_RESPONSE,
+                            serverMessage = msg.ifBlank { "MinerU 返回业务错误" }
+                        )
+                    }
+                )
             }
             // 每轮都把诊断信息写进 stage——**用户看不到 logcat**，
             // 界面上的这行字是我们唯一的排障依据。
