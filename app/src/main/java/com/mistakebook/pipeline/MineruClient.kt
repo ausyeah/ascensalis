@@ -207,13 +207,28 @@ class MineruClient(
             }
             delay(waitMs)
 
-            val response = rethrowCancellation { api.extractResults(auth, batchId) }
-            val body = response.body()
-            if (!response.isSuccessful || body == null) {
-                val pollError = HttpFactory.httpError(response.code(), response.errorBody()?.string().orEmpty())
+            // 网络异常 / 非 2xx 统一转成「本轮轮询错误」交给瞬断计数；
+            // CancellationException 由 rethrowCancellation 原样上抛
+            val pollOutcome = runCatching {
+                val response = rethrowCancellation { api.extractResults(auth, batchId) }.getOrThrow()
+                val respBody = response.body()
+                if (!response.isSuccessful || respBody == null) {
+                    throw HttpFactory.httpError(
+                        response.code(),
+                        response.errorBody()?.string().orEmpty()
+                    )
+                }
+                respBody
+            }
+            val body = pollOutcome.getOrNull()
+            if (body == null) {
+                val cause = pollOutcome.exceptionOrNull()
+                val pollError = cause as? ApiError
+                    ?: HttpFactory.throwableError(cause ?: IllegalStateException("轮询失败"))
                 pollErrors++
-                val is4xx = response.code() in 400..499 && response.code() != 429
-                if (is4xx || pollErrors >= MAX_POLL_ERRORS) {
+                val fatal4xx = pollError.detail.startsWith("HTTP 4") &&
+                    !pollError.detail.startsWith("HTTP 429")
+                if (fatal4xx || pollErrors >= MAX_POLL_ERRORS) {
                     return fail(pollError)
                 }
                 continue
