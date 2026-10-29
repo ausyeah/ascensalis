@@ -54,11 +54,15 @@ class MigrationRegistrationTest {
             .toList()
     }
 
-    private fun declaredVersion(): Int =
-        Regex("""version\s*=\s*(\d+)""")
-            .find(databaseSource)!!
-            .groupValues[1]
-            .toInt()
+    private fun declaredVersion(): Int {
+        // v0.0.60 起版本号提成顶层常量 MISTAKE_BOOK_DB_VERSION（annotation 引用它），
+        // 优先解析常量；兼容旧的字面量写法 version = 7。
+        val constant = Regex("""MISTAKE_BOOK_DB_VERSION\s*=\s*(\d+)""").find(databaseSource)
+        if (constant != null) return constant.groupValues[1].toInt()
+        val inline = Regex("""version\s*=\s*(\d+)""").find(databaseSource)
+            ?: error("找不到版本声明——若版本改成其他常量形态，请同步更新这条测试")
+        return inline.groupValues[1].toInt()
+    }
 
     // ------------------------------------------------------- 核心断言
 
