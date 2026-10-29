@@ -345,16 +345,16 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
      * 「这次没查成」不等于「额度变了」，没理由把已知信息擦掉。
      */
     fun queryTavilyUsage() {
-        val key = store.snapshotNow().tavilyApiKey
-        if (key.isBlank()) {
-            tavilyUsageState.value = TavilyUsageState(
-                usage = tavilyUsageState.value.usage,
-                loading = false,
-                error = "先填写 Tavily API Key 再查询额度"
-            )
-            return
-        }
         viewModelScope.launch {
+            val key = store.snapshotNow().tavilyApiKey
+            if (key.isBlank()) {
+                tavilyUsageState.value = TavilyUsageState(
+                    usage = tavilyUsageState.value.usage,
+                    loading = false,
+                    error = "先填写 Tavily API Key 再查询额度"
+                )
+                return@launch
+            }
             tavilyUsageState.value = tavilyUsageState.value.copy(loading = true, error = null)
             val usage = com.mistakebook.data.chat.TavilySearch.fetchUsage(
                 container.searchHttpClient,

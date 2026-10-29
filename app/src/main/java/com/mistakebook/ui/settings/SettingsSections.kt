@@ -2102,7 +2102,7 @@ internal fun SearchProviderSection(
                     value = snapshot.tavilyApiKey,
                     onValueChange = viewModel::setTavilyApiKey
                 )
-                TavilyQuotaBlock(snapshot = snapshot, viewModel = viewModel)
+                TavilyQuotaBlock(state = state, viewModel = viewModel)
             }
         }
     }
@@ -2125,10 +2125,10 @@ internal fun SearchProviderSection(
  */
 @Composable
 private fun TavilyQuotaBlock(
-    snapshot: SettingsUiState,
+    state: SettingsUiState,
     viewModel: SettingsViewModel
 ) {
-    val usage = snapshot.tavilyUsage
+    val usage = state.tavilyUsage
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2138,9 +2138,9 @@ private fun TavilyQuotaBlock(
     ) {
         OutlinedButton(
             onClick = viewModel::queryTavilyUsage,
-            enabled = !snapshot.tavilyUsageLoading
+            enabled = !state.tavilyUsageLoading
         ) {
-            if (snapshot.tavilyUsageLoading) {
+            if (state.tavilyUsageLoading) {
                 CircularProgressIndicator(
                     modifier = Modifier.width(16.dp).height(16.dp),
                     strokeWidth = 2.dp
@@ -2191,9 +2191,9 @@ private fun TavilyQuotaBlock(
         }
     }
 
-    if (snapshot.tavilyUsageError != null) {
+    if (state.tavilyUsageError != null) {
         Text(
-            text = snapshot.tavilyUsageError,
+            text = state.tavilyUsageError,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
             modifier = Modifier.padding(top = 4.dp)

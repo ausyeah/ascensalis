@@ -49,7 +49,7 @@ object XlsxText {
         // 按文件名排序，保证每次输出顺序稳定（zip 条目顺序本身不一定稳定）。
         val sheets = entries
             .filterKeys { it.startsWith(SHEET_PREFIX) && it.endsWith(".xml") }
-            .toSortedMap(compareBy(String::sheetOrder))
+            .toSortedMap(compareBy { it.sheetOrder() })
         if (sheets.isEmpty()) return ""
         val sb = StringBuilder()
         sheets.forEach { (path, xml) ->
