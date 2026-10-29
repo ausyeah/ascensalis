@@ -132,12 +132,15 @@ class ChatRepository(
     }
 
     /**
-     * 清空全部会话。同样不再删文件（与 [softDeleteSession] 同理）——
-     * 清空的会话在当前版本没有恢复入口，但消息与附件数据仍在库里
-     * /磁盘上，未来做回收站时直接可用。
+     * 清空全部会话。**这是两步确认后的破坏性终态**，与单个软删（可撤销）
+     * 语义不同：附件文件随之清理（v0.0.70）——v0.0.66 曾为统一「软删不删
+     * 文件」而保留，但清空全部没有恢复入口，文件只会慢性积累。
      */
     suspend fun softDeleteAllSessions() {
-        chatDao.softDeleteAllSessions(System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val sessions = chatDao.observeSessionsOnce()
+        sessions.forEach { appFiles.deleteRecursively(appFiles.chatDir(it.id)) }
+        chatDao.softDeleteAllSessions(now)
     }
 
     // ------------------------------------------------------------ 消息
