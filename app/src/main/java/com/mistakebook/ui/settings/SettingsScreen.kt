@@ -217,6 +217,8 @@ fun SettingsScreen(
                     BadgeEntrySection(onOpen = onOpenBadgeWall)
                     Spacer(Modifier.height(12.dp))
                     PomodoroSection(state = state, viewModel = viewModel)
+                    Spacer(Modifier.height(12.dp))
+                    WordbookSection(state = state, viewModel = viewModel)
                 }
 
                 CollapsibleSettingsGroup(title = "复习提醒", nested = true) {

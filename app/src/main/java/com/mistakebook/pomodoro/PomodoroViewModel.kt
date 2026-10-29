@@ -844,7 +844,6 @@ class PomodoroViewModel(
                 return@launch
             }
 
-            var inserted = 0
             val today = LocalDate.now().toString()
             // 任务名 → 任务 id 的本地缓存。
             //
@@ -852,6 +851,21 @@ class PomodoroViewModel(
             // 的话每行都要查一次库再比对一次，白白多几千次 SQL。
             val taskCache = HashMap<String, Long>()
 
+            /**
+             * 待落库的行（先全部算好，再统一判重）。
+             * v0.0.63 起**不再边算边插**：同一文件二次导入时，
+             * (taskId, startedAt, durationSec) 必然与已有记录撞车，
+             * 边插边导会把统计翻倍——先收集、批量判重、再插入。
+             */
+            data class PendingSession(
+                val taskId: Long,
+                val day: String,
+                val startedAt: Long,
+                val durationSec: Long,
+                val completed: Boolean
+            )
+
+            val pending = mutableListOf<PendingSession>()
             result.rows.forEach { row ->
                 // 学科：按名字找，没有就建
                 var subjectId: Long? = null
@@ -891,25 +905,49 @@ class PomodoroViewModel(
                     LocalDate.parse(day).atTime(minute / 60, minute % 60)
                         .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 }.getOrDefault(System.currentTimeMillis())
+                pending += PendingSession(
+                    taskId = taskId,
+                    day = day,
+                    startedAt = startedAt,
+                    durationSec = row.durationSec,
+                    completed = row.completed == true
+                )
+            }
+
+            // 批量判重：已有库里的 (taskId, startedAt, durationSec) 集合，
+            // 命中的行直接跳过——同一文件导两次不再翻倍统计。
+            // 已插入的键也实时并入集合：源文件内部完全相同的两行同样只落一条。
+            val existingKeys = if (pending.isEmpty()) {
+                mutableSetOf()
+            } else {
+                dao.sessionKeysOf(pending.map { it.taskId }.distinct())
+                    .mapTo(HashSet()) { Triple(it.taskId, it.startedAt, it.durationSec) }
+            }
+            var inserted = 0
+            pending.forEach { p ->
+                val key = Triple(p.taskId, p.startedAt, p.durationSec)
+                if (key in existingKeys) return@forEach
+                existingKeys += key
                 dao.insertSession(
                     com.mistakebook.data.local.entities.PomodoroSession(
-                        taskId = taskId,
+                        taskId = p.taskId,
                         mode = "POMODORO",
-                        day = day,
-                        startedAt = startedAt,
-                        endedAt = startedAt + row.durationSec * 1000L,
-                        durationSec = row.durationSec,
+                        day = p.day,
+                        startedAt = p.startedAt,
+                        endedAt = p.startedAt + p.durationSec * 1000L,
+                        durationSec = p.durationSec,
                         targetSec = 0L,
-                        completed = row.completed == true
+                        completed = p.completed
                     )
                 )
                 inserted++
             }
+            val duplicates = pending.size - inserted
             refreshStats()
-            message.value = if (result.skipped > 0) {
-                "已导入 $inserted 条，跳过 ${result.skipped} 条无法识别的行"
-            } else {
-                "已导入 $inserted 条记录"
+            message.value = buildString {
+                append("已导入 $inserted 条记录")
+                if (duplicates > 0) append("，跳过 $duplicates 条重复（库里已有）")
+                if (result.skipped > 0) append("，另有 ${result.skipped} 条无法识别的行")
             }
         }
     }

@@ -135,6 +135,7 @@ class SettingsStore(context: Context) {
             pomodoroAutoRecord = prefs[KEY_POMODORO_AUTO_RECORD] ?: true,
             pomodoroBreakLoop = prefs[KEY_POMODORO_BREAK_LOOP] ?: false,
             pomodoroBreakMinutes = prefs[KEY_POMODORO_BREAK_MINUTES] ?: 10,
+            wordbookDailyNewLimit = prefs[KEY_WORDBOOK_DAILY_NEW] ?: 20,
             // DataStore 没有"可空 long"，-1 是"未设置"哨兵
             examDateEpochDay = (prefs[KEY_EXAM_DATE] ?: -1L).takeIf { it > 0 }
         )
@@ -517,6 +518,12 @@ class SettingsStore(context: Context) {
     suspend fun setPomodoroBreakMinutes(value: Int) =
         editInt(KEY_POMODORO_BREAK_MINUTES, if (value == 5) 5 else 10)
 
+    // ===== 背单词 =====
+
+    /** 设置每日新词上限（0 = 不限），只允许 15 / 20 / 30 / 0。 */
+    suspend fun setWordbookDailyNewLimit(value: Int) =
+        editInt(KEY_WORDBOOK_DAILY_NEW, if (value in listOf(0, 15, 20, 30)) value else 20)
+
     // ===== 外观与主题 =====
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -615,6 +622,9 @@ class SettingsStore(context: Context) {
         val KEY_POMODORO_AUTO_RECORD = booleanPreferencesKey("pomodoro_auto_record")
         val KEY_POMODORO_BREAK_LOOP = booleanPreferencesKey("pomodoro_break_loop")
         val KEY_POMODORO_BREAK_MINUTES = intPreferencesKey("pomodoro_break_minutes")
+
+        /** 每日新词上限（0 = 不限），见 [SettingsSnapshot.wordbookDailyNewLimit]。 */
+        val KEY_WORDBOOK_DAILY_NEW = intPreferencesKey("wordbook_daily_new_limit")
         val KEY_CHAT_SEARCH_ENABLED = booleanPreferencesKey("chat_search_enabled")
         val KEY_CHAT_SEARCH_PROVIDER = stringPreferencesKey("chat_search_provider")
         val KEY_DEEPSEEK_SEARCH_API_KEY = stringPreferencesKey("deepseek_search_api_key")

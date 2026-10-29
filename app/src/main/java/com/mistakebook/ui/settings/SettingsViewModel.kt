@@ -295,6 +295,11 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         store.setPomodoroBreakMinutes(value)
     }
 
+    /** 设置背单词每日新词上限（0 = 不限）。 */
+    fun setWordbookDailyNewLimit(value: Int) = viewModelScope.launch {
+        store.setWordbookDailyNewLimit(value)
+    }
+
     fun setThemeMode(mode: ThemeMode) = viewModelScope.launch {
         store.setThemeMode(mode)
     }

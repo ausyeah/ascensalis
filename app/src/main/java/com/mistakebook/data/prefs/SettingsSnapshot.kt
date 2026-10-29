@@ -171,6 +171,17 @@ data class SettingsSnapshot(
     /** 休息时长（分钟），可选 5 / 10。 */
     val pomodoroBreakMinutes: Int = 10,
 
+    // ===== 背单词 =====
+
+    /**
+     * 每日新词上限（0 = 不限）。
+     *
+     * 一天狂刷新词是「前学后忘」的头号来源：新词当天见过一面，
+     * 隔天基本全忘。默认 20——错词复习不受此限制，只管「今天
+     * 开始学的新词」。设 0 可关闭限制（老习惯用户）。
+     */
+    val wordbookDailyNewLimit: Int = 20,
+
     /**
      * 考试日期（epochDay，F3 考前排期用）。null = 未设置。
      * 存 DataStore 而不是 Room：它是一条用户偏好，不是题目数据，

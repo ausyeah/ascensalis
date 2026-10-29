@@ -2324,6 +2324,37 @@ internal fun PomodoroSection(
 }
 
 @Composable
+internal fun WordbookSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    SettingsGroup(title = "背单词") {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "每日新词上限",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            listOf(15, 20, 30, 0).forEach { limit ->
+                FilterChip(
+                    selected = state.snapshot.wordbookDailyNewLimit == limit,
+                    onClick = { viewModel.setWordbookDailyNewLimit(limit) },
+                    label = { Text(if (limit == 0) "不限" else "$limit 词") }
+                )
+            }
+        }
+        Text(
+            text = "一天狂刷新词容易前学后忘；错词复习不受这个限制",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
 internal fun DataManageSection(
     container: com.mistakebook.di.AppContainer,
     viewModel: SettingsViewModel,

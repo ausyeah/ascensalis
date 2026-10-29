@@ -287,7 +287,31 @@ interface PomodoroDao {
      */
     @Query("DELETE FROM pomodoro_sessions")
     suspend fun clearAllSessions()
+
+    /**
+     * 导入去重用的自然键查询（v0.0.63）：同一文件的二次导入，
+     * (taskId, startedAt, durationSec) 完全一致——同一行源数据
+     * 建出的会话必然落出同一个三元组。
+     *
+     * 只查这几个涉及的 task：番茄TODO 导出上千行但任务只有几十个，
+     * 全表拉回来也无所谓，但按任务过滤可以让「只导入某任务」的
+     * 场景少扫大半张表。
+     */
+    @Query(
+        """
+        SELECT taskId AS taskId, startedAt AS startedAt, durationSec AS durationSec
+        FROM pomodoro_sessions WHERE taskId IN (:taskIds)
+        """
+    )
+    suspend fun sessionKeysOf(taskIds: List<Long>): List<SessionKeyRow>
 }
+
+/** [PomodoroDao.sessionKeysOf] 的行类型：导入去重的判重键。 */
+data class SessionKeyRow(
+    val taskId: Long,
+    val startedAt: Long,
+    val durationSec: Long
+)
 
 /** 按日聚合结果。 */
 data class DayTotal(

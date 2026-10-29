@@ -908,11 +908,21 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             .mapNotNull { vocabRepo.getWord(it) }
             .filter { isEligibleSenseWord(it) }
 
+        // **每日新词上限（v0.0.63）**：一天狂刷新词是「前学后忘」的头号来源。
+        // 达到上限后**全新词**（从未作答过）不再进入候选，错词复习不受限——
+        // 错词本还有词就不会开天窗，用户到上限后自然转入复习节奏。
+        // 近似口径：该词的**全部**作答都发生在今天 = 今天开始学的新词
+        // （老词今天恰好答完历史全部次数时会被误计，低频且方向只是提前到线）。
+        val newLimit = container.settingsStore.snapshotNow().wordbookDailyNewLimit
+        val dailyNewExhausted =
+            newLimit > 0 && withContext(Dispatchers.IO) { countNewWordsToday() } >= newLimit
+
         // 新词：未标记熟词且等级不足 3。答对过的新词在本次会话内
         // 不再出（sessionDone），否则一轮下来全在原地打转。
         fun isUnmastered(w: Word): Boolean {
             val p = progressCache[w.word]
-            return p == null || (!p.isMastered && p.level < 3)
+            if (p == null) return !dailyNewExhausted
+            return !p.isMastered && p.level < 3
         }
 
         var picked: Word? = null
@@ -951,9 +961,14 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             return@withContext eligibleWrong.random(Random)
         }
 
-        // 4. 兜底回退：候选全空时放宽限制，但依然绝对排除上一道刚答过的词
+        // 4. 兜底回退：候选全空时放宽限制，但依然绝对排除上一道刚答过的词。
+        // 新词上限耗尽时兜底也**排除全新词**——否则上限形同虚设；
+        // 宁可重复考老词（那正是复习），也不再灌新词。
         val lastWord = recentWords.lastOrNull()
-        val fallbackWords = allWords.filter { it.word != lastWord && isEligibleSenseWord(it) }
+        val fallbackWords = allWords.filter {
+            it.word != lastWord && isEligibleSenseWord(it) &&
+                (!dailyNewExhausted || progressCache[it.word] != null)
+        }
         if (fallbackWords.isNotEmpty()) {
             return@withContext fallbackWords.random(Random)
         }
@@ -962,6 +977,25 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             vocabRepo.getMultiSenseWords().randomOrNull(Random)
         } else {
             allWords.randomOrNull(Random)
+        }
+    }
+
+    /**
+     * 今天开始学的新词数（每日新词上限的计数口径）。
+     *
+     * 「该词的**全部**作答都发生在今天」即新学：老词今天复习时
+     * 累计作答次数必然大于今天的次数。近似边缘：老词今天恰好答完
+     * 历史全部次数会被多计一次——低频，且方向只是让上限提前到线，
+     * 不会突破限制。
+     */
+    private suspend fun countNewWordsToday(): Int {
+        val startOfDay = java.time.LocalDate.now()
+            .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val byWord = dao.logsSince(startOfDay).groupBy { it.word }
+        if (byWord.isEmpty()) return 0
+        return byWord.count { (word, logs) ->
+            val p = progressCache[word]
+            p == null || p.reps == logs.size
         }
     }
 
