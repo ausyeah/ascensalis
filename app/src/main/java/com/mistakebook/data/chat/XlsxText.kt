@@ -71,8 +71,15 @@ object XlsxText {
             val body = if (end < 0) xml.substring(si.range.last + 1) else xml.substring(si.range.last + 1, end)
             // 一个 <si> 可能被拆成多个 <r><t>（富文本），全部拼起来。
             T_OPEN.findAll(body).joinToString("") { t ->
-                val tEnd = body.indexOf("</t>", t.range.last + 1)
-                if (tEnd < 0) "" else unescape(body.substring(t.range.last + 1, tEnd))
+                // `<t>` / `<t xml:space="preserve">` 都收：必须跳到标签的 `>`，
+                // 不能只跳过 `<t` 后面那个分隔符（否则属性串会被当成正文）。
+                val tagEnd = body.indexOf('>', t.range.last)
+                if (tagEnd < 0) {
+                    ""
+                } else {
+                    val tEnd = body.indexOf("</t>", tagEnd + 1)
+                    if (tEnd < 0) "" else unescape(body.substring(tagEnd + 1, tEnd))
+                }
             }
         }.toList()
     }
@@ -142,8 +149,13 @@ object XlsxText {
         val type = attr(attrs, "t")
         if (type == "inlineStr") {
             return T_OPEN.findAll(inner).joinToString("") { t ->
-                val end = inner.indexOf("</t>", t.range.last + 1)
-                if (end < 0) "" else unescape(inner.substring(t.range.last + 1, end))
+                val tagEnd = inner.indexOf('>', t.range.last)
+                if (tagEnd < 0) {
+                    ""
+                } else {
+                    val end = inner.indexOf("</t>", tagEnd + 1)
+                    if (end < 0) "" else unescape(inner.substring(tagEnd + 1, end))
+                }
             }
         }
         val v = V_TAG.find(inner)?.groupValues?.get(1).orEmpty()
@@ -180,7 +192,10 @@ object XlsxText {
         path.substringAfterLast('/').removeSuffix(".xml")
 
     /** 让 sheet2 排在 sheet10 前面（字典序会把 10 排到 2 前）。 */
-    private fun String.sheetOrder(): String = SUB_INDEX.find(this)?.value?.padStart(6, '0') ?: this
+    private fun String.sheetOrder(): String =
+        SUB_INDEX.find(this)?.let { m ->
+            "sheet" + m.groupValues[1].padStart(6, '0')
+        } ?: this
 
     /** XML 实体还原。与 [DocxText.unescape] 相同的五个。 */
     fun unescape(text: String): String {

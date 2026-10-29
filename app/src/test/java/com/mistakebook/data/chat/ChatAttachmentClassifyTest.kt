@@ -86,8 +86,10 @@ class ChatAttachmentClassifyTest {
 
     @Test
     fun `认不出的类型归 OTHER`() {
-        listOf("a.zip", "a.mp4", "a.exe", "a.pptx", "a.xls", "无扩展名")
+        listOf("a.zip", "a.mp4", "a.exe", "a.pptx", "无扩展名")
             .forEach { name -> assertEquals(name, AttachmentKind.OTHER, classify(name, null)) }
+        // v0.0.57：xls 已支持（老版二进制格式在读取时给「请另存为」提示）
+        assertEquals(AttachmentKind.XLSX, classify("a.xls", null))
     }
 
     @Test

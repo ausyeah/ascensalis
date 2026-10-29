@@ -59,14 +59,27 @@ object AttachmentManifest {
                     append("- 图片：$name")
                     if (attachment.textExcerpt.isNotBlank()) {
                         append("（图片文字已提取，见上文）")
-                    } else if (imagesAttached) {
-                        append("（图片已随消息发送；若你读不到图片内容，可调用 describe_image 识图、ocr_image 取文字）")
-                    } else if (visionToolAvailable) {
-                        append("（你无法直接查看图片；需要内容请调用 describe_image 工具识图）")
-                    } else if (ocrToolAvailable) {
-                        append("（你无法直接查看图片；需要内容请调用 ocr_image 工具做 OCR）")
                     } else {
-                        append("（你无法直接查看图片，且当前没有可用的识图/OCR 工具）")
+                        // v0.0.57：先说明图片是否已经发出，再按**实际可用的工具**
+                        // 给降级建议。早先只要 imagesAttached=true 就无脑写
+                        // 「可调用 describe_image 识图、ocr_image 取文字」——
+                        // 工具根本没配时等于让模型去调不存在的工具，它只能回
+                        // 「我没有看图的工具」。
+                        append(if (imagesAttached) "（图片已随消息发送" else "（你无法直接查看图片")
+                        val tools = buildList {
+                            if (visionToolAvailable) add("describe_image")
+                            if (ocrToolAvailable) add("ocr_image")
+                        }
+                        when {
+                            tools.isEmpty() -> append("，且当前没有可用的识图/OCR 工具")
+                            imagesAttached ->
+                                append("；若你读不到图片内容，可调用 ")
+                                    .append(tools.joinToString(" / "))
+                            else ->
+                                append("；需要内容请调用 ")
+                                    .append(tools.joinToString(" / "))
+                        }
+                        append("）")
                     }
                     append('\n')
                 }

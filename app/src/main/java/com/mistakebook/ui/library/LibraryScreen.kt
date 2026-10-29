@@ -23,6 +23,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -182,9 +185,18 @@ fun LibraryScreen(
                                 .format(Date(file.lastModified()))
                         }
                         ListItem(
+                            leadingContent = {
+                                // 类型图标：一眼分辨「这是表格 / 文档 / 纯文本」，
+                                // 与主流阅读类 App 的文件列表一致（v0.0.57）。
+                                Icon(
+                                    imageVector = libraryFileIcon(file.name),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            },
                             headlineContent = { Text(file.name) },
                             supportingContent = {
-                                Text("${file.length()} 字节 · $stamp")
+                                Text("${formatLibrarySize(file.length())} · ${libraryFileTypeLabel(file.name)} · $stamp")
                             },
                             trailingContent = {
                                 Row {
@@ -443,4 +455,25 @@ private fun LibraryPreviewDialog(
             { TextButton(onClick = onClose) { Text(stringResource(R.string.action_cancel)) } }
         } else null
     )
+}
+
+/** 资料库文件类型图标（v0.0.57）：按扩展名给一个一眼可辨的图标。 */
+private fun libraryFileIcon(name: String): androidx.compose.ui.graphics.vector.ImageVector {
+    return when (name.substringAfterLast('.', "").lowercase()) {
+        "pdf" -> Icons.Default.PictureAsPdf
+        "xls", "xlsx" -> Icons.Default.TableChart
+        "doc", "docx" -> Icons.Default.Description
+        else -> Icons.Default.Description
+    }
+}
+
+/** 资料库文件类型文字（与图标互补，方便色弱/无图标场景辨认）。 */
+private fun libraryFileTypeLabel(name: String): String =
+    name.substringAfterLast('.', "").lowercase().ifBlank { "文件" }.uppercase()
+
+/** 人类可读的文件大小（B / KB / MB）。 */
+private fun formatLibrarySize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
+    else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
 }
