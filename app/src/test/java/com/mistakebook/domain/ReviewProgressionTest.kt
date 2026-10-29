@@ -90,15 +90,14 @@ class ReviewProgressionTest {
             stage = ReviewRules.nextStage(stage, ReviewResult.CORRECT)
         }
         assertEquals(ReviewRules.MAX_STAGE, stage)
-        // 逐项断言（拆开定位）：间隔阶梯 1/2/4/7/15 全部真实发生；
-        // 第 6 次（期末确认）的间隔也是 15 天，全对后毕业、不再排下一次
-        assertEquals(6, intervals.size)
-        assertEquals(1L, intervals[0])
-        assertEquals(2L, intervals[1])
-        assertEquals(4L, intervals[2])
-        assertEquals(7L, intervals[3])
-        assertEquals(15L, intervals[4])
-        assertEquals(15L, intervals[5])
+        // 逐项断言（带实际值消息，失败直接看控制台）
+        val expected = listOf(1L, 2L, 4L, 7L, 15L, 15L)
+        expected.forEachIndexed { index, expect ->
+            assertTrue(
+                "第 ${index + 1} 个间隔应为 $expect，实际 ${intervals.getOrElse(index) { -1L }}；全部=$intervals",
+                intervals.getOrElse(index) { -1L } == expect
+            )
+        }
         assertEquals(today.plusDays(44), day)
         assertEquals(MasteryStatus.MASTERED, ReviewRules.statusFor(stage))
     }
