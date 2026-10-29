@@ -67,6 +67,17 @@ val keystoreProps = Properties().apply {
         keystorePropsFile.inputStream().use { load(it) }
     }
 }
+
+/**
+ * R8 灰度开关（v0.0.66）：仅探针包使用，正式发布保持关闭。
+ *
+ * 用法：`-PenforceR8=true`（只有 .github/workflows/probe-r8.yml 会传）。
+ * 灰度验证走 `.probe` 探针包（applicationId 带 .probe 后缀，可与正式包
+ * 共存、数据完全隔离），真机回归四条链路（MinerU/LLM 请求体、
+ * KaTeX WebView、Room、备份恢复）确认无恙后再把正式发布转正——
+ * 在那之前，下面的 isMinifyEnabled 恒为 false。
+ */
+val enforceR8 = (project.findProperty("enforceR8") as String?)?.toBoolean() ?: false
 val releaseStoreFile = keystoreProps.getProperty("storeFile")?.takeIf { it.isNotBlank() }
     ?.let { file(it) }
     ?.takeIf { it.exists() }
@@ -157,20 +168,16 @@ android {
             buildConfigField("String", "LLM_BASE_URL", "\"https://api.deepseek.com\"")
             buildConfigField("String", "LLM_MODEL", "\"deepseek-chat\"")
 
-            // **R8 暂时关闭。**
+            // **R8 暂时关闭（默认）**：混淆会剥掉 kotlinx.serialization / Retrofit
+            // 依赖的反射信息，序列化在运行时会静默失败（编译期完全正常，
+            // 运行时才炸），而这种问题只有真机能发现。proguard-rules.pro 里
+            // 已有对应 keep 规则，但**尚未在真机验证过**。
             //
-            // 混淆会剥掉 kotlinx.serialization / Retrofit 依赖的反射信息，
-            // 序列化在运行时会静默失败（编译期完全正常，运行时才炸），
-            // 而这种问题只有真机能发现。proguard-rules.pro 里已经有对应 keep 规则，
-            // 但**尚未在真机验证过**。
-            //
-            // 当前用户的手机只承受得起一次卸载（数据靠 App 内备份恢复，
-            // 而 API Key 已失效、无法重新识别题目）。万一混淆出问题，
-            // 修复还需要再卸载一次，代价太大。
-            // 所以先关掉，拿到「稳定签名 + debuggable=false」两个确定收益；
-            // 真机验证过之后再打开。
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // 灰度路径（v0.0.66）：-PenforceR8=true 只在 probe-r8 工作流的
+            // .probe 探针包上开启，真机回归四条链路通过后再转正——
+            // 在那之前正式发布的包一律不混淆。
+            isMinifyEnabled = enforceR8
+            isShrinkResources = enforceR8
         }
     }
 

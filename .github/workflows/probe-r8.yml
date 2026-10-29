@@ -1,0 +1,126 @@
+name: Probe R8 (灰度验证包)
+
+# 手动触发的 R8 灰度构建：产出 .probe 探针包（applicationId 带 .probe 后缀），
+# 可与正式包共存、数据完全隔离。R8 只在这里开启——真机回归四条链路
+# （MinerU/LLM 请求体、KaTeX WebView、Room、备份恢复）通过后，
+# 正式发布才转正混淆（见 app/build.gradle.kts 的 enforceR8 注释）。
+#
+# 产物在本次 run 的 Artifacts 区（zip 内是 APK），保留 14 天。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        run: |
+          set -euo pipefail
+          SDK="${RUNNER_TEMP:-/home/runner}/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -sSLo /tmp/clt.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/clt.zip -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Generate local.properties (sdk.dir only, no keys)
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      # R8 不改变 JVM 单测的行为，但跑一遍确保灰度起点是绿的
+      - name: Run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Restore release keystore (if Secrets configured)
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64}" ]; then
+            echo "::warning::未配置签名 Secrets，探针包将是随机 debug 签名"
+            echo "SIGNING=off" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/release.jks" \
+            -storepass "$STORE_PASSWORD" > /dev/null
+          cat > keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+          echo "SIGNING=on" >> "$GITHUB_ENV"
+
+      # .probe 探针包：applicationId = com.mistakebook.probe（与正式包共存），
+      # R8 + 资源压缩在这里开启（-PenforceR8=true）
+      - name: Build probe APK (R8 on)
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease \
+            -PprefillKeys=false \
+            -PappIdSuffix=.probe \
+            -PenforceR8=true
+          ls -lh app/build/outputs/apk/release/
+
+      - name: Verify no secrets in APK
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/apkcheck && mkdir -p /tmp/apkcheck
+          unzip -qq app/build/outputs/apk/release/app-release.apk -d /tmp/apkcheck
+          if grep -rEoh 'sk-[A-Za-z0-9]{20,}' /tmp/apkcheck/*.dex 2>/dev/null | head -n 5; then
+            echo "::error::APK 中检测到疑似 API Key，拒绝上传"
+            exit 1
+          fi
+          echo "APK 内未检测到 API Key"
+
+      - name: Verify APK is signed (signed builds only)
+        if: env.SIGNING == 'on'
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/sig.txt
+          grep -qE "Number of signers: [1-9]" /tmp/sig.txt || {
+            echo "::error::APK 未报告签名者，拒绝上传"
+            exit 1
+          }
+          echo "签名校验通过"
+
+      - name: Prepare APK
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          SHA7=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          cp app/build/outputs/apk/release/app-release.apk \
+             "dist/mistakebook-probe-r8-${SHA7}.apk"
+          ls -lh dist/
+
+      - name: Upload artifact (retention 14 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mistakebook-probe-r8
+          path: dist/*.apk
+          retention-days: 14
+          if-no-files-found: error
