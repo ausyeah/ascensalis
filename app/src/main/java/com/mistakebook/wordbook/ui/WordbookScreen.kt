@@ -149,7 +149,8 @@ fun WordbookScreen(
                 WordbookHeaderSummary(
                     studiedToday = state.studiedTodayCount,
                     wrongCount = state.wrongBookCount,
-                    masteredCount = state.masteredCount
+                    masteredCount = state.masteredCount,
+                    dueToday = state.dueTodayCount
                 )
 
                 val tabs = remember {
@@ -241,7 +242,8 @@ fun WordbookScreen(
 private fun WordbookHeaderSummary(
     studiedToday: Int,
     wrongCount: Int,
-    masteredCount: Int
+    masteredCount: Int,
+    dueToday: Int = 0
 ) {
     val isDark = LocalDarkTheme.current
     val okColor = if (isDark) com.mistakebook.ui.theme.PaperOkDark else PaperOk
@@ -272,6 +274,19 @@ private fun WordbookHeaderSummary(
                 value = "$wrongCount",
                 accentColor = if (wrongCount > 0) errorColor else MaterialTheme.colorScheme.onSurfaceVariant,
                 bgColor = if (wrongCount > 0) errorColor.copy(alpha = if (isDark) 0.16f else 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.weight(1f)
+            )
+            // 今日到期（v0.0.64 SRS 接入）：间隔复习到点的词数。
+            // 与「待复习错词」口径不同——那是错词本库存，这是排期到期。
+            SummaryStatBadge(
+                label = "今日到期",
+                value = "$dueToday",
+                accentColor = if (dueToday > 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                bgColor = if (dueToday > 0) {
+                    MaterialTheme.colorScheme.tertiary.copy(alpha = if (isDark) 0.16f else 0.10f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                },
                 modifier = Modifier.weight(1f)
             )
             SummaryStatBadge(

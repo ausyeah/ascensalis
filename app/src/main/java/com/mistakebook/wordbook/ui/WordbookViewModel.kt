@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.mistakebook.di.AppContainer
 import com.mistakebook.pipeline.SceneImageResult
 import com.mistakebook.wordbook.algo.SpellRules
+import com.mistakebook.wordbook.algo.SpacedRepetitionScheduler
 import com.mistakebook.wordbook.algo.WordbookRules
 import com.mistakebook.wordbook.data.SenseQuestion
 import com.mistakebook.wordbook.data.Word
@@ -36,11 +37,15 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         val today: Int,
         val mastered: Int,
         val wrong: Int,
-        val favorite: Int
+        val favorite: Int,
+        val due: Int = 0
     )
 
     private val vocabRepo = container.vocabRepository
     private val dao = container.wordbookDao
+
+    /** 间隔复习调度器（v0.0.64 起真正接入打分与抽词，见 recordAnswer / pickNextWord）。 */
+    private val scheduler = SpacedRepetitionScheduler()
 
     /** 单词发音（TTS）。单例随 AppContainer，初始化异步完成，未就绪时点击静默忽略。 */
     private val audioPlayer = container.wordAudioPlayer
@@ -334,20 +339,23 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     private fun observeDatabaseStats() {
         val startOfDayMs = getStartOfDayMillis()
         viewModelScope.launch {
+            // 5 个流：combine 的类型化重载正好支持到 5 个
             combine(
                 dao.observeStudiedTodayCount(startOfDayMs),
                 dao.observeMasteredCount(),
                 dao.observeWrongBookCount(),
-                dao.observeFavoriteCount()
-            ) { today, mastered, wrong, favorite ->
-                StatsCounts(today, mastered, wrong, favorite)
+                dao.observeFavoriteCount(),
+                dao.observeDueCount(System.currentTimeMillis())
+            ) { today, mastered, wrong, favorite, due ->
+                StatsCounts(today, mastered, wrong, favorite, due)
             }.collect { counts ->
                 _uiState.update {
                     it.copy(
                         studiedTodayCount = counts.today,
                         masteredCount = counts.mastered,
                         wrongBookCount = counts.wrong,
-                        favoriteCount = counts.favorite
+                        favoriteCount = counts.favorite,
+                        dueTodayCount = counts.due
                     )
                 }
             }
@@ -902,6 +910,17 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         fun blocked(word: String): Boolean =
             word in recentWords || word in pendingDeferWords || deferCount[word] != null && deferCount[word]!! >= MAX_DEFER_TIMES
 
+        // 1.5 **到期优先（v0.0.64 SRS 接入）**：间隔复习到点的词最优先——
+        // 这就是「记忆曲线」的实际兑现：答对的词按 1/3/7/15/30 天阶梯排期，
+        // 到点就回来。nextReviewAt <= 0 是从未调度过的存量词，不算到期。
+        val nowMs = System.currentTimeMillis()
+        val dueWord = allWords.filter { w ->
+            val p = progressCache[w.word]
+            p != null && !p.isMastered && p.nextReviewAt in 1..nowMs &&
+                !blocked(w.word) && isEligibleSenseWord(w)
+        }.randomOrNull(Random)
+        if (dueWord != null) return@withContext dueWord
+
         // 2. 错词本 70% / 新词 30%
         val eligibleWrong = wrongWordsCache
             .filter { !blocked(it) }
@@ -1130,6 +1149,20 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     private suspend fun recordAnswer(current: Word, isCorrect: Boolean, studyModeLabel: String) {
         val now = System.currentTimeMillis()
         val oldProgress = dao.getProgress(current.word) ?: WordProgress(word = current.word)
+        // **SRS 排期（v0.0.64）**：此前 README 宣称「跟着记忆曲线安排下次见面」，
+        // 实际 nextReviewAt 从未被写过（调度器整个是死代码）。现在答对按
+        // 认识档的间隔阶梯（1/3/7/15/30 天）排下次见面，答错 10 分钟后重现。
+        val scheduled = scheduler.schedule(
+            rating = if (isCorrect) {
+                SpacedRepetitionScheduler.RATING_KNOW
+            } else {
+                SpacedRepetitionScheduler.RATING_FORGET
+            },
+            currentLevel = oldProgress.level,
+            currentReps = oldProgress.reps,
+            currentLapses = oldProgress.lapses,
+            nowMs = now
+        )
 
         val newProgress = if (isCorrect) {
             val newReps = oldProgress.reps + 1
@@ -1138,11 +1171,14 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
             // （错词本越积越厚）。规则见 WordbookRules.GRADUATION_REPS。
             val outOfWrongBook = oldProgress.isWrongBook && WordbookRules.shouldGraduateFromWrongBook(newReps)
             oldProgress.copy(
+                // level 沿用原口径（max(old, 2)）：四选一答对一次不直接升到
+                // 「熟练/精通」，掌握节奏由卡片模式的手动评分管
                 level = maxOf(oldProgress.level, 2),
                 reps = newReps,
                 correctCount = oldProgress.correctCount + 1,
                 isWrongBook = if (outOfWrongBook) false else oldProgress.isWrongBook,
                 lastAnsweredAt = now,
+                nextReviewAt = scheduled.nextReviewAt,
                 updatedAt = now
             )
         } else {
@@ -1157,6 +1193,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                 isWrongBook = true,
                 everWrong = true,
                 lastAnsweredAt = now,
+                nextReviewAt = scheduled.nextReviewAt,
                 updatedAt = now
             )
         }
@@ -1288,6 +1325,10 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                     0 -> {
                         deferCount[current.word] = (deferCount[current.word] ?: 0) + 1
                         deferQueue.add(DeferItem(current, sessionAnswerCount + 8))
+                        val scheduled = scheduler.schedule(
+                            SpacedRepetitionScheduler.RATING_FORGET,
+                            old.level, old.reps, old.lapses, now
+                        )
                         old.copy(
                             level = 0,
                             reps = 0,
@@ -1296,31 +1337,46 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                             isWrongBook = true,
                             everWrong = true,
                             lastAnsweredAt = now,
+                            nextReviewAt = scheduled.nextReviewAt,
                             updatedAt = now
                         )
                     }
                     1 -> {
+                        val scheduled = scheduler.schedule(
+                            SpacedRepetitionScheduler.RATING_BLURRY,
+                            old.level, old.reps, old.lapses, now
+                        )
                         old.copy(
                             level = 1,
                             reps = 0,
                             correctCount = old.correctCount + 1,
                             lastAnsweredAt = now,
+                            nextReviewAt = scheduled.nextReviewAt,
                             updatedAt = now
                         )
                     }
                     2 -> {
                         val newReps = old.reps + 1
                         val outOfWrongBook = old.isWrongBook && WordbookRules.shouldGraduateFromWrongBook(newReps)
+                        val scheduled = scheduler.schedule(
+                            SpacedRepetitionScheduler.RATING_KNOW,
+                            old.level, old.reps, old.lapses, now
+                        )
                         old.copy(
                             level = 2,
                             reps = newReps,
                             correctCount = old.correctCount + 1,
                             isWrongBook = if (outOfWrongBook) false else old.isWrongBook,
                             lastAnsweredAt = now,
+                            nextReviewAt = scheduled.nextReviewAt,
                             updatedAt = now
                         )
                     }
                     else -> {
+                        val scheduled = scheduler.schedule(
+                            SpacedRepetitionScheduler.RATING_MASTER,
+                            old.level, old.reps, old.lapses, now
+                        )
                         old.copy(
                             level = 3,
                             reps = old.reps + 1,
@@ -1328,6 +1384,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
                             isMastered = true,
                             isWrongBook = false,
                             lastAnsweredAt = now,
+                            nextReviewAt = scheduled.nextReviewAt,
                             updatedAt = now
                         )
                     }

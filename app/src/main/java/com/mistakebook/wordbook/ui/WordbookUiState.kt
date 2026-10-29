@@ -136,6 +136,12 @@ data class WordbookUiState(
 
     // 统计指标
     val studiedTodayCount: Int = 0,
+
+    /**
+     * 到期待复习词数（v0.0.64 SRS 接入）：nextReviewAt 已到点且未掌握。
+     * 头部「今日到期」徽标与抽词的到期优先层共用同一口径。
+     */
+    val dueTodayCount: Int = 0,
     val masteredCount: Int = 0,
     val wrongBookCount: Int = 0,
     val favoriteCount: Int = 0,

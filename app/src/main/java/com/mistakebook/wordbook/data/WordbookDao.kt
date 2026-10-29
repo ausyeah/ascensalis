@@ -50,6 +50,16 @@ interface WordbookDao {
     @Query("SELECT COUNT(*) FROM word_progress WHERE isWrongBook = 1")
     fun observeWrongBookCount(): Flow<Int>
 
+    /**
+     * 到期待复习数（v0.0.64 SRS 接入）：nextReviewAt 已到点且未掌握。
+     * nextReviewAt > 0 的条件把「从未调度过的存量词」（恒 0）排除在外——
+     * 否则首次接入时全库都会被算成到期。
+     */
+    @Query(
+        "SELECT COUNT(*) FROM word_progress WHERE isMastered = 0 AND nextReviewAt > 0 AND nextReviewAt <= :nowMs"
+    )
+    fun observeDueCount(nowMs: Long): Flow<Int>
+
     /** 生词本收藏数（错题本页子标签角标用）。 */
     @Query("SELECT COUNT(*) FROM word_progress WHERE isFavorite = 1")
     fun observeFavoriteCount(): Flow<Int>
