@@ -75,6 +75,17 @@ interface ChatDao {
     )
     fun observeSessions(): Flow<List<ChatSession>>
 
+    /**
+     * 一次性取出全部未删除会话。
+     *
+     * 「清空全部」要挨个清掉各会话的附件目录（v0.0.70 恢复此查询：
+     * 清空全部是破坏性终态，文件随之清理），删之前得先知道有哪些——
+     * 从 Flow 上 `first()` 拿也能凑合，但那是把一次性操作伪装成订阅，
+     * 意图不清，直接给 suspend 版。
+     */
+    @Query("SELECT * FROM chat_sessions WHERE deletedAt IS NULL")
+    suspend fun observeSessionsOnce(): List<ChatSession>
+
     @Query("UPDATE chat_sessions SET deletedAt = :at, updatedAt = :at WHERE id = :id")
     suspend fun softDeleteSession(id: Long, at: Long)
 
