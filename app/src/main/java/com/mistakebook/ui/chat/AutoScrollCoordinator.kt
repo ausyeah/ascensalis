@@ -198,20 +198,51 @@ fun rememberAutoScrollEffect(
     //    手指还按着的时候**不判**位置：用户正在拖拽，位置每帧都在变，
     //    此刻判出来的「在不在底部」没有意义。
     LaunchedEffect(state, policy) {
-        snapshotFlow { newestGapOf(state.layoutInfo) }
-            .collect { gap ->
-                if (draggedNow || coordinator.programmaticScroll) return@collect
-                if (gap == null) {
-                    // index 0 不在可见集。两种可能：
-                    // - 「新消息刚插入、还没进视口」的瞬态 → 底部仍贴着，不动；
-                    // - 用户翻到了历史 → 不在底部，暂停跟随。
-                    if (isFlushAtBottom(state.layoutInfo)) return@collect
-                    policy.onGap(null)
-                    coordinator.pause()
-                    return@collect
-                }
-                if (policy.onGap(gap)) coordinator.resume() else coordinator.pause()
+        // 最近一个「确实看见过」的最新一条（index 0）的 key。
+        //
+        // 为什么需要它：`gap == null`（index 0 不在可见集）有两种完全不同的
+        // 成因，而它们在几何上**不可区分**——
+        // - **插入瞬态**：新消息刚插到 index 0、还在视口下方，原最新一条
+        //   （现在是 index 1）仍贴底，它的 offset = 0；
+        // - **用户翻到 item 边界**：用户在历史区恰好停在某条 item 的边界上，
+        //   最底部可见 item 的 offset **同样是 0**。
+        //
+        // 旧实现只凭 `isFlushAtBottom` 就认定是瞬态并提前返回，于是第二种
+        // 情况下 `following` 一直保持 true——下一条新消息一到，path ③ 就把人
+        // 从历史区硬拽回底部。这就是用户反馈的「没有触底仍然会跟随」。
+        // （v0.0.54 只在 path ③ 用 `wasFollowing` 加固过，但 `following`
+        //   本身已经被这里写坏了，`wasFollowing` 读到的还是错的值。）
+        //
+        // 判别式：**最底部可见 item 的 key 是否就是上一个最新一条**。
+        // 插入瞬态下贴底的那条正是原最新一条；用户翻过去之后，贴底的是更上面
+        // 的某条，key 必然不同。这一条把两种情形彻底分开。
+        var lastNewestKey: Any? = null
+        // 只把 gap 与最新一条的 key 作为流的产物：发射时机与改造前完全一致
+        // （这两个值变化才重算）。layoutInfo 在 collect 里现取——
+        // 若把它也放进产物，任何布局变化都会触发一次发射，同样的 gap 会被
+        // 反复喂进状态机，恢复跟随的两帧迟滞会被无意义地提前凑满。
+        snapshotFlow {
+            val info = state.layoutInfo
+            Pair(newestGapOf(info), newestKeyOf(info))
+        }.collect { (gap, newestKey) ->
+            if (draggedNow || coordinator.programmaticScroll) return@collect
+            // index 0 在场才更新记忆；瞬态期间 index 0 是不可见的，记忆保持原值
+            if (newestKey != null) lastNewestKey = newestKey
+            val info = state.layoutInfo
+            if (gap == null) {
+                val bottomMostKey = info.visibleItemsInfo.firstOrNull()?.key
+                val transient = isInsertionTransient(
+                    bottomMostKey = bottomMostKey,
+                    bottomMostFlush = isFlushAtBottom(info),
+                    lastNewestKey = lastNewestKey
+                )
+                if (transient) return@collect
+                policy.onGap(null)
+                coordinator.pause()
+                return@collect
             }
+            if (policy.onGap(gap)) coordinator.resume() else coordinator.pause()
+        }
     }
 
     // ③ 新消息到达 → 只有「本来就在底部」才回底。
@@ -467,6 +498,42 @@ internal fun newestGapOf(info: LazyListLayoutInfo): Int? {
     val newest = info.visibleItemsInfo.firstOrNull { it.index == 0 } ?: return null
     return newest.offset
 }
+
+/**
+ * 最新一条消息（index 0）的 key；不在可见集返回 null。
+ *
+ * 供位置驱动区分「插入瞬态」与「用户翻到 item 边界」用——两者几何上不可区分，
+ * 只能靠「贴底的那条是不是上一个最新一条」来分辨。见
+ * [rememberAutoScrollEffect] 里 path ② 的注释。
+ */
+internal fun newestKeyOf(info: LazyListLayoutInfo): Any? =
+    info.visibleItemsInfo.firstOrNull { it.index == 0 }?.key
+
+/**
+ * `gap == null`（最新一条不在可见集）时，这一帧是不是**插入瞬态**。
+ *
+ * ## 为什么不能只看 `bottomMostFlush`
+ *
+ * 插入瞬态与「用户在历史区恰好停在 item 边界」在几何上完全一样：
+ * 都是最底部可见 item 的 offset = 0。只凭几何判定，就会把后一种当成前一种，
+ * 让 `following` 一直保持 true——下一条新消息到达时把人从历史区拽回底部
+ * （用户反馈「没有触底仍然会跟随」）。
+ *
+ * ## 判别式
+ *
+ * 插入瞬态下，贴底的那条正是**上一个最新一条**（它被新消息挤成了 index 1），
+ * 所以 `bottomMostKey == lastNewestKey`；用户翻过去之后，贴底的是更上面的某条，
+ * key 必然不同。
+ *
+ * @param bottomMostKey 最底部可见 item 的 key（视口为空时为 null）；
+ * @param bottomMostFlush 最底部可见 item 是否贴底，见 [isFlushAtBottom]；
+ * @param lastNewestKey 最近一个确实看见过的最新一条的 key（从没见过为 null）。
+ */
+internal fun isInsertionTransient(
+    bottomMostKey: Any?,
+    bottomMostFlush: Boolean,
+    lastNewestKey: Any?
+): Boolean = bottomMostFlush && bottomMostKey != null && bottomMostKey == lastNewestKey
 
 /**
  * 最底部可见 item 是否仍**贴在视口底边**。
