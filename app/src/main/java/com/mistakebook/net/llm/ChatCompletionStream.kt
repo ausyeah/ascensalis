@@ -199,7 +199,9 @@ class ChatCompletionStream(
         request: ChatRequest,
         effort: ReasoningEffort = ReasoningEffort.OFF
     ): Flow<ChatStreamEvent> = flow {
-        emitAll(runStreamAttempts(profile, request, effort, allowMaxTokensHalve = true))
+        // runStreamAttempts 是 FlowCollector 扩展：在本 flow 的 receiver 上直接跑，
+        // 内部逐事件 emit（不返回 Flow，所以不走 emitAll）
+        runStreamAttempts(profile, request, effort, allowMaxTokensHalve = true)
     }
 
     /**
