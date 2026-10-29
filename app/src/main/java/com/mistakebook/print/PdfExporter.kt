@@ -266,6 +266,28 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
         override val height: Float
     ) : LineElement
 
+    /**
+     * 一行的累积状态（元素与宽度同源）。[PdfTextWrap] 只认这个对象：
+     * flush 后内部换成新列表，后续追加落进新行——旧引用误用从结构上不可能再发生。
+     */
+    private class ComposingLine(
+        private val onFlush: (List<LineElement>) -> Unit
+    ) : PdfComposeSink {
+        var elements = mutableListOf<LineElement>()
+        override var currentLineWidth = 0f
+        override val hasContent: Boolean get() = elements.isNotEmpty()
+        override fun append(text: String, width: Float, fontSize: Float, color: Int) {
+            elements.add(TextElement(text, width, fontSize, fontSize, color))
+            currentLineWidth += width
+        }
+        override fun flushLine() {
+            if (elements.isEmpty()) return
+            onFlush(elements)
+            elements = mutableListOf()
+            currentLineWidth = 0f
+        }
+    }
+
     private fun layoutDocument(
         doc: ExportDoc,
         mathMap: Map<String, RenderedMath?>,
@@ -551,18 +573,19 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
         mathMap: Map<String, RenderedMath?>
     ): List<MeasuredLine> {
         val lines = mutableListOf<MeasuredLine>()
-        var currentLineElements = mutableListOf<LineElement>()
-        var currentLineWidth = 0f
-
         val baseLineHeight = fontSize * 1.3f
 
+        // 行状态收敛在一个稳定的可变对象里：flush 后 sink 内部自换新列表，
+        // 后续追加自然落进新行。旧实现把行列表按值传进 appendTextToLine，
+        // flush 后函数仍往已提交的旧列表追加——第一个换行点之后的文字全部
+        // 挤进第一行并被页边裁掉（v0.0.59 折行修复）。
+        val line = ComposingLine { elems ->
+            val maxSpanHeight = elems.maxOfOrNull { it.height } ?: fontSize
+            lines.add(MeasuredLine(MathLayout.lineHeightFor(baseLineHeight, maxSpanHeight, 2f), elems))
+        }
+
         fun flushLine() {
-            if (currentLineElements.isEmpty()) return
-            val maxSpanHeight = currentLineElements.maxOfOrNull { it.height } ?: fontSize
-            val lineHeight = MathLayout.lineHeightFor(baseLineHeight, maxSpanHeight, 2f)
-            lines.add(MeasuredLine(lineHeight, currentLineElements))
-            currentLineElements = mutableListOf()
-            currentLineWidth = 0f
+            line.flushLine()
         }
 
         paint.textSize = fontSize
@@ -589,9 +612,9 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
                             // 独立居中
                             val indent = ((maxWidth - fitted.width) / 2f).coerceAtLeast(0f)
                             if (indent > 0f) {
-                                currentLineElements.add(TextElement("", indent, fitted.height, fontSize, textColor))
+                                line.elements.add(TextElement("", indent, fitted.height, fontSize, textColor))
                             }
-                            currentLineElements.add(element)
+                            line.elements.add(element)
                             flushLine()
                         } else {
                             // 回退为源码居中文本
@@ -599,9 +622,9 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
                             val textW = paint.measureText(fallbackText)
                             val indent = ((maxWidth - textW) / 2f).coerceAtLeast(0f)
                             if (indent > 0f) {
-                                currentLineElements.add(TextElement("", indent, fontSize, fontSize, textColor))
+                                line.elements.add(TextElement("", indent, fontSize, fontSize, textColor))
                             }
-                            currentLineElements.add(TextElement(fallbackText, textW, fontSize, fontSize, textColor))
+                            line.elements.add(TextElement(fallbackText, textW, fontSize, fontSize, textColor))
                             flushLine()
                         }
                     } else {
@@ -615,20 +638,20 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
                                 maxWidthPx = maxWidth,
                                 maxHeightPx = fontSize * MathLayout.INLINE_MATH_MAX_HEIGHT_RATIO
                             )
-                            if (currentLineWidth + fitted.width > maxWidth && currentLineElements.isNotEmpty()) {
+                            if (line.currentLineWidth + fitted.width > maxWidth && line.hasContent) {
                                 flushLine()
                             }
-                            currentLineElements.add(MathElement(rendered.bitmap, fitted.width, fitted.height))
-                            currentLineWidth += fitted.width
+                            line.elements.add(MathElement(rendered.bitmap, fitted.width, fitted.height))
+                            line.currentLineWidth += fitted.width
                         } else {
                             // 回退为源码文本
                             val fallbackText = "$${token.latex}$"
                             val textW = paint.measureText(fallbackText)
-                            if (currentLineWidth + textW > maxWidth && currentLineElements.isNotEmpty()) {
+                            if (line.currentLineWidth + textW > maxWidth && line.hasContent) {
                                 flushLine()
                             }
-                            currentLineElements.add(TextElement(fallbackText, textW, fontSize, fontSize, textColor))
-                            currentLineWidth += textW
+                            line.elements.add(TextElement(fallbackText, textW, fontSize, fontSize, textColor))
+                            line.currentLineWidth += textW
                         }
                     }
                 }
@@ -645,9 +668,9 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
                             // 遇到硬回车换行
                             val word = text.substring(segmentStart, i)
                             if (word.isNotEmpty()) {
-                                appendTextToLine(word, fontSize, textColor, maxWidth, paint, currentLineElements, currentLineWidth, ::flushLine).also {
-                                    currentLineWidth = it
-                                }
+                                PdfTextWrap.appendText(
+                                    line, word, fontSize, textColor, maxWidth
+                                ) { paint.measureText(it) }
                             }
                             flushLine()
                             segmentStart = i + 1
@@ -656,8 +679,9 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
                     }
 
                     if (segmentStart < text.length) {
-                        val remaining = text.substring(segmentStart)
-                        currentLineWidth = appendTextToLine(remaining, fontSize, textColor, maxWidth, paint, currentLineElements, currentLineWidth, ::flushLine)
+                        PdfTextWrap.appendText(
+                            line, text.substring(segmentStart), fontSize, textColor, maxWidth
+                        ) { paint.measureText(it) }
                     }
                 }
             }
@@ -665,57 +689,6 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
 
         flushLine()
         return lines
-    }
-
-    /**
-     * 将一段文本以自然中英文分词并折行加入当前行。
-     */
-    private fun appendTextToLine(
-        text: String,
-        fontSize: Float,
-        textColor: Int,
-        maxWidth: Float,
-        paint: TextPaint,
-        currentLineElements: MutableList<LineElement>,
-        initialLineWidth: Float,
-        onFlushLine: () -> Unit
-    ): Float {
-        var currentLineWidth = initialLineWidth
-        val wordBuffer = StringBuilder()
-
-        fun flushWordBuffer() {
-            if (wordBuffer.isEmpty()) return
-            val word = wordBuffer.toString()
-            val wordW = paint.measureText(word)
-            if (currentLineWidth + wordW > maxWidth && currentLineElements.isNotEmpty()) {
-                onFlushLine()
-                currentLineWidth = 0f
-            }
-            currentLineElements.add(TextElement(word, wordW, fontSize, fontSize, textColor))
-            currentLineWidth += wordW
-            wordBuffer.clear()
-        }
-
-        text.forEach { ch ->
-            if (ch.code >= 0x2E80 || ch.isWhitespace()) {
-                // 中文字符或空白标点作为独立断行边界
-                flushWordBuffer()
-                val charStr = ch.toString()
-                val charW = paint.measureText(charStr)
-                if (currentLineWidth + charW > maxWidth && currentLineElements.isNotEmpty()) {
-                    onFlushLine()
-                    currentLineWidth = 0f
-                }
-                currentLineElements.add(TextElement(charStr, charW, fontSize, fontSize, textColor))
-                currentLineWidth += charW
-            } else {
-                // 西文字符/数字累积在单词中，避免单词断开
-                wordBuffer.append(ch)
-            }
-        }
-
-        flushWordBuffer()
-        return currentLineWidth
     }
 
     // =========================================================================
