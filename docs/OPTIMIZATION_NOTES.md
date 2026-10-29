@@ -189,6 +189,14 @@ Paparazzi 不模拟系统 fontScale，故 **fontScale 1.3 / 2.0 与「320dp+font
 
 ---
 
+## v0.0.56 发版（2026-10-29）
+
+版本号 55 → 56，内容为上面「v0.0.55 反馈轮」的 7 项修复（已合入 main，合并提交 `10915ff`）。
+
+出包：`scripts/release.ps1 -Tag v0.0.56`（打 annotated tag → CI 触发 → 签名 APK 挂到 Release）。
+
+---
+
 ## v0.0.55 反馈轮（资料库上传修复 + 成就墙重设计：从 wip/library-and-badge 移入）
 
 ### 为什么不能直接 merge
