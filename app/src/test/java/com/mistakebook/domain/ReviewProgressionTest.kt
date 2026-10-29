@@ -90,16 +90,20 @@ class ReviewProgressionTest {
             stage = ReviewRules.nextStage(stage, ReviewResult.CORRECT)
         }
         assertEquals(ReviewRules.MAX_STAGE, stage)
-        // 逐项断言（带实际值消息，失败直接看控制台）
-        val expected = listOf(1L, 2L, 4L, 7L, 15L, 15L)
-        expected.forEachIndexed { index, expect ->
-            assertTrue(
-                "第 ${index + 1} 个间隔应为 $expect，实际 ${intervals.getOrElse(index) { -1L }}；全部=$intervals",
-                intervals.getOrElse(index) { -1L } == expect
-            )
-        }
-        assertEquals(today.plusDays(44), day)
-        assertEquals(MasteryStatus.MASTERED, ReviewRules.statusFor(stage))
+        // 完全展开的逐步断言：每一轮的间隔独立成行，失败行号 = 偏离的步数
+        val d1 = ReviewRules.nextReviewDay(0, ReviewResult.CORRECT, today)
+        assertEquals(today.plusDays(1), d1)
+        val d2 = ReviewRules.nextReviewDay(1, ReviewResult.CORRECT, d1)
+        assertEquals(today.plusDays(3), d2)
+        val d3 = ReviewRules.nextReviewDay(2, ReviewResult.CORRECT, d2)
+        assertEquals(today.plusDays(7), d3)
+        val d4 = ReviewRules.nextReviewDay(3, ReviewResult.CORRECT, d3)
+        assertEquals(today.plusDays(14), d4)
+        val d5 = ReviewRules.nextReviewDay(4, ReviewResult.CORRECT, d4)
+        assertEquals(today.plusDays(29), d5)
+        val d6 = ReviewRules.nextReviewDay(5, ReviewResult.CORRECT, d5)
+        assertEquals(today.plusDays(44), d6)
+        assertEquals(MasteryStatus.MASTERED, ReviewRules.statusFor(ReviewRules.MAX_STAGE))
     }
 
     @Test
