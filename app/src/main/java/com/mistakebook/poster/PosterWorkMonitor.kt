@@ -58,12 +58,31 @@ class PosterWorkMonitor(
             WorkManager.getInstance(appContext)
                 .getWorkInfosForUniqueWorkFlow(workName)
                 .filter { infos -> infos.isNotEmpty() }
-                .map { infos -> infos.maxByOrNull { it.state.ordinal } }
+                .map { infos -> pickCurrent(infos) }
                 .collect { info ->
                     _state.value = info.toPosterState()
                 }
         }
     }
+
+    /**
+     * 在同名 unique work 的**全部历史记录**里挑出「当前应该展示的那条」。
+     *
+     * 不能按 state.ordinal 取 max（v0.0.59 修复）：用户第二次点「生图打卡」
+     * 走 REPLACE 后，旧的 SUCCEEDED/CANCELLED 记录（ordinal 更大）会永远
+     * 压过新任务的 ENQUEUED/RUNNING——新图生成了（生图额度已烧），
+     * 界面却停在旧图或「海报生成已取消」。
+     *
+     * 优先级：活跃任务 > 最近一次成功 > 最近一次失败 > 其余（取消）。
+     * 「最近」取列表最后一条：WorkManager 按 WorkSpec 创建序返回同名记录。
+     */
+    private fun pickCurrent(infos: List<WorkInfo>): WorkInfo? =
+        infos.firstOrNull {
+            it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
+        }
+            ?: infos.lastOrNull { it.state == WorkInfo.State.SUCCEEDED }
+            ?: infos.lastOrNull { it.state == WorkInfo.State.FAILED }
+            ?: infos.lastOrNull()
 
     /** 清空状态（用户已经处理完结果后调用）。 */
     fun reset() {
@@ -77,9 +96,9 @@ class PosterWorkMonitor(
                 .getWorkInfosForUniqueWork(workName)
                 .get()
         }.getOrNull().orEmpty()
-        val succeeded = infos.filter { it.state == WorkInfo.State.SUCCEEDED }.maxByOrNull {
-            it.runAttemptCount
-        } ?: return
+        // 与 pickCurrent 同口径：多条成功记录取最后一条（创建序最新的那次）。
+        // 旧实现按 runAttemptCount 取，REPLACE 之后新旧记录的计数没有可比性。
+        val succeeded = infos.lastOrNull { it.state == WorkInfo.State.SUCCEEDED } ?: return
         val path = succeeded.outputData.getString(PosterWorker.KEY_RESULT_PATH) ?: return
         if (File(path).isFile) _state.value = PosterWorkState.Done(path)
     }

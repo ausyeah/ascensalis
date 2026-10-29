@@ -35,15 +35,16 @@ class QuestionRepository(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun observePage(filter: Filter, page: Int, pageSize: Int = PAGE_SIZE): Flow<List<Question>> =
-        questionDao.observePage(
+    /**
+     * 按筛选条件取全量未删题（v0.0.59 起不再分页，见 QuestionDao.observeFiltered）。
+     */
+    fun observeFiltered(filter: Filter): Flow<List<Question>> =
+        questionDao.observeFiltered(
             statusName = filter.status?.name.orEmpty(),
             subjectFilter = filter.subjectId ?: 0L,
             notebookFilter = filter.notebookId ?: 0L,
             reasonName = filter.reason?.name.orEmpty(),
-            keyword = escapeLike(filter.keyword.trim()),
-            limit = pageSize,
-            offset = page.coerceAtLeast(0) * pageSize
+            keyword = escapeLike(filter.keyword.trim())
         )
 
     fun observeCount(filter: Filter): Flow<Int> =
@@ -319,10 +320,6 @@ class QuestionRepository(
             questionId,
             knowledgePoints.map { it.trim() }.filter { it.isNotEmpty() }
         )
-    }
-
-    companion object {
-        const val PAGE_SIZE = 30
     }
 }
 

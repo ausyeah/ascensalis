@@ -79,7 +79,6 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     private val subjectFilter = MutableStateFlow<Long?>(null)
     private val notebookFilter = MutableStateFlow<Long?>(null)
     private val keywordInput = MutableStateFlow("")
-    private val page = MutableStateFlow(0)
     private val dueOnly = MutableStateFlow(false)
     private val localDateRefreshes = MutableSharedFlow<Unit>(replay = 1, extraBufferCapacity = 1)
     private val questionOrder = MutableStateFlow<List<Long>>(emptyList())
@@ -102,7 +101,6 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         val subjectId: Long?,
         val notebookId: Long?,
         val keyword: String,
-        val page: Int,
         val dueOnly: Boolean
     )
 
@@ -115,20 +113,21 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         keywordInput.debounce(300),
         dueOnly
     ) { status, subject, notebook, keyword, due ->
-        Query(status, subject, notebook, keyword, 0, due)
-    }.combine(page) { query, pageIndex -> query.copy(page = pageIndex) }
+        Query(status, subject, notebook, keyword, due)
+    }
 
     private fun questionsOf(query: Query) = if (query.dueOnly) {
         today.flatMapLatest { repository.observeDue(it) }
     } else {
-        repository.observePage(
+        // 全量查询（v0.0.59）：旧的 30 条/页在 StateFlow 里只持当前页，
+        // 触底加载是整页**替换**而非追加，>30 题滚动直接坏掉（换页还可能翻到空页）。
+        repository.observeFiltered(
             filter = QuestionRepository.Filter(
                 status = query.status,
                 subjectId = query.subjectId,
                 notebookId = query.notebookId,
                 keyword = query.keyword
-            ),
-            page = query.page
+            )
         )
     }
 
@@ -201,38 +200,28 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setStatus(status: MasteryStatus?) {
         statusFilter.value = status
-        page.value = 0
     }
 
     fun setSubject(subjectId: Long?) {
         subjectFilter.value = subjectId
-        page.value = 0
     }
 
     fun setNotebook(notebookId: Long?) {
         notebookFilter.value = notebookId
-        page.value = 0
     }
 
     fun setKeyword(keyword: String) {
         keywordInput.value = keyword
-        page.value = 0
     }
 
     fun setDueOnly(value: Boolean) {
         dueOnly.value = value
-        page.value = 0
     }
 
     fun refreshLocalDate() {
         localDateRefreshes.tryEmit(Unit)
     }
 
-    fun loadMore() {
-        if (filteredCount.value > questions.value.size) {
-            page.value = page.value + 1
-        }
-    }
     fun saveVisibleQuestionOrder(ids: List<Long>) {
         if (ids.isEmpty()) return
         val merged = mergeVisibleOrder(questionOrder.value, ids)

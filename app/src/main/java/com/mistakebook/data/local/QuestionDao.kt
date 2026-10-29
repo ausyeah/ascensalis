@@ -37,6 +37,20 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface QuestionDao {
 
+    /**
+     * 按筛选条件取**全量**未删题（v0.0.59 起不再分页）。
+     *
+     * ## 为什么去掉 LIMIT/OFFSET
+     *
+     * 首页曾经按页翻（30 条/页），但 StateFlow 只持当前页：触底加载会把
+     * 整个列表**替换**成下一页而不是追加，超过 30 题后滚动体验直接坏掉。
+     * 打印页更是早已用 pageSize=Int.MAX_VALUE 绕过分页拿全量——分页没有
+     * 任何真实消费者。个人题库千级量级，全量查询 + LazyColumn 惰性组合
+     * 完全够用（与 allKnowledgePointsJson 的「千级一次加载」同口径）。
+     *
+     * **两处查询必须同步改**（列表与计数）。只改一处的话，
+     * 列表显示 3 条而角标写「共 12 条」，用户会以为漏了几条。
+     */
     @Query(
         """
         SELECT * FROM questions
@@ -55,17 +69,14 @@ interface QuestionDao {
             OR note LIKE '%' || :keyword || '%' ESCAPE '\'
           )
         ORDER BY updatedAt DESC
-        LIMIT :limit OFFSET :offset
         """
     )
-    fun observePage(
+    fun observeFiltered(
         statusName: String,
         subjectFilter: Long,
         notebookFilter: Long,
         reasonName: String,
-        keyword: String,
-        limit: Int,
-        offset: Int
+        keyword: String
     ): Flow<List<Question>>
 
     @Query(

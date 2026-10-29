@@ -95,14 +95,13 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
     private val questions: StateFlow<List<Question>> =
         combine(subjectId, status, keyword.debounce(300)) { s, st, kw -> Triple(s, st, kw) }
             .flatMapLatest { (s, st, kw) ->
-                container.questionRepository.observePage(
+                // v0.0.59 起列表查询就是全量（不再有分页参数）。
+                container.questionRepository.observeFiltered(
                     filter = com.mistakebook.data.repos.QuestionRepository.Filter(
                         subjectId = s,
                         status = st,
                         keyword = kw
-                    ),
-                    page = 0,
-                    pageSize = Int.MAX_VALUE
+                    )
                 )
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

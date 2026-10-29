@@ -501,26 +501,6 @@ fun HomeScreen(
                             }
                         )
                     }
-                    // 触底加载。
-                    //
-                    // 原来是 LaunchedEffect(state.questions.size)：**列表长度一变就触发**，
-                    // 删一条题也会触发一次加载；加载到底之后 size 不再变，
-                    // 于是再也触发不了，要靠别的路径补。
-                    // 改成监听「可见的最后一项」，只在真的快滚到底时才拉下一页。
-                    item {
-                        LaunchedEffect(questionListState) {
-                            snapshotFlow {
-                                val last =
-                                    questionListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
-                                        ?: -1
-                                last to state.questions.size
-                            }.distinctUntilChanged().collect { (lastVisible, size) ->
-                                if (size > 0 && lastVisible >= size - LOAD_MORE_THRESHOLD) {
-                                    viewModel.loadMore()
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -1115,6 +1095,3 @@ private fun NotebookDropdown(
  * 拇指能点中，又不至于把整张卡都推走（推太多用户会失去「这是同一张卡」的感觉）。
  */
 private val SwipeDeleteRevealWidth = 88.dp
-
-/** 距列表末尾还剩几项时开始拉下一页。留一点余量，滚到底前数据就位。 */
-private const val LOAD_MORE_THRESHOLD = 5

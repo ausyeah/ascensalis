@@ -329,16 +329,28 @@ class PomodoroViewModel(
             return
         }
         viewModelScope.launch {
-            val result = PomodoroRecorder.stopAndRecord(timer, dao)
-            PomodoroService.stop(getApplication())
+            val result = stopAndRecordNow()
             if (result != null) {
-                refreshStats()
                 message.value = result
-                // T9 事件驱动：完成番茄后主动刷新桌面小组件
-                com.mistakebook.widget.TodayWidgetProvider.refreshAll(getApplication())
             }
-            syncTimerUi()
         }
+    }
+
+    /**
+     * 「结束并落库」的可挂起实现：[stop] 与 [deleteTask] 共用。
+     * 挂起版本保证**落库完成后**调用方才继续——删任务场景必须如此，
+     * fire-and-forget 的 stop() 和删除之间没有顺序保证。
+     */
+    private suspend fun stopAndRecordNow(): String? {
+        val result = PomodoroRecorder.stopAndRecord(timer, dao)
+        PomodoroService.stop(getApplication())
+        if (result != null) {
+            refreshStats()
+            // T9 事件驱动：完成番茄后主动刷新桌面小组件
+            com.mistakebook.widget.TodayWidgetProvider.refreshAll(getApplication())
+        }
+        syncTimerUi()
+        return result
     }
 
     private fun taskName(): String {
@@ -474,12 +486,17 @@ class PomodoroViewModel(
                 message.value = "预置任务不可删除"
                 return@launch
             }
+            // 删的是正在计时的任务：必须**先**把这次计时落库、停掉服务，再删任务。
+            // 旧顺序（先 deleteTask，后 fire-and-forget 的 stop）下 sessions 外键
+            // 已把任务级联带走，stopAndRecord 再插 taskId=已删id 的记录必然
+            // SQLiteConstraintException——viewModelScope 没有异常兜底，
+            // 专注满 1 分钟即崩（v0.0.59 P0-4）。刚落的这条明细会随任务
+            // CASCADE 一起删，与「任务及其记录已删除」的提示一致。
+            if (timer.state.value.taskId == id) {
+                stopAndRecordNow()
+            }
             dao.deleteTask(id)
             if (selectedTaskId.value == id) selectedTaskId.value = null
-            if (timer.state.value.taskId == id) {
-                // 删的是正在计时的任务：先收掉这次计时（不丢已专注的时长记录）
-                stop(save = true)
-            }
             editingTask.value = null
             message.value = "任务及其记录已删除"
         }
