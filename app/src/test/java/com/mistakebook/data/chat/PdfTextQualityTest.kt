@@ -34,8 +34,9 @@ class PdfTextQualityTest {
     @Test
     fun `PDF 原始字节流判为不可用`() {
         // 用户截图里的真实形态：可打印字符里混着大量控制字节
+        // （Kotlin 不支持 \x 十六进制转义，必须用 \u）
         val garbage = buildString {
-            append("JeMä\x00\x01\x02\x03\x04")
+            append("JeMä\u0000\u0001\u0002\u0003\u0004")
             repeat(20) { append("Obj\u0007\u000b\u000e endobj\u001f") }
         }
         assertFalse(PdfTextQuality.isUsable(garbage))
