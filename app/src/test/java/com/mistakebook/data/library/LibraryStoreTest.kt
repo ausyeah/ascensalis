@@ -28,7 +28,7 @@ class LibraryStoreTest {
     @Test
     fun `simple names resolve inside root`() {
         val root = root()
-        listOf("a.md", "笔记.txt", "data.json", "表.csv").forEach { name ->
+        listOf("a.md", "笔记.txt", "data.json", "表.csv", "资料.docx", "试卷.pdf").forEach { name ->
             val f = LibraryStore.resolveLibraryPath(root, name)
             assertNotNull("应接受 $name", f)
             assertTrue(f!!.path.startsWith(root.canonicalPath))
@@ -55,8 +55,8 @@ class LibraryStoreTest {
     @Test
     fun `unsupported or missing extension is rejected`() {
         val root = root()
-        assertNull(LibraryStore.resolveLibraryPath(root, "file.pdf"))
         assertNull(LibraryStore.resolveLibraryPath(root, "file.exe"))
+        assertNull(LibraryStore.resolveLibraryPath(root, "file.doc"))
         assertNull(LibraryStore.resolveLibraryPath(root, "noext"))
         assertNull(LibraryStore.resolveLibraryPath(root, ""))
         assertNull(LibraryStore.resolveLibraryPath(root, "  "))
@@ -161,5 +161,107 @@ class LibraryStoreTest {
             mapOf("name" to "e.md", "old" to "ZZZ", "content" to "CCC")
         )
         assertFalse(r.ok)
+    }
+
+    // ---- 二进制文档（.docx / .pdf）----
+
+    /** 组一个最小 docx（zip + word/document.xml），用于提取测试。 */
+    private fun docxWith(paragraphs: List<String>): ByteArray {
+        val body = paragraphs.joinToString("") { p ->
+            "<w:p><w:r><w:t>$p</w:t></w:r></w:p>"
+        }
+        val xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
+            "<w:body>$body</w:body></w:document>"
+        val out = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { zip ->
+            zip.putNextEntry(java.util.zip.ZipEntry("word/document.xml"))
+            zip.write(xml.toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
+        }
+        return out.toByteArray()
+    }
+
+    /** 组一个最小 PDF，内容流可选 Flate 压缩。 */
+    private fun pdfWithContent(content: String, flate: Boolean): ByteArray {
+        val body = "BT\n$content\nET"
+        val bodyBytes = body.toByteArray(Charsets.ISO_8859_1)
+        val streamBytes: ByteArray
+        val filter = if (flate) {
+            val deflater = java.util.zip.Deflater()
+            deflater.setInput(bodyBytes)
+            deflater.finish()
+            val buf = java.io.ByteArrayOutputStream()
+            val tmp = ByteArray(4096)
+            while (!deflater.finished()) {
+                val n = deflater.deflate(tmp)
+                buf.write(tmp, 0, n)
+            }
+            deflater.end()
+            streamBytes = buf.toByteArray()
+            " /Filter /FlateDecode"
+        } else {
+            streamBytes = bodyBytes
+            ""
+        }
+        val text = "%PDF-1.4\n" +
+            "1 0 obj\n<< /Length ${streamBytes.size}$filter >>\n" +
+            "stream\n" + String(streamBytes, Charsets.ISO_8859_1) + "\nendstream\nendobj\n" +
+            "trailer\n<< /Root 1 0 R >>\n%%EOF\n"
+        return text.toByteArray(Charsets.ISO_8859_1)
+    }
+
+    @Test
+    fun `docx paragraphs are extracted`() {
+        val root = root()
+        val f = LibraryStore.resolveLibraryPath(root, "作业.docx")!!
+        f.writeBytes(docxWith(listOf("第一段 &amp; 标题", "第二段")))
+        val (text, truncated) = LibraryStore.read(f)!!
+        assertEquals("第一段 & 标题\n第二段", text)
+        assertFalse(truncated)
+    }
+
+    @Test
+    fun `pdf literal strings are extracted with line breaks`() {
+        val root = root()
+        val f = LibraryStore.resolveLibraryPath(root, "讲义.pdf")!!
+        f.writeBytes(
+            pdfWithContent("/F1 12 Tf 72 720 Td (Hello \\(World\\)) Tj 0 -20 Td (Line Two) Tj", flate = false)
+        )
+        val (text, _) = LibraryStore.read(f)!!
+        assertEquals("Hello (World)\nLine Two", text)
+    }
+
+    @Test
+    fun `pdf flate stream is inflated before extraction`() {
+        val root = root()
+        val f = LibraryStore.resolveLibraryPath(root, "压缩.pdf")!!
+        f.writeBytes(pdfWithContent("(Deep inside) Tj", flate = true))
+        val (text, _) = LibraryStore.read(f)!!
+        assertEquals("Deep inside", text)
+    }
+
+    @Test
+    fun `pdf without text yields hint instead of null`() {
+        val root = root()
+        val f = LibraryStore.resolveLibraryPath(root, "扫描件.pdf")!!
+        f.writeBytes(pdfWithContent("/F1 1 Tf 0 0 Td", flate = false))
+        val (text, truncated) = LibraryStore.read(f)!!
+        assertTrue(text.contains("未能"))
+        assertFalse(truncated)
+    }
+
+    @Test
+    fun `tool cannot write or edit binary docs`() {
+        val root = root()
+        val w = LibraryTool.dispatch(root, "library_write", mapOf("name" to "a.pdf", "content" to "x"))
+        assertFalse("应拒绝写入 pdf", w.ok)
+        val f = LibraryStore.resolveLibraryPath(root, "a.pdf")!!
+        f.writeBytes(pdfWithContent("(keep) Tj", flate = false))
+        val e = LibraryTool.dispatch(root, "library_edit", mapOf("name" to "a.pdf", "content" to "x"))
+        assertFalse("应拒绝编辑 pdf", e.ok)
+        val r = LibraryTool.dispatch(root, "library_read", mapOf("name" to "a.pdf"))
+        assertTrue(r.ok)
+        assertTrue(r.message.contains("keep"))
     }
 }
