@@ -939,6 +939,16 @@ class ChatViewModel(
                 val ids = repository.attachPrepared(message.id, sessionId, attachments)
                 repository.setAttachmentIds(message.id, ids)
             }
+            // v0.0.58：@资料库 选中的文件登记到消息上，只为**历史可见**
+            //（原文已由生成服务注入本轮 system 上下文，这里不再重复发送）。
+            // 用户反馈「勾选了资料库没有显示具体文件，在对话历史里」。
+            if (libraryPaths.isNotEmpty()) {
+                repository.attachLibraryFiles(
+                    messageId = message.id,
+                    sessionId = sessionId,
+                    files = libraryPaths.map { File(it) }.filter { it.isFile }
+                )
+            }
         }
         // **模型不识图时，先让 MinerU 把图片读一遍。**
         //
@@ -1227,6 +1237,47 @@ class ChatViewModel(
                         kind = result.kind,
                         // 准备失败的文件仍留在列表里，用户能看到「处理失败」并移除；
                         // 直接从 UI 消失的话用户会以为是自己没选上
+                        status = if (result.ok) AttachmentStatus.READY else AttachmentStatus.FAILED,
+                        sizeBytes = result.sizeBytes,
+                        extractedChars = result.extractedChars,
+                        errorMessage = result.errorMessage,
+                        prepared = result.takeIf { it.ok }
+                    )
+                }
+            )
+            // v0.0.58：PDF 抽不出文字时，把栅格化出来的页面图补成图片附件，
+            // 让模型用识图 / OCR 工具读（用户反馈「发送 PDF 不能正确调用工具读取识别」）。
+            result.pageImages.forEach { path ->
+                addPageImageAttachment(path)
+            }
+        }
+    }
+
+    /** 把 PDF 栅格化出的页面图加成一条图片附件（复用图片压缩/降噪链路）。 */
+    private fun addPageImageAttachment(path: String) {
+        val sessionId = _state.value.sessionId
+        if (sessionId == 0L) return
+        val file = File(path)
+        if (!file.isFile) return
+        val localId = ++attachmentSeq
+        _state.value = _state.value.copy(
+            pendingAttachments = _state.value.pendingAttachments + PendingAttachment(
+                id = localId,
+                fileName = file.name,
+                kind = AttachmentKind.IMAGE,
+                status = AttachmentStatus.PREPARING
+            )
+        )
+        viewModelScope.launch {
+            val longEdge = settingsStore.settings.first().imageLongEdgePx
+            val result = preparer.prepareFile(sessionId, file, longEdge)
+            _state.value = _state.value.copy(
+                pendingAttachments = _state.value.pendingAttachments.map {
+                    if (it.id != localId) it
+                    else PendingAttachment(
+                        id = localId,
+                        fileName = result.fileName,
+                        kind = result.kind,
                         status = if (result.ok) AttachmentStatus.READY else AttachmentStatus.FAILED,
                         sizeBytes = result.sizeBytes,
                         extractedChars = result.extractedChars,

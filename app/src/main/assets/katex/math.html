@@ -257,6 +257,15 @@
       out.style.fontSize = Math.max(8, Math.floor(BASE_PX * maxW / rect.width)) + 'px';
       rect = out.getBoundingClientRect();
     }
+    /* v0.0.58: font already at the 8px floor and still too wide -> scale it.
+       Without this the bitmap exceeds the 2048px cap and Kotlin clips the
+       right side off (user: formulas cut on the right). getBoundingClientRect
+       accounts for transforms, so the reported w/h stay truthful. */
+    if (rect.width > maxW && rect.width > 0) {
+      out.style.transformOrigin = 'left top';
+      out.style.transform = 'scale(' + (maxW / rect.width) + ')';
+      rect = out.getBoundingClientRect();
+    }
 
     // fs 是本张位图实际用的字号（设备像素）。Android 侧按「目标字号 / fs」等比缩放，
     // 这样公式之间的相对大小才会一致；只按包围盒高度缩放会把单个字母撑得巨大。
@@ -325,6 +334,13 @@
       if (rect0.width > maxW) {
         fontSize = Math.max(8, Math.floor(BASE_PX * maxW / rect0.width));
         holder.style.fontSize = fontSize + 'px';
+      }
+      /* v0.0.58: same fallback as render() - scale instead of letting the
+         bitmap overflow past the capture cap (which silently cuts the right). */
+      var rect0b = holder.getBoundingClientRect();
+      if (rect0b.width > maxW && rect0b.width > 0) {
+        holder.style.transformOrigin = 'left top';
+        holder.style.transform = 'scale(' + (maxW / rect0b.width) + ')';
       }
       // 暂存 fontSize，等字体就绪后连同最终 rect 一起输出
       holders[i].__fontSize = fontSize;

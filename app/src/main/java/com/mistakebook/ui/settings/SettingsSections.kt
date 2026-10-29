@@ -1754,6 +1754,18 @@ internal fun LlmUsageSection(container: com.mistakebook.di.AppContainer) {
                 label = stringResource(R.string.settings_usage_cached),
                 value = formatCount(snap.llmCachedTokens)
             )
+            // v0.0.58：缓存命中这一行的口径要说清。
+            // 用户反馈「缓存命中肯定有问题，从来没变过」——真实情况是
+            // 只有服务端在 usage 里上报 `prompt_cache_hit_tokens` 时才统计得到，
+            // 多数中转站/模型不给这个字段，于是这一行会长期不动。
+            // 不说清楚的话，用户只会以为是我们算错了。
+            Text(
+                text = "缓存命中仅统计服务端上报了缓存命中 token 的调用；" +
+                    "当前模型若不上报该字段，这一行会保持不变。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
             Text(
                 text = stringResource(R.string.settings_usage_hint),
                 style = MaterialTheme.typography.bodySmall,

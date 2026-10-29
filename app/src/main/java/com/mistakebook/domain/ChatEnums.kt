@@ -51,6 +51,15 @@ enum class AttachmentKind {
     DOCX,
 
     /**
+     * 资料库文件（v0.0.58）：用户 @资料库 选中、本轮注入过上下文的文件。
+     *
+     * 只为**在对话历史里可见**而存在——不参与构造请求（原文已由服务
+     * 注入 system 上下文，见 `ChatGenerationService` 的 extraContext）。
+     * 用户反馈「勾选了资料库没有显示具体文件，在对话历史里」：
+     * 以前注入是一次性的，发完就查无此物。
+     */
+    LIBRARY,
+    /**
      * Excel 表格（xlsx；老版 xls 走同一分支但会给「请另存为」提示）。
      *
      * 抽成以 `\t` 分列、`\n` 分行的文本，见 [com.mistakebook.data.chat.XlsxText]。

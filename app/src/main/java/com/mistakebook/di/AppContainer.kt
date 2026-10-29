@@ -241,7 +241,7 @@ class AppContainer(context: Context) {
         com.mistakebook.data.chat.searchHttpClient()
     }
 
-    val llmClient: LlmClient by lazy { LlmClient(llmApi) }
+    val llmClient: LlmClient by lazy { LlmClient(llmApi, usageStatsStore) }
 
     /** 生图客户端（渠道由设置里配置，见 [com.mistakebook.data.prefs.ImageProfile]）。 */
     val imageGenClient: ImageGenClient by lazy { ImageGenClient() }

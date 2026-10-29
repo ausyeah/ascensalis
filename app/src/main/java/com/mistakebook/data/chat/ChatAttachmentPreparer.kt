@@ -76,7 +76,15 @@ data class PreparedAttachment(
     val heightPx: Int = 0,
     val textExcerpt: String = "",
     val extractedChars: Int = 0,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /**
+     * 抽不出文字时栅格化出来的**页面图片**路径（v0.0.58）。
+     *
+     * PDF 是扫描件 / 特殊字体编码时，客户端自己把页面转成图，
+     * 由模型用识图 / OCR 工具读——而不是把乱码发给模型换一句
+     * 「请把页面转成图片后发给我」。
+     */
+    val pageImages: List<String> = emptyList()
 ) {
     val ok: Boolean get() = errorMessage == null
 }
@@ -113,7 +121,7 @@ class ChatAttachmentPreparer(
                 val size = copyTo(uri, target)
                 when (kind) {
                     AttachmentKind.IMAGE -> processImage(target, fileName, size, longEdgePx)
-                    AttachmentKind.PDF -> processPdf(target, fileName, size)
+                    AttachmentKind.PDF -> processPdf(target, fileName, size, sessionId)
                     AttachmentKind.TEXT -> processPlainText(target, fileName, size)
                     AttachmentKind.DOCX -> processDocx(target, fileName, size)
                     AttachmentKind.XLSX -> processSpreadsheet(target, fileName, size)
@@ -136,8 +144,52 @@ class ChatAttachmentPreparer(
             }
         }
 
-    // ------------------------------------------------------------ 处理
+    /**
+     * 准备一个**已经在会话目录里**的本地文件（v0.0.58：PDF 栅格化出的页面图）。
+     *
+     * 与 [prepare] 的区别：不走 SAF、不拷贝——文件本来就在
+     * `appFiles.chatDir(sessionId)` 里，再拷一份纯属浪费。
+     */
+    suspend fun prepareFile(
+        sessionId: Long,
+        file: File,
+        longEdgePx: Int
+    ): PreparedAttachment = withContext(Dispatchers.IO) {
+        if (!file.isFile) {
+            return@withContext PreparedAttachment(
+                localPath = "",
+                fileName = file.name,
+                mimeType = "",
+                kind = AttachmentKind.OTHER,
+                errorMessage = "文件不存在"
+            )
+        }
+        val kind = classify(file.name, null)
+        runCatching {
+            when (kind) {
+                AttachmentKind.IMAGE ->
+                    processImage(file, file.name, file.length(), longEdgePx)
 
+                else -> PreparedAttachment(
+                    localPath = file.absolutePath,
+                    fileName = file.name,
+                    mimeType = "",
+                    kind = kind,
+                    sizeBytes = file.length()
+                )
+            }
+        }.getOrElse { throwable ->
+            PreparedAttachment(
+                localPath = "",
+                fileName = file.name,
+                mimeType = "",
+                kind = kind,
+                errorMessage = throwable.message ?: "处理失败"
+            )
+        }
+    }
+
+    // ------------------------------------------------------------ 处理
     private fun copyTo(uri: Uri, target: File): Long =
         context.contentResolver.openInputStream(uri)?.let {
             copyLimited(it, target, MAX_FILE_BYTES)
@@ -178,11 +230,54 @@ class ChatAttachmentPreparer(
         }
     }
 
-    private fun processPdf(file: File, fileName: String, size: Long): PreparedAttachment {
+    private fun processPdf(
+        file: File,
+        fileName: String,
+        size: Long,
+        sessionId: Long
+    ): PreparedAttachment {
         val pages = PdfTextExtractor.extractAll(file.readBytes())
         val text = pages.filter { it.isNotBlank() }.joinToString("\n")
-        return excerpt(file, fileName, "application/pdf", AttachmentKind.PDF, size, text)
+        // v0.0.58：抽出来的东西**先过质量检查**。
+        // 非标准内容流的兜底路径会把 PDF 二进制原文当文本返回（用户实测
+        // 「已提取 631 字」其实是一串乱码），旧逻辑非空即成功，
+        // 于是乱码被发给模型，模型只能让用户自己去转图片。
+        if (PdfTextQuality.isUsable(text)) {
+            return excerpt(file, fileName, "application/pdf", AttachmentKind.PDF, size, text)
+        }
+        // 抽不出可读文字 → 栅格化成页面图，让模型用识图/OCR 工具读。
+        val pageImages = PdfPageImages.render(file) { index ->
+            appFiles.chatFile(
+                sessionId,
+                "pdfpage_${System.currentTimeMillis()}_$index",
+                "jpg"
+            )
+        }
+        return PreparedAttachment(
+            localPath = file.absolutePath,
+            fileName = fileName,
+            mimeType = "application/pdf",
+            kind = AttachmentKind.PDF,
+            sizeBytes = size,
+            // 这段「正文」是给模型看的说明：它会随文档摘要一起进上下文，
+            // 明确告诉模型「文字没抽出来，页面图已经在了，去调识图/OCR 工具」。
+            // 留空的话模型只看到「未能提取到正文」，不知道该干什么。
+            textExcerpt = PDF_PAGE_IMAGE_NOTE,
+            extractedChars = 0,
+            errorMessage = if (pageImages.isEmpty()) {
+                "没有从 $fileName 里读到可读文字（可能是扫描件或损坏），且页面转图失败"
+            } else {
+                null
+            },
+            pageImages = pageImages
+        )
     }
+
+    /** PDF 转图后写给模型的说明（v0.0.58）。 */
+    private const val PDF_PAGE_IMAGE_NOTE =
+        "（该 PDF 的文字层无法提取，可能是扫描件或使用了特殊字体编码。" +
+            "本消息已附带它的页面图片，请调用 describe_image 或 ocr_image 读取图片内容，" +
+            "不要向用户索要转换后的文件。）"
 
     private fun processPlainText(file: File, fileName: String, size: Long): PreparedAttachment {
         val text = decodePlainText(file.readBytes())

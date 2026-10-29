@@ -339,6 +339,40 @@ class ChatRepository(
 
     suspend fun updateAttachment(attachment: ChatAttachment) = chatDao.updateAttachment(attachment)
 
+    /**
+     * 把本轮 @资料库 注入的文件登记到消息上（v0.0.58）。
+     *
+     * 只为**历史可见**：气泡里显示文件芯片，用户回看时知道这一轮参考了哪些资料。
+     * 不参与构造请求（[AttachmentKind.LIBRARY] 在 toOutgoing 里被过滤）。
+     *
+     * @return 落库后的附件 id（目前没有第二写入方，返回只为对称/调试）。
+     */
+    suspend fun attachLibraryFiles(
+        messageId: Long,
+        sessionId: Long,
+        files: List<java.io.File>
+    ): List<Long> {
+        if (files.isEmpty()) return emptyList()
+        val now = System.currentTimeMillis()
+        return files.map { file ->
+            chatDao.insertAttachment(
+                ChatAttachment(
+                    messageId = messageId,
+                    sessionId = sessionId,
+                    kind = AttachmentKind.LIBRARY,
+                    localPath = file.absolutePath,
+                    fileName = file.name,
+                    mimeType = "",
+                    status = com.mistakebook.domain.AttachmentStatus.READY,
+                    sizeBytes = file.length(),
+                    textExcerpt = "",
+                    extractedChars = 0,
+                    errorMessage = null,
+                    createdAt = now
+                )
+            )
+        }
+    }
     suspend fun deleteAttachment(attachment: ChatAttachment) {
         chatDao.deleteAttachment(attachment.id)
         deleteAttachmentFile(attachment)
@@ -431,6 +465,9 @@ class ChatRepository(
         }
         val history = raw.filterNot { it.id == summaryMessage?.id }
             .map { it.toOutgoing(supportsVision, visionToolAvailable, ocrToolAvailable) }
+        // v0.0.58：资料库附件只是「历史可见」的标记，原文已注入 system 上下文，
+        // 不能重复塞进请求（否则同一份资料每轮都占一遍上下文）。
+        // 所以 toOutgoing 里按 kind 过滤，LIBRARY 不出现在 usable 集合中。
         return ChatContextAssembler.assemble(
             systemPrompt = ChatPrompts.SYSTEM,
             questionContext = systemContext,
@@ -446,7 +483,10 @@ class ChatRepository(
         ocrToolAvailable: Boolean = false
     ): OutgoingMessage {
         val attachments = attachmentIds().mapNotNull { chatDao.findAttachment(it) }
-        val usable = attachments.filter { it.status == AttachmentStatus.READY }
+        val usable = attachments.filter {
+            // v0.0.58：LIBRARY 只是历史可见的标记，不进请求上下文
+            it.status == AttachmentStatus.READY && it.kind != AttachmentKind.LIBRARY
+        }
         val imageAttachments = usable.filter { it.kind == AttachmentKind.IMAGE }
         val docAttachments = usable.filter { it.kind != AttachmentKind.IMAGE }
         // 先把「实际会发出去的图片」算出来，清单据此如实描述。

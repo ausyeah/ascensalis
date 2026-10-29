@@ -356,19 +356,21 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 return@launch
             }
             tavilyUsageState.value = tavilyUsageState.value.copy(loading = true, error = null)
-            val usage = com.mistakebook.data.chat.TavilySearch.fetchUsage(
+            val result = com.mistakebook.data.chat.TavilySearch.fetchUsage(
                 container.searchHttpClient,
                 key
             )
-            tavilyUsageState.value = if (usage != null) {
-                TavilyUsageState(usage = usage, loading = false, error = null)
-            } else {
-                // 失败时保留 usage（见方法注释），只更新 loading / error。
-                TavilyUsageState(
-                    usage = tavilyUsageState.value.usage,
-                    loading = false,
-                    error = "查询失败：请检查 Key 是否正确、网络是否可用"
-                )
+            tavilyUsageState.value = when (result) {
+                is com.mistakebook.data.chat.UsageResult.Ok ->
+                    TavilyUsageState(usage = result.usage, loading = false, error = null)
+
+                is com.mistakebook.data.chat.UsageResult.Failed ->
+                    // 失败时保留上一次的成功结果（见方法注释），只把原因显示出来。
+                    TavilyUsageState(
+                        usage = tavilyUsageState.value.usage,
+                        loading = false,
+                        error = result.message
+                    )
             }
         }
     }

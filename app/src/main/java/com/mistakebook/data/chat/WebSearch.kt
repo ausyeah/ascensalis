@@ -165,6 +165,17 @@ object TavilySearch {
             }
     }
 
+/**
+ * 额度查询结果（v0.0.58）。
+ *
+ * 为什么不用 Usage?：null 分不清「Key 错」「没网」「服务端炸了」，
+ * 而这三种的下一步动作完全不同。带上 message，界面才能说人话。
+ */
+sealed interface UsageResult {
+    data class Ok(val usage: TavilySearch.Usage) : UsageResult
+    data class Failed(val message: String) : UsageResult
+}
+
     /**
      * 纯解析函数（可单测）：`GET /usage` 响应体 → [Usage]。
      *
@@ -191,14 +202,14 @@ object TavilySearch {
     /**
      * 查询额度：`GET https://api.tavily.com/usage`，Bearer 鉴权。
      *
-     * 返回 null 表示这次没查成（网络错误 / Key 无效 / 响应异常）。
-     * 调用方据此决定是「显示查不到」还是「显示真实额度」，
-     * **不要**把失败当成 0 用——那会让用户以为额度用光了。
+     * 返回 [UsageResult.Failed] 表示这次没查成（网络错误 / Key 无效 / 响应异常），
+     * **message 里带上真实原因**（HTTP 状态或异常类型）——早先只回 null，
+     * 界面只能显示「查询失败」，用户完全不知道该改 Key 还是开代理。
      */
     suspend fun fetchUsage(
         client: OkHttpClient,
         apiKey: String
-    ): Usage? {
+    ): UsageResult {
         val request = Request.Builder()
             .url("https://api.tavily.com/usage")
             .header("Authorization", "Bearer $apiKey")
@@ -207,10 +218,28 @@ object TavilySearch {
         return runCatching {
             client.newCall(request).execute().use { r ->
                 val text = r.body?.string().orEmpty()
-                if (!r.isSuccessful) return@use null
-                parseUsage(text)
+                if (!r.isSuccessful) {
+                    return@use UsageResult.Failed(usageErrorMessage(r.code, text))
+                }
+                UsageResult.Ok(parseUsage(text))
             }
-        }.getOrNull()
+        }.getOrElse { t ->
+            UsageResult.Failed(
+                "查询失败：${t.javaClass.simpleName}（${t.message ?: "网络不可达"}）" +
+                    "。若在国内网络，请先在设置里配置代理或开启 VPN"
+            )
+        }
+    }
+
+    /** HTTP 非 2xx → 给人看的原因。 */
+    private fun usageErrorMessage(code: Int, body: String): String = when (code) {
+        401, 403 -> "查询失败：Key 无效或已失效（HTTP $code）"
+        429 -> "查询失败：查询太频繁，稍后再试（HTTP $code）"
+        in 500..599 -> "查询失败：Tavily 服务端异常（HTTP $code）"
+        else -> {
+            val snippet = body.take(120).ifBlank { "" }
+            "查询失败：HTTP $code${if (snippet.isEmpty()) "" else " $snippet"}"
+        }
     }
 
     /** JSON 数字字段，兼容整数 / 浮点 / 缺少。 */
@@ -318,9 +347,17 @@ object DeepSeekSearch {
 fun pickSearchKey(explicitKey: String?, fallbackKey: String?): String? =
     explicitKey?.takeIf { it.isNotBlank() } ?: fallbackKey?.takeIf { it.isNotBlank() }
 
-/** 建搜索专用的 OkHttpClient：比对话更长的超时（服务端搜索要真爬网页）。 */
+/**
+ * 建搜索专用的 OkHttpClient：比对话更长的超时（服务端搜索要真爬网页）。
+ *
+ * v0.0.58：补上 `NetworkRouter.proxySelector`。此前这个 client 是裸建的，
+ * 用户在网络代理里配的规则对它完全不生效——国内网络下 Tavily 的
+ * `/usage` 与 `/search` 都注定连不上，而界面只会显示「查询失败」。
+ */
 fun searchHttpClient(): OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(15, TimeUnit.SECONDS)
     .readTimeout(60, TimeUnit.SECONDS)
     .callTimeout(90, TimeUnit.SECONDS)
+    .retryOnConnectionFailure(true)
+    .proxySelector(com.mistakebook.net.NetworkRouter.proxySelector)
     .build()

@@ -138,6 +138,23 @@ fun MistakeBookNavHost(
             container.pendingChatAttachmentPaths = paths
         }
     }
+
+    /**
+     * v0.0.58：对话拍照的直接交接（不裁剪、不识别）。
+     *
+     * 相机页「完成」→ 取走本批**原图** → 交给
+     * [AppContainer.pendingChatAttachmentPaths] → ChatScreen 的 LaunchedEffect
+     * 逐张转成待发附件（走既有的附件准备管线：压缩 / data URL / OCR 文字）。
+     *
+     * 为什么不再走裁切接力：对话里的图是要**原样发给模型**的，
+     * 裁切是错题识别为了提准才做的加工，裁掉的内容模型反而看不到了。
+     */
+    fun submitChatBatchRaw() {
+        val files = container.captureBatch.drainRaw()
+        if (files.isNotEmpty()) {
+            container.pendingChatAttachmentPaths = files.map { it.absolutePath }
+        }
+    }
     androidx.compose.runtime.LaunchedEffect(filterDueRequest) {
         if (filterDueRequest > 0) {
             navController.navigate(Routes.HOME) {
@@ -250,18 +267,20 @@ fun MistakeBookNavHost(
                     navController.popBackStack()
                 },
                 onStartBatchCrop = {
-                    // F6/T2：点「完成」从第一张未裁的原图开始逐张接力裁切。
-                    // QUESTION 批次裁完直接提交识别；CHAT 批次裁完交接回对话页。
+                    // F6/T2：点「完成」。
+                    // - QUESTION：从第一张未裁的原图开始逐张接力裁切，裁完提交识别；
+                    // - CHAT（v0.0.58）：**不裁、不识别**，把原图整体交回会话当图片附件，
+                    //   由模型自己决定调 OCR / 识图工具。前端相机是复用的，后端在这里分叉。
+                    if (container.cameraPurpose == AppContainer.CameraPurpose.CHAT) {
+                        submitChatBatchRaw()
+                        navController.popBackStack()
+                        return@onStartBatchCrop
+                    }
                     val batch = container.captureBatch
                     if (batch.paths.isNotEmpty()) {
                         navController.navigate(Routes.crop(batch.paths.first())) {
                             popUpTo(Routes.CAPTURE) { inclusive = true }
                         }
-                    } else if (container.cameraPurpose ==
-                        AppContainer.CameraPurpose.CHAT
-                    ) {
-                        // 无待裁原图：CHAT 批次全部处理完 → 交接回会话
-                        submitChatBatch()
                     } else {
                         submitCaptureBatch()
                     }

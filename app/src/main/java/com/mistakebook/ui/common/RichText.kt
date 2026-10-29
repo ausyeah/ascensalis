@@ -628,13 +628,18 @@ private fun MathImage(
             )
             val w = fitted.width.coerceAtLeast(1f)
             val h = fitted.height.coerceAtLeast(1f)
+            // v0.0.58：双保险——理论上有 fit 的 maxWidthPx 就不会越界，
+            // 但「公式右边被裁掉」是真实反馈过的bug，这里按约束再夹一次，
+            // 宁可小一像素也不让图探出容器被 Card 的圆角裁掉。
+            val safeW = w.coerceAtMost(maxWidthPx).coerceAtLeast(1f)
+            val safeH = if (safeW < w) h * (safeW / w) else h
             Image(
                 bitmap = image.asImageBitmap(),
                 contentDescription = latex,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.size(
-                    with(density) { w.toDp() },
-                    with(density) { h.toDp() }
+                    with(density) { safeW.toDp() },
+                    with(density) { safeH.toDp() }
                 )
             )
         }

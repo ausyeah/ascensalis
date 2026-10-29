@@ -41,10 +41,20 @@ class HtmlExporter(private val mathRenderer: MathRenderer) {
      *   不知道设备的 WebView 版本支不支持 MathML（MathML Core 要 Chrome 109+），
      *   而 KaTeX 在 [com.mistakebook.math.MathRenderer] 里已经用了好久。
      */
-    enum class FormulaMode { MATHML, KATEX }
+    /**
+     * 公式渲染模式。
+     *
+     * - [BITMAP]：**默认**。栅格化成 PNG 内联进 HTML。Android WebView 不支持
+     *   MathML，KaTeX 的 `<annotation>` 原文会被当普通文本显示出来——
+     *   用户实测「PDF 打印出来公式是一串 LaTeX 源码」正是这个原因。
+     *   位图在屏幕预览与 PDF 导出两条链路上行为一致，所见即所得。
+     * - [MATHML]：保留给将来支持 MathML 的渲染目标。
+     * - [KATEX]：保留给带 KaTeX 脚本的页面（导出 PDF 的 WebView 用不到）。
+     */
+    enum class FormulaMode { BITMAP, MATHML, KATEX }
 
     /** 只生成 HTML，不写文件。[HtmlPdfExporter] 直接复用这一份。 */
-    suspend fun buildHtml(doc: ExportDoc, mode: FormulaMode = FormulaMode.MATHML): HtmlDocument {
+    suspend fun buildHtml(doc: ExportDoc, mode: FormulaMode = FormulaMode.BITMAP): HtmlDocument {
         val skipped = mutableListOf<String>()
         val body = buildString {
                 append(DOCTYPE)
@@ -86,7 +96,7 @@ class HtmlExporter(private val mathRenderer: MathRenderer) {
 
     /** 写文件。分享用的 HTML 走这里，用原生 MathML（自包含、无 JS、离线可看）。 */
     suspend fun export(doc: ExportDoc, target: File): ExportResult = withContext(Dispatchers.IO) {
-        val built = buildHtml(doc, FormulaMode.MATHML)
+        val built = buildHtml(doc, FormulaMode.BITMAP)
         target.parentFile?.mkdirs()
         target.writeText(built.html, Charsets.UTF_8)
         ExportResult(file = target, skipped = built.skipped)
@@ -173,6 +183,20 @@ class HtmlExporter(private val mathRenderer: MathRenderer) {
     }
 
     private suspend fun renderFormula(token: RichToken.MathToken, mode: FormulaMode): String {
+        if (mode == FormulaMode.BITMAP) {
+            // v0.0.58 起的默认路径：位图。见 [FormulaMode.BITMAP] 的说明。
+            val bitmap = mathRenderer.render(token.latex, token.display)
+            val dataUrl = bitmap?.let { renderBitmapAsDataUrl(it.bitmap) }
+            val latexText = escape(token.latex)
+            return if (dataUrl != null) {
+                val cls = if (token.display) "formula block" else "formula"
+                """<img class="$cls" src="$dataUrl" alt="$latexText">"""
+            } else {
+                // 位图也没出来（公式非法 / 渲染器未就绪）：退化成等宽源码，
+                // 并在注释里留痕，方便定位是渲染失败而不是样式问题。
+                """<code class="latex">$latexText</code>"""
+            }
+        }
         if (mode == FormulaMode.KATEX) {
             // 留给页面上的 KaTeX 脚本渲染。data-tex 逃义后就是原始 LaTeX。
             val display = if (token.display) "1" else "0"

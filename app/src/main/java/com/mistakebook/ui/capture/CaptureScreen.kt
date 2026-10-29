@@ -393,45 +393,6 @@ fun CaptureScreen(
             )
         }
 
-        // 连拍批次：计数 + 「完成」（v0.0.57 起固定**右下角**）。
-        // 早先放在顶部居中，单手操作时够不着；放右下角既顺手又不挡取景。
-        if (batchActive) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 28.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.92f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = stringResource(
-                        if (isChatPurpose) R.string.capture_chat_batch_count
-                        else R.string.capture_batch_count,
-                        batchSize
-                    ),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    style = MaterialTheme.typography.labelMedium
-                )
-                TextButton(
-                    onClick = onStartBatchCrop,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text(
-                        stringResource(
-                            if (isChatPurpose) R.string.capture_chat_batch_done
-                            else R.string.capture_batch_done
-                        )
-                    )
-                }
-            }
-        }
-
         if (errorText != null) {
             CapturePill(
                 modifier = Modifier.align(Alignment.Center),
@@ -457,9 +418,14 @@ fun CaptureScreen(
             }
         }
 
+        // 连拍批次：计数 + 「完成」。
+        // v0.0.58：改到**底部操作区上方、右对齐**。v0.0.57 曾按「右下角」
+        // 浮在预览上，实测与快门行/关闭键重叠（用户反馈「右下角重合有问题」）——
+        // 底部操作区高度随内容变化，用固定 padding 永远贴不准。
+        // 放进底部 Column 里当它的一行，位置由布局天然保证，不可能重合。
         // ---------------------------------------------------------- 底部操作区
         //
-        // 三层结构：引导语 → 控制排 → 快门行。
+        // 三层结构：批次卡 → 引导语 → 控制排 → 快门行。
         // 控制排收编了原先散落在顶部的闪光灯/前后摄与 OCR 档位——
         // 拍摄时眼睛盯着取景器，手边能摸到的才是入口，浮在预览上方的
         // 细碎图标既难按也干扰取景。
@@ -471,6 +437,47 @@ fun CaptureScreen(
                 .padding(bottom = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (batchActive) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.92f))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (isChatPurpose) R.string.capture_chat_batch_count
+                                else R.string.capture_batch_count,
+                                batchSize
+                            ),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        TextButton(
+                            onClick = onStartBatchCrop,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (isChatPurpose) R.string.capture_chat_batch_done
+                                    else R.string.capture_batch_done
+                                )
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+
             Text(
                 text = "对准题目，光线充足识别更准",
                 color = Color.White.copy(alpha = 0.7f),
@@ -620,12 +627,13 @@ fun CaptureScreen(
                                                     context.getString(R.string.capture_chat_batch_full),
                                                     Toast.LENGTH_SHORT
                                                 ).show()
-                                            } else if (!batchActive) {
-                                                // 单张链路：拍完直接进裁切。对比度增强的 0~3 档在裁切页里调——
-                                                // 那里能同时看到裁切结果与增强效果，比按快门前盲选更准
-                                                // （v0.0.55 反馈：裁剪页原先没有这个入口）。
-                                                onCropped(path)
                                             }
+                                            // v0.0.58：对话拍照**只借前端相机**。
+                                            // 拍完一律入批留在相机页（支持连拍），
+                                            // 「完成」时把原图整体交回会话当图片附件——
+                                            // 不裁剪、不提交识别，识不识图由模型自己调工具决定。
+                                            // 旧的单张链路会跳裁切页，那等于把错题后端
+                                            // 也接了进来（用户反馈的核心问题）。
                                         }
                                     },
                                     onError = {

@@ -933,20 +933,6 @@ internal fun StudyView(
                 }
             }
 
-            // 场景图（F-IMG-1）：紧跟题目卡之后，v0.0.55 反馈从「LazyColumn 最底部」上移。
-            //
-            // T7 当初把它下沉到最底部是为了「不占首屏」，但刷题页要滚过题目卡 +
-            // 选项 + 打分按钮才到底，用户反馈「最下面的生图没了」——其实就是
-            // 「不滚到很下面根本找不到」。辅助功能的入口找不到，等于没有。
-            //
-            // 现在放在题目卡正下方：未生成时是一颗 46dp 的按钮（首屏多占约 54dp，
-            // 题目与选项仍在首屏内）；生成后是 200dp 的图 + 场景描述，此时把选项
-            // 推下去是用户主动选择的结果，可接受，滚一下就到。
-            if (currentWord != null) {
-                item {
-                    WordSceneImage(state = state, viewModel = viewModel)
-                }
-            }
 
             // 模式分支交互
             if (state.studyMode == StudyMode.QUIZ || state.studyMode == StudyMode.SENSE) {
@@ -1118,6 +1104,18 @@ internal fun StudyView(
                             }
                         }
                     }
+                }
+            }
+            // 场景图（F-IMG-1）：v0.0.58 反馈「把场景图功能放到最下面啊」。
+            //
+            // 历史来回搬了两次，结论记在这里免得再改：
+            // - 最初在最底部 → 用户说找不到（要滚过题目卡+选项+打分按钮）；
+            // - v0.0.55 上移到题目卡正下方 → 用户说挡住刷题，要求放回最下面。
+            // 现在固定在最底部：题目卡 → 选项 → 打分/前进 → 场景图。
+            // 未生成时只是一颗 46dp 的按钮，滚到底才看到，不占首屏。
+            if (currentWord != null) {
+                item {
+                    WordSceneImage(state = state, viewModel = viewModel)
                 }
             }
         }

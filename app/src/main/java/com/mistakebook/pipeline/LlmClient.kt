@@ -32,7 +32,16 @@ import java.io.File
  *   原先两者都落到 BAD_RESPONSE，导致上层只能笼统报「整理失败」；
  * - 瞬时错误（网络/5xx）额外重试 1 次（2s 退避）；鉴权、限流、取消与截断不重试。
  */
-class LlmClient(private val api: LlmApi) {
+class LlmClient(
+    private val api: LlmApi,
+    /**
+     * 用量统计（v0.0.58）：识别流水线的 LLM 调用以前**完全不进统计**，
+     * 用户看到的「调用次数/tokens 从来不动」有一部分就是这个原因——
+     * 错题识别走的是本类，而只有对话链路记了账。
+     * 传 null 表示不统计（单测 / 旧构造点）。
+     */
+    private val usageStats: com.mistakebook.data.prefs.UsageStatsStore? = null
+) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -197,7 +206,24 @@ class LlmClient(private val api: LlmApi) {
                 )
             )
         }
+        // 记账（v0.0.58）：识别流水线的用量以前没人记，统计页因此「从来不动」。
+        // 只在拿到正文时记一次——阶梯重试会把用量翻倍，取最后一次成功即可。
+        recordUsage(body.usage)
         return ApiResult.Success(text)
+    }
+
+    /** 把一次成功调用的 token 用量写进统计。服务端不给 usage 就跳过（不编数）。 */
+    private fun recordUsage(usage: com.mistakebook.net.llm.Usage?) {
+        val stats = usageStats ?: return
+        val u = usage ?: return
+        if (u.promptTokens <= 0 && u.completionTokens <= 0) return
+        runCatching {
+            stats.recordLlm(
+                promptTokens = u.promptTokens,
+                completionTokens = u.completionTokens,
+                cachedTokens = u.promptCacheHitTokens
+            )
+        }
     }
 
     /** 长边压到 [longEdgePx]，JPEG q80，转 base64 data URL。 */
@@ -356,7 +382,7 @@ class LlmClient(private val api: LlmApi) {
          * 用户实测 16K 在中文下约 26000 字就被截断。多题 + 每道题带完整解析
          * 与 SVG 附图时，JSON 很容易超过这个量。撞服务端硬上限时有降档重试兜底。
          */
-        const val DEFAULT_MAX_TOKENS = 32768
+        const val DEFAULT_MAX_TOKENS = 65536
 
         /** [plainText] 的默认上限：一段场景 prompt / 一个标题，512 足够。 */
         const val DEFAULT_PLAIN_MAX_TOKENS = 512

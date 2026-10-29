@@ -815,10 +815,14 @@ private fun MessageBubble(
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
         Surface(
+            // v0.0.58：**只有用户消息有气泡**，AI 回复全宽度铺开
+            //（对齐 ChatGPT 移动端：用户消息框起来，助手消息通栏）。
+            // 原来助手也用 surfaceVariant 气泡 + 320dp 限宽，长公式/表格/HTML
+            // 全被挤在窄列里——既割裂阅读，也让宽公式更容易被右侧裁掉。
             color = if (isUser) {
                 MaterialTheme.colorScheme.primaryContainer
             } else {
-                MaterialTheme.colorScheme.surfaceVariant
+                Color.Transparent
             },
             shape = RoundedCornerShape(
                 topStart = 14.dp,
@@ -826,9 +830,14 @@ private fun MessageBubble(
                 bottomStart = if (isUser) 14.dp else 4.dp,
                 bottomEnd = if (isUser) 4.dp else 14.dp
             ),
-            modifier = Modifier.widthIn(max = 320.dp)
+            modifier = if (isUser) Modifier.widthIn(max = 320.dp) else Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Column(
+                modifier = Modifier.padding(
+                    horizontal = if (isUser) 12.dp else 0.dp,
+                    vertical = 8.dp
+                )
+            ) {
                 // 用户自己发的图片。**早先气泡只渲染 message.content，
                 // 附件从来没进过界面**——模型看得到图，用户这边看不见，
                 // 表现成「图片发不出去」。
@@ -1456,7 +1465,10 @@ private fun ChatInputBar(
             // 下段：操作条
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 附件在最左（用户点名：最左边是 +，右边那个加号不要了）
-                IconButton(onClick = onAttach, enabled = !streaming, modifier = Modifier.size(44.dp)) {
+                // v0.0.58：生成中也能加附件（用户反馈「可以打字但不能添加图片」）。
+                // 附件只是排队成 pendingAttachments，等这一轮结束后随下一条消息发出，
+                // 与「打字」完全同权——没有理由只禁这一项。
+                IconButton(onClick = onAttach, modifier = Modifier.size(44.dp)) {
                     Icon(
                         Icons.Default.Add,
                         contentDescription = stringResource(R.string.chat_attach)

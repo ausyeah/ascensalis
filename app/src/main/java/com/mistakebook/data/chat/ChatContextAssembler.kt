@@ -23,18 +23,27 @@ import com.mistakebook.domain.ChatRole
 object ChatContextAssembler {
 
     /** 历史部分的字符预算（不含 system 与题目上下文）。按混合中英文文本保守折算，约覆盖 60K token。 */
-    const val MAX_HISTORY_CHARS = 240_000
+    // v0.0.58：240_000 → 1_000_000。用户要求「最少按 1000000 上下文输入」，
+    // 且我们此前会在远未触到模型上限时就开始丢历史（omittedCount），
+    // 表现为「聊着聊着模型忘了前面说过什么」。字符预算放到 100 万
+    // （≈25~30 万 token）后，日常会话基本不会触发压缩。
+    const val MAX_HISTORY_CHARS = 1_000_000
 
-    /** 历史部分的轮数上限，避免极短消息无限增长请求。 */
-    const val MAX_HISTORY_ROUNDS = 64
+    /**
+     * 历史部分的轮数上限，避免极短消息无限增长请求。
+     * v0.0.58：64 → 128，与字符预算同步放大。
+     */
+    const val MAX_HISTORY_ROUNDS = 128
 
     /**
      * 整个请求最多带几张历史图片。
      *
-     * 取 2 是权衡：够用（用户贴的图基本都在最近几条里），又不会把请求体撑到几十 MB
-     * 被网关直接 413 拒掉。
+     * v0.0.58 从 2 提到 4：PDF 抽不出文字时会栅格化出最多 4 张页面图
+     * （见 [com.mistakebook.data.chat.PdfPageImages]），只带 2 张的话
+     * 后面的页面模型根本看不到，「正确调用工具读取识别」就落空了。
+     * 4 张 ~1500px 的 JPEG 压成 base64 约 1~2MB，仍在网关可接受范围。
      */
-    const val MAX_IMAGES_PER_REQUEST = 2
+    const val MAX_IMAGES_PER_REQUEST = 4
 
     /** 合成消息的 id：负数，避免与数据库自增 id 撞上。 */
     const val ID_SYSTEM = -1L
