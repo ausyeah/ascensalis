@@ -287,10 +287,6 @@ interface PomodoroDao {
      */
     @Query("DELETE FROM pomodoro_sessions")
     suspend fun clearAllSessions()
-
-    /** 删任务时的级联由外键处理；这里只用于清空某个任务的记录（暂未使用）。 */
-    @Query("DELETE FROM pomodoro_sessions WHERE taskId = :taskId")
-    suspend fun deleteSessionsOf(taskId: Long)
 }
 
 /** 按日聚合结果。 */

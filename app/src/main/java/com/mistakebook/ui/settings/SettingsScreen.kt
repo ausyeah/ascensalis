@@ -85,6 +85,9 @@ fun SettingsScreen(
             }
             val result = container.backupManager.restore(stream)
             result.onSuccess { count ->
+                // bump 背单词纪元：万一进程没死（ROM 拦截 killProcess），
+                // 词库页的内存缓存也会立刻重建，不会拿旧进度写回新库。
+                container.wordbookEpoch.value += 1
                 snackbarHostState.showSnackbar(
                     context.getString(R.string.settings_restore_done, count)
                 )

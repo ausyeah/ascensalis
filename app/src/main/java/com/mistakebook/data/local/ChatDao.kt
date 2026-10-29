@@ -95,18 +95,6 @@ interface ChatDao {
     @Query("UPDATE chat_sessions SET deletedAt = :at, updatedAt = :at WHERE deletedAt IS NULL")
     suspend fun softDeleteAllSessions(at: Long)
 
-    @Query("SELECT COUNT(*) FROM chat_sessions WHERE questionId = :questionId AND deletedAt IS NULL")
-    suspend fun countSessionsForQuestion(questionId: Long): Int
-
-    /**
-     * 题目被删时，把会话与它的关联摘掉但**保留会话**。
-     *
-     * 之所以不用外键级联：对话是用户自己攒下的思考过程，
-     * 删一道题不该连带删掉这些。
-     */
-    @Query("UPDATE chat_sessions SET questionId = NULL, updatedAt = :at WHERE questionId = :questionId")
-    suspend fun detachSessionsFromQuestion(questionId: Long, at: Long)
-
     // ------------------------------------------------------------ 消息
 
     @Insert

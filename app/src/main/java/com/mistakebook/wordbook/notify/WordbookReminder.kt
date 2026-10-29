@@ -101,7 +101,15 @@ class WordbookReminderWorker(
  */
 object WordbookReminderScheduler {
 
-    fun schedule(context: Context, hour: Int = DEFAULT_HOUR, minute: Int = DEFAULT_MINUTE) {
+    // policy 默认 CANCEL_AND_REENQUEUE（改提醒时间时重排）；启动路径传 KEEP——
+    // 每次启动都取消重排会把首次触发时间无限推后，提醒永远轮不到响
+    // （与 ReviewScheduler 同一个坑，v0.0.60 修复）。
+    fun schedule(
+        context: Context,
+        hour: Int = DEFAULT_HOUR,
+        minute: Int = DEFAULT_MINUTE,
+        policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+    ) {
         val now = java.time.LocalDateTime.now()
         var target = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
         if (!target.isAfter(now)) target = target.plusDays(1)
@@ -111,7 +119,7 @@ object WordbookReminderScheduler {
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             WordbookReminderWorker.WORK_NAME,
-            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
+            policy,
             request
         )
     }

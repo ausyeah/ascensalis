@@ -80,7 +80,6 @@ class UiScreenshotTest {
             selectedOptionIndex = 0,
             isAnswered = true,
             allowReselect = true,
-            remainingQueueCount = 37,
             studiedTodayCount = 18,
             masteredCount = 214,
             wrongBookCount = 23,

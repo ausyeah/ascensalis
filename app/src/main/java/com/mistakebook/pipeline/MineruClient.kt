@@ -600,5 +600,3 @@ class MineruStallTracker(private val stallSec: Long = STALL_SEC) {
     fun heldFor(elapsedSec: Long): Long =
         if (lastSeenState.isEmpty()) 0L else elapsedSec - changedAtSec
 }
-
-class MineruException(message: String) : Exception(message)

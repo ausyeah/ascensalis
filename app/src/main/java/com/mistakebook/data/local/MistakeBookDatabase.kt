@@ -20,6 +20,13 @@ import com.mistakebook.data.local.entities.Tag
 import com.mistakebook.data.local.entities.WeeklyReport
 import com.mistakebook.data.local.entities.BadgeRecord
 
+/**
+ * 主库当前版本。备份恢复用它校验「备份里的库不能比当前 App 还新」——
+ * 高版本备份恢复进低版本 App，Room 下次启动会因找不到迁移而启动崩循环，
+ * 只能清数据自救（v0.0.60 起在恢复入口直接拒绝）。
+ */
+const val MISTAKE_BOOK_DB_VERSION = 7
+
 @Database(
     entities = [
         Subject::class,
@@ -37,7 +44,7 @@ import com.mistakebook.data.local.entities.BadgeRecord
         WeeklyReport::class,
         BadgeRecord::class
     ],
-    version = 7,
+    version = MISTAKE_BOOK_DB_VERSION,
     exportSchema = true
 )
 @TypeConverters(Converters::class)

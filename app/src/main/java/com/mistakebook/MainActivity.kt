@@ -98,17 +98,21 @@ class MainActivity : ComponentActivity() {
         }
         container.appScope.launch {
             val snapshot = container.settingsStore.snapshotNow()
+            // 启动路径必须 KEEP：CANCEL_AND_REENQUEUE 会把首次触发时间无限推后，
+            // 每天在提醒时刻前打开 App 的用户永远收不到提醒（v0.0.60 修复）。
             ReviewScheduler.schedule(
                 this@MainActivity,
                 snapshot.reminderHour,
-                snapshot.reminderMinute
+                snapshot.reminderMinute,
+                androidx.work.ExistingPeriodicWorkPolicy.KEEP
             )
             // 单词书的每日目标提醒：与错题复习提醒同一时刻，
             // 少设一个时间开关，用户少困惑一次。
             com.mistakebook.wordbook.notify.WordbookReminderScheduler.schedule(
                 this@MainActivity,
                 snapshot.reminderHour,
-                snapshot.reminderMinute
+                snapshot.reminderMinute,
+                androidx.work.ExistingPeriodicWorkPolicy.KEEP
             )
         }
         if (intent?.getBooleanExtra(EXTRA_FILTER_DUE, false) == true) {

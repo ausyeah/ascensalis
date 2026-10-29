@@ -128,7 +128,6 @@ data class WordbookUiState(
      */
     val allowReselect: Boolean = false,
     val isCardRevealed: Boolean = false,
-    val remainingQueueCount: Int = 0,
 
     // 拼写模式（SPELL）状态
     val spellInput: String = "",

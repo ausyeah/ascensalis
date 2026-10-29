@@ -75,9 +75,4 @@ object ChatGenerationBus {
     fun publish(value: Snapshot) {
         _snapshot.value = value
     }
-
-    /** 一次生成彻底结束后清空，避免下次进入会话时读到上次的残留。 */
-    fun clear() {
-        _snapshot.value = null
-    }
 }

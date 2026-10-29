@@ -48,11 +48,11 @@ abstract class WordbookDatabase : RoomDatabase() {
                 WordbookDatabase::class.java,
                 DB_NAME
             )
-                // 有匹配的 Migration 就走迁移（1→2 的加列）；
-                // 万一将来出现没有覆盖到的版本号，再退化为重建，
-                // 好过启动即崩。保留这行是保底，不是主路径。
                 .addMigrations(MIGRATION_1_2)
-                .fallbackToDestructiveMigration()
+                // 不开 fallbackToDestructiveMigration（v0.0.60，与主库「宁崩不丢」对齐）：
+                // 旧注释称它是「保底」，实际是**静默清空**——将来升 v3 忘写迁移时，
+                // 用户的学习进度、错词本、打卡流水会被整体删除且无任何提示。
+                // 崩溃（CI / 崩溃上报能看见）远好过无声丢数据。
                 .build()
     }
 }

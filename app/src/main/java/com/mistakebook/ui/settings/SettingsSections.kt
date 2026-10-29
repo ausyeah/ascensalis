@@ -113,29 +113,9 @@ internal fun SettingsGroup(title: String, content: @Composable () -> Unit) {
     }
 }
 
-/**
- * 设置页的分组标题：外观 / 使用偏好 / 识别与大模型 / 数据管理。
- *
- * 设置项从「配置 Key」堆到「数据管理」一长串，用户找「主题」要翻过半页。
- * 按「先看外观、再是偏好、配置垫底、数据收尾」的顺序分组，
- * 每组一行小标题 + 细分割线，扫一眼就知道东西在哪。
- */
-@Composable
-internal fun SettingsSectionHeader(title: String) {
-    Column(modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(6.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    }
-}
-
 // ChoiceRow 已删：唯一的使用者是 MinerU 的模型版本/识别语言两项，
 // 而这两项现已固定为 vlm / ch，不再可配。
+// SettingsSectionHeader 也删了（v0.0.60）：v0.0.54 设置页改折叠分组后全工程无调用。
 
 @Composable
 internal fun SwitchRow(

@@ -380,7 +380,7 @@
     <string name="settings_clear_trash_confirm">确认清空</string>
     <string name="settings_restore_confirm_title">恢复备份</string>
     <string name="settings_restore_confirm_body">恢复会覆盖当前全部错题与图片，且无法撤销。确认继续？</string>
-    <string name="settings_restore_done">恢复完成，已重新载入 %1$d 题</string>
+    <string name="settings_restore_done">恢复完成，已重新载入 %1$d 题。应用即将退出，请重新打开</string>
     <string name="settings_restore_failed">备份文件无效：%1$s</string>
     <string name="settings_backup_exported">备份已导出</string>
     <string name="settings_backup_failed">导出失败：%1$s</string>

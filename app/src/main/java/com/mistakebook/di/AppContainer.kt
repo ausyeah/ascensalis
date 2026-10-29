@@ -149,8 +149,26 @@ class AppContainer(context: Context) {
         )
     }
 
-    val wordbookDatabase: com.mistakebook.wordbook.data.WordbookDatabase by lazy {
-        com.mistakebook.wordbook.data.WordbookDatabase.build(appContext)
+    val wordbookDatabase: com.mistakebook.wordbook.data.WordbookDatabase
+        get() = wordbookDatabaseRef ?: synchronized(this) {
+            wordbookDatabaseRef
+                ?: com.mistakebook.wordbook.data.WordbookDatabase.build(appContext)
+                    .also { wordbookDatabaseRef = it }
+        }
+
+    @Volatile
+    private var wordbookDatabaseRef: com.mistakebook.wordbook.data.WordbookDatabase? = null
+
+    /** 备份/恢复期间关 wordbook 库（v0.0.60：此前恢复在打开的句柄底下换 .db 文件）。 */
+    fun closeWordbookDatabase() {
+        wordbookDatabaseRef?.close()
+        wordbookDatabaseRef = null
+    }
+
+    /** 关库之后重新打开（与 [reopenDatabase] 同一套可替换引用模式）。 */
+    fun reopenWordbookDatabase() {
+        wordbookDatabaseRef?.let { if (it.isOpen) return }
+        wordbookDatabaseRef = com.mistakebook.wordbook.data.WordbookDatabase.build(appContext)
     }
 
     val pomodoroDao: com.mistakebook.data.local.PomodoroDao by lazy {
@@ -356,7 +374,11 @@ class AppContainer(context: Context) {
             // 关库让 WAL 落进 .db，否则备份缺最近数据、
             // 恢复时旧 WAL 会被重放到新库上。详见 BackupManager 里的注释。
             closeDatabase = { closeDatabase() },
-            reopenDatabase = { reopenDatabase() }
+            reopenDatabase = { reopenDatabase() },
+            // wordbook 库同关同开（v0.0.60）：恢复时在打开的句柄底下换文件会损坏库。
+            closeWordbookDatabase = { closeWordbookDatabase() },
+            reopenWordbookDatabase = { reopenWordbookDatabase() },
+            expectedDbVersion = com.mistakebook.data.local.MISTAKE_BOOK_DB_VERSION
         )
     }
 

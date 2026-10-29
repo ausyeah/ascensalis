@@ -80,15 +80,28 @@ class ReviewWorker(
 
 object ReviewScheduler {
 
-    // App 启动时登记每日周期任务：首次延迟到用户设定的时刻，之后每 24 小时一次。
-    fun schedule(context: Context, hour: Int = DEFAULT_HOUR, minute: Int = DEFAULT_MINUTE) {
+    // 登记/更新每日周期任务。首次延迟到用户设定的时刻，之后每 24 小时一次。
+    //
+    // ## policy 的讲究（v0.0.60 修复）
+    //
+    // 启动路径必须用 KEEP：旧代码每次启动都 CANCEL_AND_REENQUEUE，
+    // 首次触发时间被反复推后——每天在提醒时刻**之前**打开 App 的用户
+    // 永远收不到提醒（今天 19:00 打开、提醒设 20:00 → 首次触发被推到明天
+    // 20:00，明天又打开 → 又推一天，无限循环）。只有用户**改提醒时间**时
+    // 才需要 CANCEL_AND_REENQUEUE（设置页那条调用）。
+    fun schedule(
+        context: Context,
+        hour: Int = DEFAULT_HOUR,
+        minute: Int = DEFAULT_MINUTE,
+        policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE
+    ) {
         val delayMinutes = initialDelayMinutes(java.time.LocalDateTime.now(), hour, minute)
         val request = PeriodicWorkRequestBuilder<ReviewWorker>(1, TimeUnit.DAYS)
             .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             ReviewWorker.WORK_NAME,
-            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
+            policy,
             request
         )
     }

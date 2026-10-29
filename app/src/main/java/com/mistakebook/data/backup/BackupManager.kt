@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import com.mistakebook.data.AppFiles
+import com.mistakebook.data.local.MISTAKE_BOOK_DB_VERSION
 import com.mistakebook.util.isWithinDirectory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -21,7 +22,7 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
- * 本地备份：zip = mistake_book.db + files/ 全量。
+ * 本地备份：zip = mistake_book.db + wordbook_local.db + files/ 全量。
  *
  * - Android Q+ 用 MediaStore.Downloads 写入 Download/错题本/，不需要存储权限；
  * - Q 以下写入 app 私有目录后由分享按钮导出（避免申请 WRITE_EXTERNAL_STORAGE）。
@@ -45,13 +46,22 @@ class BackupManager(
      * 这才是「一个自洽的库」。
      */
     private val closeDatabase: suspend () -> Unit = {},
-    private val reopenDatabase: () -> Unit = {}
+    private val reopenDatabase: () -> Unit = {},
+    /**
+     * wordbook 库与主库同理（v0.0.60 起）：恢复时它的 Room 连接还开着，
+     * 覆盖其 .db 文件等于在打开的句柄底下换文件——读已删除 inode、
+     * WAL 重放错乱，重则库损坏。恢复/导出期间与主库同关同开。
+     */
+    private val closeWordbookDatabase: suspend () -> Unit = {},
+    private val reopenWordbookDatabase: () -> Unit = {},
+    /** 当前 App 的主库版本，恢复时校验备份不能比它新（见 [restore]）。 */
+    private val expectedDbVersion: Int = MISTAKE_BOOK_DB_VERSION
 ) {
 
     suspend fun export(): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             // 备份前对两个数据库均执行安全检查点（checkpoint / flush）
-            val wordbookDb = context.getDatabasePath("wordbook_local.db")
+            val wordbookDb = context.getDatabasePath(WORDBOOK_DB_NAME)
             listOf(files.databaseFile, wordbookDb).forEach { dbFile ->
                 if (dbFile.exists()) {
                     runCatching {
@@ -64,7 +74,9 @@ class BackupManager(
 
             // 先关库：把 WAL checkpoint 进 .db 并清掉 -wal/-shm，
             // 否则备份里那份 .db 缺最近的数据。详见 closeDatabase 的注释。
+            // wordbook 与主库同关同开（v0.0.60）。
             closeDatabase()
+            closeWordbookDatabase()
             // 用局部变量而不是直接把 try/finally 当表达式传进 runCatching：
             // `try` 没有 else 分支时，Kotlin 推不出它的类型，
             // 会报「Missing return statement」——这个报错完全指不到真正的原因。
@@ -72,6 +84,7 @@ class BackupManager(
             try {
                 path = doExport("backup_${timestamp()}.zip")
             } finally {
+                reopenWordbookDatabase()
                 reopenDatabase()
             }
             path
@@ -106,14 +119,31 @@ class BackupManager(
         }
     }
 
-    /** 解压并覆盖数据库与文件目录，返回恢复后的题目数量。 */
+    /**
+     * 解压并覆盖数据库与文件目录，返回恢复后的题目数量。
+     *
+     * ## 恢复的原子性（v0.0.60 重排）
+     *
+     * 旧实现「先删原库再拷贝」：拷贝中途失败（磁盘满 / IO 错）原库已经没了，
+     * finally 又把唯一完好的解压副本清掉——两头空。现在**先全部staging成
+     * `.restore-new` 临时文件，全部成功后才做删旧换新**（删+rename 是同目录
+     * 原子级小操作，几乎不会失败），失败时原库分毫未动。
+     *
+     * ## 版本校验
+     *
+     * 备份里的库如果比当前 App 的 schema **新**（用户降级安装/换机装旧版），
+     * Room 下次启动会因找不到迁移而启动崩循环，只能清数据自救——
+     * 在动原库之前直接拒绝。
+     */
     suspend fun restore(input: InputStream): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
             val temp = File(context.cacheDir, "restore_${System.currentTimeMillis()}")
             temp.mkdirs()
             // 关库必须在**解压之前**：Room 还开着的时候覆盖 .db，
             // SQLite 句柄仍指向旧文件，行为不可预期。
+            // 主库与 wordbook 库都关（v0.0.60：wordbook 此前漏关）。
             closeDatabase()
+            closeWordbookDatabase()
             // 同 export：try 无 else 分支时不能当表达式用，会报「Missing return statement」
             val restored: Int
             try {
@@ -132,39 +162,49 @@ class BackupManager(
                         entry = zip.nextEntry
                     }
                 }
-                val restoredDb = File(temp, "mistake_book.db")
+                val restoredDb = File(temp, files.databaseFile.name)
                 if (!restoredDb.exists()) error("备份中缺少数据库文件")
 
-                // **必须连 -wal/-shm 一起删掉**。
-                // 只覆盖 .db 而留着旧的 WAL，下次启动 SQLite 会拿旧 WAL
-                // 重放到新库上——那是**另一份数据库的历史**，
-                // 轻则数据错乱（恢复后又冒出已删的题），重则库损坏。
+                // 版本守卫：备份库比当前 App 新 → 拒绝恢复（此时原库还一个字节没动）
+                val backupVersion = readUserVersion(restoredDb)
+                if (backupVersion > expectedDbVersion) {
+                    error(
+                        "备份来自更新版本的 App（库版本 $backupVersion > 当前 $expectedDbVersion），" +
+                            "请先升级 App 再恢复"
+                    )
+                }
+
                 val db = files.databaseFile
                 db.parentFile?.mkdirs()
-                db.delete()
-                File(db.path + "-wal").delete()
-                File(db.path + "-shm").delete()
+                val stagedMain = stagedFile(db)
+                stagedMain.delete()
+                restoredDb.copyTo(stagedMain, overwrite = false)
 
-                restoredDb.copyTo(db, overwrite = false)
-
-                // 完整解压并还原 wordbook_local.db 及其关联文件（兼容旧版本备份）
-                val restoredWordbookDb = File(temp, "wordbook_local.db")
+                // wordbook 库 staging（兼容不含它的旧备份）
+                val restoredWordbookDb = File(temp, WORDBOOK_DB_NAME)
+                var hasWordbook = false
+                val wordbookDb = context.getDatabasePath(WORDBOOK_DB_NAME)
+                val stagedWordbook = stagedFile(wordbookDb)
                 if (restoredWordbookDb.exists()) {
-                    val wordbookDb = context.getDatabasePath("wordbook_local.db")
-                    wordbookDb.parentFile?.mkdirs()
-                    wordbookDb.delete()
-                    File(wordbookDb.path + "-wal").delete()
-                    File(wordbookDb.path + "-shm").delete()
+                    stagedWordbook.delete()
+                    restoredWordbookDb.copyTo(stagedWordbook, overwrite = false)
+                    hasWordbook = true
+                }
 
-                    restoredWordbookDb.copyTo(wordbookDb, overwrite = false)
+                // ===== 分割线：到此为止所有长 IO 都成功了，原库仍分毫未动 =====
+                // 换库必须连 -wal/-shm 一起清掉：留着旧 WAL，下次启动 SQLite 会拿
+                // **另一份数据库的历史**重放到新库上——轻则数据错乱（恢复后又冒出
+                // 已删的题），重则库损坏。
+                swapIn(stagedMain, db)
 
-                    val restoredWordbookWal = File(temp, "wordbook_local.db-wal")
-                    if (restoredWordbookWal.exists()) {
-                        restoredWordbookWal.copyTo(File(wordbookDb.path + "-wal"), overwrite = false)
-                    }
-                    val restoredWordbookShm = File(temp, "wordbook_local.db-shm")
-                    if (restoredWordbookShm.exists()) {
-                        restoredWordbookShm.copyTo(File(wordbookDb.path + "-shm"), overwrite = false)
+                if (hasWordbook) {
+                    swapIn(stagedWordbook, wordbookDb)
+                    // 旧版本备份可能连 wal/shm 一起打进来了：一并还原（Room 已关，安全）
+                    listOf("-wal", "-shm").forEach { suffix ->
+                        val from = File(temp, WORDBOOK_DB_NAME + suffix)
+                        if (from.exists()) {
+                            from.copyTo(File(wordbookDb.path + suffix), overwrite = true)
+                        }
                     }
                 }
 
@@ -177,11 +217,35 @@ class BackupManager(
                 // 失败时也要清理，否则每次恢复失败都在 cache 里攒一个目录，
                 // 而 cache 又不会被清理——用户重试十次就是十份完整文档的体积。
                 temp.deleteRecursively()
+                reopenWordbookDatabase()
                 reopenDatabase()
             }
             restored
         }
     }
+
+    /** staging 的落点：与目标同目录的 `.restore-new` 文件（保证 rename 同文件系统）。 */
+    private fun stagedFile(target: File): File = File(target.path + ".restore-new")
+
+    /**
+     * 换库：清掉目标及其 WAL/SHM，再把 staging 文件 rename 到位。
+     * 在这里之前，所有可能失败的 IO 都已经完成。
+     */
+    private fun swapIn(staged: File, target: File) {
+        target.delete()
+        File(target.path + "-wal").delete()
+        File(target.path + "-shm").delete()
+        if (!staged.renameTo(target)) {
+            error("替换数据库失败：${target.name}（rename 未成功，原库未受影响可重试）")
+        }
+    }
+
+    /** 读 SQLite 库头的 user_version（Room 的 schema 版本就存在这里）。 */
+    private fun readUserVersion(dbFile: File): Int = runCatching {
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.version
+        }
+    }.getOrDefault(-1)
 
     private fun collectEntries(): List<Pair<File, String>> {
         val entries = mutableListOf<Pair<File, String>>()
@@ -190,11 +254,14 @@ class BackupManager(
         // 漏了它备份就不完整——而数据库里那几条消息还在，
         // 恢复后附件全成死链，界面上显示不出来的文件。
         //
+        // `library` 也在列（v0.0.60 补）：资料库是用户主动导入的
+        // md/docx/pdf 原文，漏了它恢复后资料全丢、聊天引用全成死链。
+        //
         // `mineru` 不在列（T5）：它是识别的临时产物，且识别终态会被
         // RecognitionEngine 分层回收；DB 里已有 task.markdown 缓存，
         // 把它打进备份只会让 zip 体积随识别次数线性膨胀。恢复旧备份时
         // zip 里若含 mineru 文件也无害（整目录解压覆盖），无需兼容代码。
-        listOf("crops", "questions", "imports", "chats").forEach { dirName ->
+        listOf("crops", "questions", "imports", "chats", "library").forEach { dirName ->
             File(filesRoot, dirName).walkTopDown()
                 .filter { it.isFile }
                 .forEach { file ->
@@ -211,7 +278,7 @@ class BackupManager(
             zip.closeEntry()
             
             // 将 wordbook_local.db 及其 WAL/SHM 文件纳入 ZIP 归档
-            val wordbookDb = context.getDatabasePath("wordbook_local.db")
+            val wordbookDb = context.getDatabasePath(WORDBOOK_DB_NAME)
             listOf(wordbookDb, File(wordbookDb.path + "-wal"), File(wordbookDb.path + "-shm")).forEach { file ->
                 if (file.exists()) {
                     zip.putNextEntry(ZipEntry(file.name))
@@ -242,4 +309,9 @@ class BackupManager(
             cursor.getInt(0)
         }
     }.getOrDefault(0)
+
+    companion object {
+        /** wordbook 独立库文件名（与 WordbookDatabase.DB_NAME 一致，此处不引依赖）。 */
+        private const val WORDBOOK_DB_NAME = "wordbook_local.db"
+    }
 }

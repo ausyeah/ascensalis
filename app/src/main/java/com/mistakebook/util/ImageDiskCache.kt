@@ -68,7 +68,16 @@ class ImageDiskCache(
     fun put(key: String, bytes: ByteArray, pinned: Boolean = false): File {
         dir.mkdirs()
         val file = fileFor(key, pinned)
-        file.writeBytes(bytes)
+        // 先写临时文件再 rename（v0.0.60）：直写目标的话，进程中途被杀会留
+        // 截断文件，而 get/peek 只查 length>0 就会命中半张图。
+        // 同目录 rename 是原子操作，目标要么是完整的旧图要么是完整的新图。
+        val tmp = File(dir, file.name + ".tmp")
+        tmp.writeBytes(bytes)
+        if (!tmp.renameTo(file)) {
+            // rename 失败（极少数文件系统）退回直写，保证功能可用
+            file.writeBytes(bytes)
+            tmp.delete()
+        }
         evictIfNeeded()
         return file
     }

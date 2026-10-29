@@ -229,11 +229,6 @@ class ChatRepository(
         return id
     }
 
-    suspend fun appendAssistantContent(id: Long, content: String) {
-        val current = chatDao.findMessage(id) ?: return
-        chatDao.appendContent(id, current.content + content, MessageStatus.STREAMING, System.currentTimeMillis())
-    }
-
     suspend fun updateAssistantContent(id: Long, content: String) {
         chatDao.appendContent(id, content, MessageStatus.STREAMING, System.currentTimeMillis())
     }

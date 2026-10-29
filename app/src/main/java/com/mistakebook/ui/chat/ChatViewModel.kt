@@ -316,8 +316,6 @@ class ChatViewModel(
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val partSerializer = ListSerializer(ChatContentPart.serializer())
 
-    private var streamJob: Job? = null
-
     /**
      * 本地「在途生成」标记。
      *
@@ -894,9 +892,7 @@ class ChatViewModel(
     fun stop() {
         // 生成跑在服务里：停止 = 让服务取消这次任务（内容保留、状态记为已取消）
         ChatGenerationService.stop(appContext)
-        streamJob?.cancel()
-        // OCR 阶段还没有 streamJob 可停，这里一并取消，
-        // 否则用户点「停止」后 MinerU 还在后台烧额度。
+        // OCR 阶段的兜底：用户点「停止」后 MinerU 不能还在后台烧额度。
         ocrJob?.cancel()
         // 本地立即解锁：服务那边取消是异步的，如果这中间用户就点了发送，
         // 守卫会把消息吞掉。服务最终还会落一条 CANCELED 终态消息，

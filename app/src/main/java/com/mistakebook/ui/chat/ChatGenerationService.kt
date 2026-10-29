@@ -998,7 +998,6 @@ class ChatGenerationService : Service() {
         const val ACTION_STOP = "com.mistakebook.chat.STOP"
 
         const val EXTRA_SESSION_ID = "sessionId"
-        const val EXTRA_ASSISTANT_ID = "assistantId"
         const val EXTRA_QUESTION_ID = "questionId"
 
         /**
