@@ -46,6 +46,16 @@ interface CaptureTaskDao {
     @Query("UPDATE capture_tasks SET status = :status, errorMessage = :message, updatedAt = :now WHERE id = :id")
     suspend fun updateStatus(id: Long, status: TaskStatus, message: String?, now: Long)
 
+    /**
+     * 定向只写 refinedJson 与 updatedAt（T4 自动暂存用）。
+     *
+     * 整包 update（findById→copy→update）拿的是**旧快照**：暂存与识别完成
+     * 的 finish() 并发时互相覆盖，谁后写谁赢、先写的列全丢。定向 UPDATE
+     * 只碰自己负责的两列，天然无竞态（v0.0.65）。
+     */
+    @Query("UPDATE capture_tasks SET refinedJson = :refinedJson, updatedAt = :now WHERE id = :id")
+    suspend fun updateRefinedJson(id: Long, refinedJson: String, now: Long)
+
     @Query(
         "UPDATE capture_tasks SET status = :status, errorMessage = :message, errorKind = :kind, updatedAt = :now WHERE id = :id AND status != 'DONE'"
     )

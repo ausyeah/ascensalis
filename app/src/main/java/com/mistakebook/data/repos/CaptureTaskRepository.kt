@@ -80,11 +80,12 @@ class CaptureTaskRepository(private val dao: CaptureTaskDao) {
      *
      * 绝不动 status：暂存发生时任务可能处于任意状态（DONE 之后用户
      * 回来改题很常见），整包 update 拿旧快照会把 status/markdown 等
-     * 并发改动一起冲掉。
+     * 并发改动一起冲掉。v0.0.65 起用**定向 UPDATE**：旧实现嘴上说
+     * 「只写一列」，手上却是 findById→copy→整行覆盖——恰是它声明
+     * 要避免的丢更新，与识别完成 finish() 的并发写互相覆盖。
      */
     suspend fun updateRefinedJson(id: Long, refinedJson: String, now: Long) {
-        val task = dao.findById(id) ?: return
-        dao.update(task.copy(refinedJson = refinedJson, updatedAt = now))
+        dao.updateRefinedJson(id, refinedJson, now)
     }
 
     suspend fun delete(id: Long) = dao.deleteById(id)

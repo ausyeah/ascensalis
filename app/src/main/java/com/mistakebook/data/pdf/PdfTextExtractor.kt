@@ -259,7 +259,13 @@ object PdfTextExtractor {
             while (!inflater.finished()) {
                 val count = inflater.inflate(buffer)
                 if (count == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
-                if (count > 0) out.write(buffer, 0, count)
+                if (count > 0) {
+                    // 解压炸弹守卫（v0.0.65）：几 MB 的恶意/损坏流可以膨胀出
+                    // 任意大的字节数组，直接把 App 打成 OOM。超上限按「解不出
+                    // 可用内容」处理（返回 null → 该页抽不出文字 → 走 MinerU）。
+                    if (out.size() + count > MAX_INFLATE_BYTES) return null
+                    out.write(buffer, 0, count)
+                }
             }
             out.toByteArray()
         } catch (error: Exception) {

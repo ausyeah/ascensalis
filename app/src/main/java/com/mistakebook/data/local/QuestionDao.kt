@@ -260,8 +260,23 @@ interface QuestionDao {
     @Query("SELECT * FROM questions WHERE deletedAt IS NOT NULL AND deletedAt < :before")
     suspend fun listDeletedBefore(before: Long): List<Question>
 
+    /**
+     * 物理删除（回收站清理）。**必须连带清 question_tags**：
+     * 关联表没有外键（多对多的标准做法），只删 questions 的话，
+     * 标签关联行会永久残留——tags 列表里出现一批零引用的孤儿标签，
+     * 越积越多。review_logs 刻意保留：它们是「曾经学过」的历史统计。
+     */
+    @Transaction
+    suspend fun hardDelete(ids: List<Long>) {
+        deleteTagCrossRefs(ids)
+        deleteQuestionsByIds(ids)
+    }
+
+    @Query("DELETE FROM question_tags WHERE questionId IN (:ids)")
+    suspend fun deleteTagCrossRefs(ids: List<Long>)
+
     @Query("DELETE FROM questions WHERE id IN (:ids)")
-    suspend fun hardDelete(ids: List<Long>)
+    suspend fun deleteQuestionsByIds(ids: List<Long>)
 }
 
 /**

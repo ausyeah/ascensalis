@@ -111,11 +111,18 @@ fun MistakeBookNavHost(
         val files = batch.drainCropped()
         if (files.isEmpty()) return
         scope.launch {
-            val ids = container.recognitionSubmitter.submitImages(files, title)
-            if (ids.isNotEmpty()) {
-                navController.navigate(Routes.progress(ids.first())) {
-                    popUpTo(Routes.HOME)
+            // 兜底（v0.0.65）：成果已从批次取走，创建任务若失败（磁盘满等）
+            // 不能让异常裸奔——那会直接崩溃且成果失去引用。落一条日志并提示，
+            // 文件仍留在原处（drain 不删），用户可重试导入。
+            runCatching {
+                val ids = container.recognitionSubmitter.submitImages(files, title)
+                if (ids.isNotEmpty()) {
+                    navController.navigate(Routes.progress(ids.first())) {
+                        popUpTo(Routes.HOME)
+                    }
                 }
+            }.onFailure { error ->
+                android.util.Log.e("MistakeBookNavHost", "批量提交识别失败", error)
             }
         }
     }

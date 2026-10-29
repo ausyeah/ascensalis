@@ -374,6 +374,10 @@ class ChatRepository(
     }
 
     private fun deleteAttachmentFile(attachment: ChatAttachment) {
+        // 资料库附件（v0.0.65 防雷）：localPath 指向的是**用户导入的原文件**，
+        // 删消息/删附件绝不能把它带走——资料库里的原件还在用。
+        // 沙盒副本类附件（图片/PDF 副本）才随消息清理。
+        if (attachment.kind == com.mistakebook.domain.AttachmentKind.LIBRARY) return
         runCatching { java.io.File(attachment.localPath).takeIf { it.exists() }?.delete() }
             .onFailure { Log.w(TAG, "删除附件文件失败: ${attachment.localPath}", it) }
     }
