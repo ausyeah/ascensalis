@@ -213,9 +213,11 @@ class MineruClient(
                 val response = rethrowCancellation { api.extractResults(auth, batchId) }.getOrThrow()
                 val respBody = response.body()
                 if (!response.isSuccessful || respBody == null) {
-                    throw HttpFactory.httpError(
-                        response.code(),
-                        response.errorBody()?.string().orEmpty()
+                    throw PollHttpError(
+                        HttpFactory.httpError(
+                            response.code(),
+                            response.errorBody()?.string().orEmpty()
+                        )
                     )
                 }
                 respBody
@@ -223,7 +225,7 @@ class MineruClient(
             val body = pollOutcome.getOrNull()
             if (body == null) {
                 val cause = pollOutcome.exceptionOrNull()
-                val pollError = cause as? ApiError
+                val pollError = (cause as? PollHttpError)?.error
                     ?: HttpFactory.throwableError(cause ?: IllegalStateException("轮询失败"))
                 pollErrors++
                 val fatal4xx = pollError.detail.startsWith("HTTP 4") &&
@@ -458,6 +460,9 @@ class MineruClient(
 
     private fun formatSize(bytes: Long): String =
         if (bytes < 1024 * 1024) "${bytes / 1024} KB" else "${bytes / 1024 / 1024} MB"
+
+    /** 轮询阶段的 HTTP 错误载体（[ApiError] 不是 Throwable，包一层才能走 runCatching 的异常通道）。 */
+    private class PollHttpError(val error: ApiError) : Exception(error.serverMessage)
 
     companion object {
         const val PING_TASK_NOT_FOUND = -60012
