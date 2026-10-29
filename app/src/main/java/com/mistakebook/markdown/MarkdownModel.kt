@@ -171,20 +171,6 @@ object MarkdownParser {
 
     private val parseCache = LruCache<String, List<Block>>(PARSE_CACHE_ENTRIES)
 
-    private fun splitByTables(input: String): List<String> {
-        val result = mutableListOf<String>()
-        var last = 0
-        tableTag.findAll(input).forEach { match ->
-            if (match.range.first > last) {
-                result += input.substring(last, match.range.first)
-            }
-            result += "\u0000TABLE\u0000" + match.groupValues[1]
-            last = match.range.last + 1
-        }
-        if (last < input.length) result += input.substring(last)
-        return result
-    }
-
     private fun parseHtmlTable(html: String): Block.Table? {
         val rows = rowTag.findAll(html).map { rowMatch ->
             cellTag.findAll(rowMatch.groupValues[1])
