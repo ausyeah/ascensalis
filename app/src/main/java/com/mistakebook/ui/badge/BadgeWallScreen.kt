@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -298,7 +299,9 @@ private fun BadgeImage(badge: Badge, unlocked: Boolean, size: Dp) {
         colorFilter = if (unlocked) {
             null
         } else {
-            ColorFilter.colorMatrix(ColorMatrix().apply { setSaturation(0f) })
+            // Compose 的 ColorMatrix 方法是 setToSaturation（android.graphics 那个才叫
+            // setSaturation）——WIP 里写的是 framework 版名字，从未编译所以没暴露。
+            ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
         },
         alpha = if (unlocked) 1f else 0.45f
     )

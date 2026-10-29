@@ -91,6 +91,17 @@ fun LibraryScreen(
         files = LibraryStore.list(root)
     }
 
+    // 从内容提供方查文件显示名；查不到返回 null，由调用方回退 lastPathSegment。
+    // 必须声明在 importLauncher **之前**：Kotlin 的局部函数不支持前向引用，
+    // WIP 把声明放在使用之后，从未编译所以没暴露（CI 报 Unresolved reference）。
+    fun queryDisplayName(context: android.content.Context, uri: Uri): String? = runCatching {
+        context.contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+    }.getOrNull()
+
     // SAF 导入：拷进 library 目录（只收支持的扩展名，其余提示不支持）。
     // 文件名优先查 DISPLAY_NAME：部分文档选择器的 uri.lastPathSegment
     // 是数字 id（如 msf:100），拿来当文件名必然解析失败。
@@ -120,15 +131,6 @@ fun LibraryScreen(
             }
         }
     }
-
-    /** 从内容提供方查文件显示名；查不到返回 null，由调用方回退 lastPathSegment。 */
-    fun queryDisplayName(context: android.content.Context, uri: Uri): String? = runCatching {
-        context.contentResolver
-            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else null
-            }
-    }.getOrNull()
 
     Scaffold(
         topBar = {
@@ -419,19 +421,26 @@ private fun LibraryPreviewDialog(
                 }
             }
         },
-        confirmButton = if (onSave != null) {
-            TextButton(onClick = { draft?.let(onSave) }) {
-                Text(stringResource(R.string.action_confirm))
-            }
-        } else {
-            TextButton(onClick = onClose) {
-                Text(stringResource(R.string.action_back))
+        // 注意形参必须是「 composable lambda 」本身，不能是 if 表达式的结果：
+        // `confirmButton = if (...) { TextButton(...) } else { ... }` 求值得到的是
+        // Unit（TextButton 返回 Unit），类型对不上 `@Composable () -> Unit`，
+        // 而且会让整个 AlertDialog 的重载解析失败，连带 title/text 两个槽一起报
+        // 「@Composable invocations can only happen from...」。所以 if 要写在
+        // lambda **里面**。
+        confirmButton = {
+            if (onSave != null) {
+                TextButton(onClick = { draft?.let(onSave) }) {
+                    Text(stringResource(R.string.action_confirm))
+                }
+            } else {
+                TextButton(onClick = onClose) {
+                    Text(stringResource(R.string.action_back))
+                }
             }
         },
+        // 二进制文档不给「取消」：只有「知道了」一个出口，避免用户以为能改。
         dismissButton = if (onSave != null) {
-            TextButton(onClick = onClose) {
-                Text(stringResource(R.string.action_cancel))
-            }
+            { TextButton(onClick = onClose) { Text(stringResource(R.string.action_cancel)) } }
         } else null
     )
 }
