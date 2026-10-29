@@ -271,18 +271,19 @@ fun MistakeBookNavHost(
                     // - QUESTION：从第一张未裁的原图开始逐张接力裁切，裁完提交识别；
                     // - CHAT（v0.0.58）：**不裁、不识别**，把原图整体交回会话当图片附件，
                     //   由模型自己决定调 OCR / 识图工具。前端相机是复用的，后端在这里分叉。
+                    // （参数 lambda 里不能写 return，用 if/else 分叉。）
                     if (container.cameraPurpose == AppContainer.CameraPurpose.CHAT) {
                         submitChatBatchRaw()
                         navController.popBackStack()
-                        return@onStartBatchCrop
-                    }
-                    val batch = container.captureBatch
-                    if (batch.paths.isNotEmpty()) {
-                        navController.navigate(Routes.crop(batch.paths.first())) {
-                            popUpTo(Routes.CAPTURE) { inclusive = true }
-                        }
                     } else {
-                        submitCaptureBatch()
+                        val batch = container.captureBatch
+                        if (batch.paths.isNotEmpty()) {
+                            navController.navigate(Routes.crop(batch.paths.first())) {
+                                popUpTo(Routes.CAPTURE) { inclusive = true }
+                            }
+                        } else {
+                            submitCaptureBatch()
+                        }
                     }
                 }
             )

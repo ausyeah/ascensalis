@@ -165,17 +165,6 @@ object TavilySearch {
             }
     }
 
-/**
- * 额度查询结果（v0.0.58）。
- *
- * 为什么不用 Usage?：null 分不清「Key 错」「没网」「服务端炸了」，
- * 而这三种的下一步动作完全不同。带上 message，界面才能说人话。
- */
-sealed interface UsageResult {
-    data class Ok(val usage: TavilySearch.Usage) : UsageResult
-    data class Failed(val message: String) : UsageResult
-}
-
     /**
      * 纯解析函数（可单测）：`GET /usage` 响应体 → [Usage]。
      *
@@ -248,6 +237,20 @@ sealed interface UsageResult {
         val s = p.contentOrNull ?: return null
         return s.toDoubleOrNull()?.toLong()
     }
+}
+
+/**
+ * 额度查询结果（v0.0.58）。
+ *
+ * 为什么不用 Usage?：null 分不清「Key 错」「没网」「服务端炸了」，
+ * 而这三种的下一步动作完全不同。带上 message，界面才能说人话。
+ *
+ * 顶层声明（而非塞进 [TavilySearch] 内部）：设置页按
+ * `com.mistakebook.data.chat.UsageResult` 顶层类型引用。
+ */
+sealed interface UsageResult {
+    data class Ok(val usage: TavilySearch.Usage) : UsageResult
+    data class Failed(val message: String) : UsageResult
 }
 
 /**

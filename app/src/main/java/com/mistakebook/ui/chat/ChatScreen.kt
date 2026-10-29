@@ -1908,10 +1908,16 @@ private fun PendingAttachmentChip(
                         com.mistakebook.domain.AttachmentStatus.FAILED ->
                             attachment.errorMessage ?: stringResource(R.string.chat_attachment_failed)
 
-                        else -> if (attachment.extractedChars > 0) {
-                            stringResource(R.string.chat_attachment_extracted, attachment.extractedChars)
-                        } else {
-                            formatSize(attachment.sizeBytes)
+                        else -> when (attachment.kind) {
+                            // 资料库文件不走「提取字数」口径：原文由服务整段注入上下文。
+                            com.mistakebook.domain.AttachmentKind.LIBRARY ->
+                                stringResource(R.string.chat_attachment_library)
+
+                            else -> if (attachment.extractedChars > 0) {
+                                stringResource(R.string.chat_attachment_extracted, attachment.extractedChars)
+                            } else {
+                                formatSize(attachment.sizeBytes)
+                            }
                         }
                     }
                     Text(
@@ -1989,7 +1995,13 @@ private fun AttachmentFileChip(file: BubbleFile) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                val subtitle = file.errorMessage ?: run {
+                val subtitle = file.errorMessage ?: if (
+                    file.kind == com.mistakebook.domain.AttachmentKind.LIBRARY
+                ) {
+                    // 资料库文件不走「提取字数」口径：原文由服务整段注入上下文，
+                    // 显示「已提取 0 字」会让人以为没读上。
+                    stringResource(R.string.chat_attachment_library)
+                } else {
                     // stringResource 是 @Composable，只能在本层调用，
                     // buildString 的 lambda 里拿不到。
                     val extracted = stringResource(

@@ -61,10 +61,11 @@ object PdfPageImages {
                     try {
                         // 先铺白底：PDF 页面常带透明通道，直接渲染会得到全黑图。
                         android.graphics.Canvas(bitmap).drawColor(Color.WHITE)
+                        // render 的签名是 (destination, destClip, transform, renderMode)：
+                        // destClip=null 即整页铺满 destination（bitmap 已按页面比例建好）。
                         page.render(
                             bitmap,
                             null,
-                            android.graphics.Rect(0, 0, bitmap.width, bitmap.height),
                             null,
                             PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
                         )

@@ -603,6 +603,7 @@
     <string name="chat_attachment_open_missing">附件文件已不存在</string>
     <string name="chat_attachment_no_viewer">没有可以打开这类文件的应用</string>
     <string name="chat_attachment_extracted">已提取 %1$d 字</string>
+    <string name="chat_attachment_library">资料库文件 · 原文已注入本轮上下文</string>
     <string name="chat_attachment_size">%1$s</string>
     <string name="chat_attachment_unsupported">不支持这种文件：%1$s</string>
     <string name="chat_attachment_too_large">文件太大：%1$s（上限 %2$s）</string>

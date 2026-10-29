@@ -89,6 +89,12 @@ data class PreparedAttachment(
     val ok: Boolean get() = errorMessage == null
 }
 
+/** PDF 转图后写给模型的说明（v0.0.58）。const 只能落在顶层或 companion，这里选顶层。 */
+private const val PDF_PAGE_IMAGE_NOTE =
+    "（该 PDF 的文字层无法提取，可能是扫描件或使用了特殊字体编码。" +
+        "本消息已附带它的页面图片，请调用 describe_image 或 ocr_image 读取图片内容，" +
+        "不要向用户索要转换后的文件。）"
+
 /**
  * 附件准备管线。**纯单机，不上传**。
  *
@@ -125,6 +131,15 @@ class ChatAttachmentPreparer(
                     AttachmentKind.TEXT -> processPlainText(target, fileName, size)
                     AttachmentKind.DOCX -> processDocx(target, fileName, size)
                     AttachmentKind.XLSX -> processSpreadsheet(target, fileName, size)
+                    // LIBRARY 只由「@资料库」内部登记产生（见 ChatViewModel），
+                    // 不会经 SAF 选文件进来；留一支让 when 保持穷尽。
+                    AttachmentKind.LIBRARY -> PreparedAttachment(
+                        localPath = target.absolutePath,
+                        fileName = fileName,
+                        mimeType = "",
+                        kind = kind,
+                        sizeBytes = size
+                    )
                     AttachmentKind.OTHER -> PreparedAttachment(
                         localPath = target.absolutePath,
                         fileName = fileName,
@@ -246,13 +261,14 @@ class ChatAttachmentPreparer(
             return excerpt(file, fileName, "application/pdf", AttachmentKind.PDF, size, text)
         }
         // 抽不出可读文字 → 栅格化成页面图，让模型用识图/OCR 工具读。
-        val pageImages = PdfPageImages.render(file) { index ->
+        // 注意必须命名 targetFactory：尾随 lambda 会绑到最后一个参数（longEdgePx）。
+        val pageImages = PdfPageImages.render(file, targetFactory = { index ->
             appFiles.chatFile(
                 sessionId,
                 "pdfpage_${System.currentTimeMillis()}_$index",
                 "jpg"
             )
-        }
+        })
         return PreparedAttachment(
             localPath = file.absolutePath,
             fileName = fileName,
@@ -274,11 +290,6 @@ class ChatAttachmentPreparer(
     }
 
     /** PDF 转图后写给模型的说明（v0.0.58）。 */
-    private const val PDF_PAGE_IMAGE_NOTE =
-        "（该 PDF 的文字层无法提取，可能是扫描件或使用了特殊字体编码。" +
-            "本消息已附带它的页面图片，请调用 describe_image 或 ocr_image 读取图片内容，" +
-            "不要向用户索要转换后的文件。）"
-
     private fun processPlainText(file: File, fileName: String, size: Long): PreparedAttachment {
         val text = decodePlainText(file.readBytes())
         return excerpt(file, fileName, "text/plain", AttachmentKind.TEXT, size, text)
@@ -391,6 +402,8 @@ class ChatAttachmentPreparer(
             AttachmentKind.PDF -> "pdf"
             AttachmentKind.DOCX -> "docx"
             AttachmentKind.XLSX -> "xlsx"
+            // LIBRARY 不经 SAF 进来（只在 @资料库 登记时产生），这支让 when 保持穷尽
+            AttachmentKind.LIBRARY -> fileName.substringAfterLast('.', "bin").ifBlank { "bin" }
             AttachmentKind.TEXT -> if (fileName.lowercase().endsWith(".md")) "md" else "txt"
             AttachmentKind.OTHER -> fileName.substringAfterLast('.', "bin").ifBlank { "bin" }
         }
