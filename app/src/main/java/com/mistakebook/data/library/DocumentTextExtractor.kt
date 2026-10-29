@@ -7,6 +7,7 @@ import java.util.zip.Inflater
 import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
+import org.w3c.dom.NodeList
 
 /**
  * 文档正文提取器（v0.0.54）：把资料库里的二进制文档（.docx / .pdf）
@@ -61,17 +62,22 @@ object DocumentTextExtractor {
         val doc = nsFactory.newDocumentBuilder().parse(ByteArrayInputStream(bytes))
         val wns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         var paragraphs = doc.getElementsByTagNameNS(wns, "p")
-        var tagName = "t"
+        // 命名空间感知解析下，取 w:t **必须**用 NS 版：
+        // `getElementsByTagName("t")` 匹配的是限定名（qualified name），
+        // 而这里的元素叫 "w:t"，一个都匹配不到——于是每段都取到空文本，
+        // 整个文档静默变成空串（WIP 从未跑过单测，所以没暴露）。
+        // 退回分支（非命名空间解析）才该用限定名 "w:t"。
+        var runsOf: (Element) -> NodeList = { p -> p.getElementsByTagNameNS(wns, "t") }
         if (paragraphs.length == 0) {
             val plainFactory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = false }
             val doc2 = plainFactory.newDocumentBuilder().parse(ByteArrayInputStream(bytes))
             paragraphs = doc2.getElementsByTagName("w:p")
-            tagName = "w:t"
+            runsOf = { p -> p.getElementsByTagName("w:t") }
         }
         val sb = StringBuilder()
         for (i in 0 until paragraphs.length) {
             val p = paragraphs.item(i) as? Element ?: continue
-            val runs = p.getElementsByTagName(tagName)
+            val runs = runsOf(p)
             val line = StringBuilder()
             for (j in 0 until runs.length) {
                 line.append(runs.item(j).textContent)
@@ -135,6 +141,16 @@ object DocumentTextExtractor {
      * 从内容流里按出现顺序抽取文本：
      * `(字面量) Tj` / `[ (a) (b) ] TJ` / `<十六进制> Tj`，遇
      * `Td / TD / T* / ET` 视为换行。
+     *
+     * ## 为什么最后要整形
+     *
+     * 行首/行尾那些换行只是**定位算符的副产品**，不是真正的空行：
+     * PDF 内容流几乎总是以 `BT ... Td` 开头（先把笔尖挪到起始位置）、以
+     * `ET` 结尾，两者都会被上面的正则当成换行，于是抽出来的文本永远是
+     * `"\n正文\n"`。而 PDF 里挪一次位置常连写两个算符（`Td` 后再来一个
+     * `T*`），原样输出会得到一串空行——喂给大模型全是噪声。
+     *
+     * 所以：连续换行合并成一个，再去掉首尾换行。
      */
     private fun textFromContent(content: String): String {
         val sb = StringBuilder()
@@ -156,6 +172,8 @@ object DocumentTextExtractor {
             }
         }
         return sb.toString()
+            .replace(Regex("[\\n\\r]+"), "\n")
+            .trim('\n')
     }
 
     /** 文本操作数 + 算符；捕获组：literal / hex / array（TJ 数组）/ line（换行算符）。 */
