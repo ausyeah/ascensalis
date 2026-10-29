@@ -548,7 +548,15 @@ fun MistakeBookNavHost(
                 questionId = raw.takeIf { it != Routes.CHAT_FREE },
                 sessionId = rawSession.takeIf { it != Routes.CHAT_FREE },
                 onBack = { navController.popBackStack() },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenCamera = {
+                    // v0.0.57：对话拍照复用 App 内置相机（与错题扫描同一套）。
+                    // 用途显式设为 CHAT：连拍确认后回填 pendingChatAttachmentPaths，
+                    // ChatScreen 的 LaunchedEffect 自动转成当轮附件。
+                    container.cameraPurpose = AppContainer.CameraPurpose.CHAT
+                    container.captureBatch.clear()
+                    navController.navigate(Routes.CAPTURE)
+                }
             )
         }
 

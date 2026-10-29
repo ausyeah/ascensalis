@@ -283,7 +283,7 @@ internal fun CropOverlay(
                     )
                     midpoints.forEach { center ->
                         drawCircle(color = color, radius = 10f, center = center)
-                        drawCircle(color = Color(0xFF4F7DF3), radius = 6f, center = center)
+                        drawCircle(color = Color(0xFFB0673A), radius = 6f, center = center)
                     }
                 }
             }

@@ -26,6 +26,17 @@ object MarkdownParser {
          * 渲染层可以放心交给解码器。
          */
         data class Svg(val source: String) : Block
+
+        /**
+         * ```html 围栏（v0.0.57）：走 [com.mistakebook.ui.common.HtmlBlock] 的 WebView 渲染。
+         *
+         * [source] 已经过 [HtmlSanitizer] 清洗（去脚本 / 事件 / 外链等），
+         * 渲染层再关掉网络加载，双保险。
+         *
+         * 之所以单独成块而不是继续当 [Code]：以前 html 围栏落到 Code，
+         * 生成结束后气泡里就是一整段源码——用户反馈的「流式正常、结束变源码」。
+         */
+        data class Html(val source: String) : Block
         data object Rule : Block
     }
 
@@ -37,16 +48,86 @@ object MarkdownParser {
     fun parse(input: String): List<Block> {
         if (input.isBlank()) return emptyList()
         val blocks = mutableListOf<Block>()
-        // 先把 HTML 表格抠出来单独成块，其余按行处理
-        val segments = splitByTables(input)
-        segments.forEach { segment ->
-            if (segment.startsWith("\u0000TABLE\u0000")) {
-                parseHtmlTable(segment.removePrefix("\u0000TABLE\u0000"))?.let { blocks += it }
-            } else {
+        // v0.0.57：先按```围栏切段，**只对围栏外的文本**做 HTML 表格抽取。
+        // 以前直接对整篇跑 tableTag，围栏里的 `<table>`（尤其 ```html 完整页面）
+        // 会被抠出来当原生表格，页面结构被拆散、剩下的残片变成源码。
+        splitFences(input).forEach { segment ->
+            if (segment.trimStart().startsWith("```")) {
                 parsePlain(segment.trimEnd(), blocks)
+            } else {
+                // 围栏外：先把 HTML 表格抠出来单独成块，其余按行处理
+                splitByTables(segment).forEach { piece ->
+                    if (piece.startsWith("\u0000TABLE\u0000")) {
+                        parseHtmlTable(piece.removePrefix("\u0000TABLE\u0000"))?.let { blocks += it }
+                    } else {
+                        parsePlain(piece.trimEnd(), blocks)
+                    }
+                }
             }
         }
         return blocks
+    }
+
+    /**
+     * 按 ``` 围栏切段：围栏段落**原样**返回（开围栏行到闭围栏行），
+     * 其余文本按原顺序返回。
+     *
+     * 为什么需要它：表格抽取 / 段落解析都按行跑，必须先知道「这一行是不是
+     * 围栏里的代码」。否则 ```html 里一个字面量 `<table>` 就会被当成真表格。
+     * 未闭合的围栏一路收到结尾（流式中间态），交给 parsePlain 的降级逻辑。
+     */
+    private fun splitFences(input: String): List<String> {
+        val lines = input.split('\n')
+        val out = mutableListOf<String>()
+        val plain = StringBuilder()
+        fun flushPlain() {
+            if (plain.isNotEmpty()) {
+                out += plain.toString()
+                plain.setLength(0)
+            }
+        }
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
+            if (line.trimStart().startsWith("```")) {
+                flushPlain()
+                val fence = StringBuilder(line)
+                i++
+                var closed = false
+                while (i < lines.size) {
+                    fence.append('\n').append(lines[i])
+                    // 闭围栏：另一行以 ``` 开头（opening 行已单独占一行，不会自闭合）
+                    if (lines[i].trimStart().startsWith("```")) {
+                        closed = true
+                        i++
+                        break
+                    }
+                    i++
+                }
+                out += fence.toString()
+                // closed=false：已到结尾，未闭合围栏一起作为最后一段
+                if (!closed) break
+            } else {
+                plain.append(line).append('\n')
+                i++
+            }
+        }
+        flushPlain()
+        return out
+    }
+
+    private fun splitByTables(input: String): List<String> {
+        val result = mutableListOf<String>()
+        var last = 0
+        tableTag.findAll(input).forEach { match ->
+            if (match.range.first > last) {
+                result += input.substring(last, match.range.first)
+            }
+            result += "\u0000TABLE\u0000" + match.groupValues[1]
+            last = match.range.last + 1
+        }
+        if (last < input.length) result += input.substring(last)
+        return result
     }
 
     /**
@@ -81,6 +162,12 @@ object MarkdownParser {
      * 见 [unclosedSvgBlockOrNull]。设得够大（32KB）以保证正常示意图不受影响。
      */
     private const val UNCLOSED_SVG_EMIT_LIMIT = 32 * 1024
+
+    /**
+     * 未闭合 ```html 的产出上限（字符数）。超过它先当代码块显示，
+     * 避免每个流式 chunk 都对超长前缀跑一遍清洗（O(n²)）。
+     */
+    private const val UNCLOSED_HTML_EMIT_LIMIT = 64 * 1024
 
     private val parseCache = LruCache<String, List<Block>>(PARSE_CACHE_ENTRIES)
 
@@ -249,10 +336,15 @@ object MarkdownParser {
                         // 走等宽代码块——语言标记一并带出去，渲染层可据此
                         // 决定要不要显示语言标签。
                         val text = code.toString().trimEnd()
-                        blocks += if (isSvgFence(codeLanguage, text)) {
-                            Block.Svg(sanitizeSvg(text))
-                        } else {
-                            Block.Code(text, codeLanguage)
+                        blocks += when {
+                            isSvgFence(codeLanguage, text) -> Block.Svg(sanitizeSvg(text))
+                            // ```html 围栏（v0.0.57）：走 WebView 渲染，不再当源码。
+                            isHtmlFence(codeLanguage) -> {
+                                val sanitized = sanitizeHtml(text)
+                                if (sanitized.isBlank()) Block.Code(text, codeLanguage)
+                                else Block.Html(sanitized)
+                            }
+                            else -> Block.Code(text, codeLanguage)
                         }
                         code.clear()
                         codeLanguage = ""
@@ -399,10 +491,17 @@ object MarkdownParser {
         // 避免每个 chunk 都对全量前缀重跑清洗（O(n²)）；闭合后整段重解析自然恢复。
         if (inCode && code.isNotBlank()) {
             val text = code.toString().trimEnd()
-            if (isSvgFence(codeLanguage, text)) {
-                unclosedSvgBlockOrNull(text)?.let { blocks += it }
-            } else {
-                blocks += Block.Code(text, codeLanguage)
+            when {
+                isSvgFence(codeLanguage, text) ->
+                    unclosedSvgBlockOrNull(text)?.let { blocks += it }
+                // 未闭合的 ```html：流式中间态也尽量先渲染（≤ 上限时），
+                // 让「生成中就排版好、结束不闪变源码」成为默认体验。
+                isHtmlFence(codeLanguage) && text.length <= UNCLOSED_HTML_EMIT_LIMIT -> {
+                    val sanitized = sanitizeHtml(text)
+                    if (sanitized.isNotBlank()) blocks += Block.Html(sanitized)
+                    else blocks += Block.Code(text, codeLanguage)
+                }
+                else -> blocks += Block.Code(text, codeLanguage)
             }
         }
         // 同上：流式尾端 / 模型漏写闭合的裸 `<svg …`。同样走 [unclosedSvgBlockOrNull]，
@@ -429,6 +528,16 @@ object MarkdownParser {
             language.equals("xml", ignoreCase = true) ||
             language.equals("html", ignoreCase = true)
     }
+
+    /**
+     * 围栏内容是否应按 HTML 页面渲染（v0.0.57）。
+     *
+     * 只认显式的 `html` / `htm` 标记：无标记的 HTML 片段与「讲 HTML 的示例代码」
+     * 无法区分，贸然渲染会把教程源码变成页面。`isSvgFence` 优先于本函数，
+     * 所以 ```html 里若整段就是 `<svg>`（顶部就是 svg），仍走 SVG 渲染。
+     */
+    private fun isHtmlFence(language: String): Boolean =
+        language.equals("html", ignoreCase = true) || language.equals("htm", ignoreCase = true)
 
     /**
      * 流式期间**未闭合** SVG 的产出策略（v0.0.54 后续优化 · Task B）。

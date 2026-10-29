@@ -2457,16 +2457,16 @@ private fun DailyTrendLine(values: List<Long>) {
     )
 }
 
-/** 饼图配色：同一强调色系里拉开色相，保证相邻扇区不同色。 */
+/** 饼图配色（v0.0.57：换成暖色系，去掉蓝/紫）。 */
 private val PIE_COLORS = listOf(
-    Color(0xFF4F7DF3),
-    Color(0xFF12A594),
-    Color(0xFFE8A33D),
-    Color(0xFF8B5CF6),
-    Color(0xFFEC5B5B),
-    Color(0xFF3AA8E8),
-    Color(0xFF7CB342),
-    Color(0xFFD81B60)
+    Color(0xFFB0673A), // 赭石
+    Color(0xFF4E8A72), // 灰绿
+    Color(0xFFC08A3E), // 麦黄
+    Color(0xFFA24A63), // 酒红
+    Color(0xFFA94A3F), // 砖红
+    Color(0xFF3E7F86), // 灰青
+    Color(0xFF7C8A4E), // 橄榄
+    Color(0xFF8A6A4F)  // 棕
 )
 
 private fun pieColor(index: Int): Color = PIE_COLORS[index % PIE_COLORS.size]

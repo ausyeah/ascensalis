@@ -84,62 +84,35 @@ internal fun CropToolbar(
                 }
             }
             Spacer(Modifier.width(8.dp))
-            // 增强入口（v0.0.55 反馈）：单独一颗按钮，点开展开四档档位条。
-            //
-            // 为什么不常驻：工具栏已经有一排模式切换 + 一排操作，再常驻一排四档
-            // 会把裁剪区压得很小——而裁切区正是这个页面的主战场。档位条按需展开，
-            // 展开时当前档位写在按钮上，用户随时知道现在用的是哪档。
-            TextButton(
-                onClick = { onEnhancePanelOpenChange(!enhancePanelOpen) },
-                modifier = Modifier.weight(0.62f)
-            ) {
-                Text(
-                    text = stringResource(
-                        when (enhanceStrength.coerceIn(0, 3)) {
-                            0 -> R.string.capture_ocr_off
-                            1 -> R.string.capture_ocr_light
-                            3 -> R.string.capture_ocr_strong
-                            else -> R.string.capture_ocr_standard
-                        }
-                    ),
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
         }
 
-        if (enhancePanelOpen) {
-            // 四档档位条：与拍照页原先那颗档位条同一套资源与顺序，
-            // 只是搬到了「能同时看到裁切结果」的地方。
-            val options = listOf(
-                R.string.capture_ocr_off,
-                R.string.capture_ocr_light,
-                R.string.capture_ocr_standard,
-                R.string.capture_ocr_strong
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                options.forEachIndexed { index, titleRes ->
-                    SegmentedButton(
-                        selected = enhanceStrength.coerceIn(0, 3) == index,
-                        onClick = { onEnhanceStrengthChange(index) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                        colors = SegmentedButtonDefaults.colors(
-                            activeContainerColor = Color.White.copy(alpha = 0.9f),
-                            inactiveContainerColor = Color.Black.copy(alpha = 0.3f),
-                            activeContentColor = Color.Black,
-                            inactiveContentColor = Color.White,
-                            activeBorderColor = Color.White
-                        )
-                    ) {
-                        Text(stringResource(titleRes))
-                    }
+        // 增强档位（v0.0.57：四档常驻显示，不再「点开才展开」）。
+        // 用户反馈「调整增强就显示成四个选项吧不用展开」——相机侧本来也没有
+        // 更多设置，藏起来只会让人以为没有这个功能。常驻一排四档的代价，
+        // 比「找不到入口」小得多。
+        val options = listOf(
+            R.string.capture_ocr_off,
+            R.string.capture_ocr_light,
+            R.string.capture_ocr_standard,
+            R.string.capture_ocr_strong
+        )
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            options.forEachIndexed { index, titleRes ->
+                SegmentedButton(
+                    selected = enhanceStrength.coerceIn(0, 3) == index,
+                    onClick = { onEnhanceStrengthChange(index) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    colors = SegmentedButtonDefaults.colors(
+                        activeContainerColor = Color.White.copy(alpha = 0.9f),
+                        inactiveContainerColor = Color.Black.copy(alpha = 0.3f),
+                        activeContentColor = Color.Black,
+                        inactiveContentColor = Color.White,
+                        activeBorderColor = Color.White
+                    )
+                ) {
+                    Text(stringResource(titleRes))
                 }
             }
-            Text(
-                text = stringResource(R.string.crop_enhance_hint),
-                color = Color.White.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.labelSmall
-            )
         }
 
         Row(

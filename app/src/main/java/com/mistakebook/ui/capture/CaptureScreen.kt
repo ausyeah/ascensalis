@@ -393,18 +393,18 @@ fun CaptureScreen(
             )
         }
 
-        // F6：连拍批次悬浮计数 + 「完成」。QUESTION 与 CHAT（T2 对话连拍）都有批次；
-        // 计数文案不同（本批 N 张），上限不同（12 / 9）。
+        // 连拍批次：计数 + 「完成」（v0.0.57 起固定**右下角**）。
+        // 早先放在顶部居中，单手操作时够不着；放右下角既顺手又不挡取景。
         if (batchActive) {
-            Row(
+            Column(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 96.dp)
-                    .clip(RoundedCornerShape(999.dp))
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 28.dp)
+                    .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.92f))
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
                     text = stringResource(
@@ -417,7 +417,7 @@ fun CaptureScreen(
                 )
                 TextButton(
                     onClick = onStartBatchCrop,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
                     colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )

@@ -18,12 +18,12 @@ data class Subject(
     val colorArgb: Int = DEFAULT_COLOR
 ) {
     companion object {
-        const val DEFAULT_COLOR = 0xFF4F7DF3.toInt()
+        const val DEFAULT_COLOR = 0xFFB0673A.toInt()
 
         /** 预置学科：名字 → 卡片色板里的颜色（缺省用默认色）。 */
         val PRESETS: List<Pair<String, Int>> = listOf(
-            "数学" to 0xFF4F7DF3.toInt(),
-            "通信原理" to 0xFF12A594.toInt()
+            "数学" to 0xFFB0673A.toInt(),
+            "通信原理" to 0xFF4E8A72.toInt()
         )
 
         /** 兜底名：大模型判断不出学科时用它，用户可在编辑页改。 */

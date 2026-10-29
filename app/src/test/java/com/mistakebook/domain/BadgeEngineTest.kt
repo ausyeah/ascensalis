@@ -164,15 +164,17 @@ class BadgeEngineTest {
 
     @Test
     fun `all badges unlock with saturated stats`() {
+        // v0.0.57 目录扩到 48 枚，最高档到「千题 / 五百掌握 / 五千复习 /
+        // 一年坚持 / 单日三十 / 十关清零 / 五百词」。饱和值随之抬高。
         val stats = empty().copy(
-            totalQuestions = 100,
-            masteredQuestions = 10,
-            totalReviews = 100,
-            maxDailyEntries = 10,
-            studyDays = (0L until 30L).map { today.minusDays(it) }.toSet(),
-            clearedKnowledgePoints = 1,
+            totalQuestions = 1000,
+            masteredQuestions = 500,
+            totalReviews = 5000,
+            maxDailyEntries = 30,
+            studyDays = (0L until 365L).map { today.minusDays(it) }.toSet(),
+            clearedKnowledgePoints = 10,
             firstWordRecorded = true,
-            masteredWords = 100
+            masteredWords = 500
         )
         assertEquals(Badge.entries.size, unlockedKeys(stats).size)
     }

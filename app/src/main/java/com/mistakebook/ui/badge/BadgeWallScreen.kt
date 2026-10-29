@@ -56,6 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mistakebook.R
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.Badge
+import com.mistakebook.domain.BadgeCategory
 import com.mistakebook.domain.BadgeEngine
 import com.mistakebook.domain.BadgeStats
 import java.text.SimpleDateFormat
@@ -64,8 +65,8 @@ import java.util.Locale
 import kotlin.math.ceil
 
 /** 每页徽章数：3 列 × 3 行，与参考样式的呼吸感一致。 */
-private const val PAGE_SIZE = 9
-private const val GRID_COLUMNS = 3
+private const val PAGE_SIZE = 6
+private const val GRID_COLUMNS = 2
 
 /**
  * 成就墙（v0.0.54 重设计）。
@@ -242,7 +243,7 @@ private fun Spotlights(modifier: Modifier = Modifier) {
             drawPath(
                 beam,
                 brush = Brush.verticalGradient(
-                    listOf(Color(0xFFBBd4F5).copy(alpha = 0.9f), Color.Transparent)
+                    listOf(Color(0xFFE8D6B8).copy(alpha = 0.9f), Color.Transparent)
                 )
             )
         }
@@ -263,7 +264,7 @@ private fun BadgeGridItem(
                     .align(Alignment.BottomEnd)
                     .size(22.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF3D5A80).copy(alpha = 0.85f)),
+                    .background(Color(0xFF6B4A2F).copy(alpha = 0.85f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -283,7 +284,14 @@ private fun BadgeGridItem(
  */
 @Composable
 private fun BadgeImage(badge: Badge, unlocked: Boolean, size: Dp) {
-    val res = BADGE_IMAGES.getValue(badge)
+    val res = BADGE_IMAGES[badge]
+    if (res == null) {
+        // 新增徽章暂时没有美术素材（v0.0.57 一次扩到 48 枚）：用分类配色 +
+        // 首字做一枚程序化徽章，保证「有章可看」，而不是因为缺图直接崩。
+        // `BADGE_IMAGES.getValue` 在缺键时会抛异常——旧代码只覆盖了 10 枚。
+        ProceduralBadge(badge = badge, unlocked = unlocked, size = size)
+        return
+    }
     Image(
         painter = painterResource(res),
         contentDescription = badge.title,
@@ -305,6 +313,54 @@ private fun BadgeImage(badge: Badge, unlocked: Boolean, size: Dp) {
         },
         alpha = if (unlocked) 1f else 0.45f
     )
+}
+
+/**
+ * 程序化徽章：没有美术素材时按分类配色 + 标题首字生成一枚圆形章。
+ *
+ * 与美术素材同一套尺寸 / 阴影 / 未解锁置灰口径，看起来是同一面墙。
+ */
+@Composable
+private fun ProceduralBadge(badge: Badge, unlocked: Boolean, size: Dp) {
+    val (start, end) = categoryGradient(badge.category)
+    val brush = if (unlocked) {
+        Brush.linearGradient(listOf(start, end))
+    } else {
+        Brush.linearGradient(listOf(Color(0xFFB9B4AC), Color(0xFF8F8A82)))
+    }
+    Box(
+        modifier = Modifier
+            .size(size)
+            .shadow(
+                elevation = if (unlocked) 10.dp else 3.dp,
+                shape = CircleShape,
+                clip = false,
+                ambientColor = Color(0x33446688),
+                spotColor = Color(0x55446688)
+            )
+            .clip(CircleShape)
+            .background(brush),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = badge.title.take(1),
+            style = MaterialTheme.typography.titleLarge,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(4.dp)
+        )
+    }
+}
+
+/** 分类配色（与全局暖色主题一致，v0.0.57 去掉蓝/紫）。 */
+private fun categoryGradient(category: BadgeCategory): Pair<Color, Color> = when (category) {
+    BadgeCategory.QUESTIONS -> Color(0xFFB0673A) to Color(0xFF8A4E2A)
+    BadgeCategory.MASTERY -> Color(0xFF5C8A3C) to Color(0xFF3E6B2A)
+    BadgeCategory.REVIEWS -> Color(0xFF3E7F86) to Color(0xFF2C5F66)
+    BadgeCategory.STREAK -> Color(0xFFC08A3E) to Color(0xFF96661E)
+    BadgeCategory.DAILY -> Color(0xFFA24A63) to Color(0xFF7A3248)
+    BadgeCategory.KNOWLEDGE -> Color(0xFF8A6A4F) to Color(0xFF66492F)
+    BadgeCategory.WORDS -> Color(0xFF7C8A4E) to Color(0xFF5A6836)
 }
 
 @Composable

@@ -275,47 +275,49 @@ class HtmlExporter(private val mathRenderer: MathRenderer) {
               margin: 0 0 16px;
             }
 
-            @page { size: A4; margin: 16mm 14mm; }
+            @page { size: A4; margin: 12mm 12mm; }
             * { box-sizing: border-box; }
             body {
               font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", sans-serif;
-              line-height: 1.75; color: #1a1a1a; margin: 0; padding: 24px;
-              max-width: 860px;
+              /* v0.0.57：用户反馈打印出来「整体太大、一页装不下几道题」。
+                 统一把字号/行高/间距压一档，仍是同一套 HTML→PDF（WYSIWYG）。 */
+              font-size: 13px; line-height: 1.5; color: #1a1a1a; margin: 0; padding: 14px;
+              max-width: 720px;
             }
-            h1 { font-size: 22px; margin: 0 0 4px; }
-            .meta { color: #888; font-size: 13px; margin: 0 0 24px; }
+            h1 { font-size: 18px; margin: 0 0 3px; }
+            .meta { color: #888; font-size: 11px; margin: 0 0 14px; }
             .card {
               border: 1px solid #e6e6e6; border-left: 4px solid #d0d0d0;
-              border-radius: 6px; padding: 14px 18px; margin: 0 0 18px;
+              border-radius: 6px; padding: 10px 12px; margin: 0 0 12px;
               page-break-inside: avoid; break-inside: avoid;
             }
-            h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; color: #333; }
-            .stem { font-size: 16px; }
-            .options { padding-left: 26px; margin: 8px 0; }
-            .options li { margin: 3px 0; }
+            h2 { font-size: 13px; font-weight: 600; margin: 0 0 7px; color: #333; }
+            .stem { font-size: 13px; }
+            .options { padding-left: 20px; margin: 6px 0; }
+            .options li { margin: 2px 0; }
             .answer, .analysis {
-              margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e0e0e0;
-              font-size: 15px; color: #444;
+              margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e0e0e0;
+              font-size: 12.5px; color: #444;
             }
             .tag {
-              display: inline-block; font-size: 12px; color: #fff; background: #8a8a8a;
-              border-radius: 3px; padding: 1px 7px; margin-right: 8px; vertical-align: 2px;
+              display: inline-block; font-size: 10px; color: #fff; background: #8a8a8a;
+              border-radius: 3px; padding: 1px 6px; margin-right: 6px; vertical-align: 1px;
             }
-            figure { margin: 12px 0; text-align: center; }
-            figure img { max-width: 60%; }
-            figcaption { font-size: 12px; color: #999; margin-top: 4px; }
-            .blank { margin-top: 12px; border-bottom: 1px dashed #ddd; }
+            figure { margin: 8px 0; text-align: center; }
+            figure img { max-width: 50%; }
+            figcaption { font-size: 10.5px; color: #999; margin-top: 3px; }
+            .blank { margin-top: 8px; border-bottom: 1px dashed #ddd; }
             img.formula { vertical-align: middle; margin: 0 2px; }
-            img.formula.block { display: block; margin: 10px auto; }
+            img.formula.block { display: block; margin: 6px auto; }
             code.latex {
-              font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px;
+              font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px;
               background: #f6f6f6; padding: 1px 4px; border-radius: 3px;
             }
-            math { font-size: 1.05em; }
-            math[display="block"] { margin: 10px 0; }
+            math { font-size: 1em; }
+            math[display="block"] { margin: 6px 0; }
             /* 打印时用 KaTeX 的展开样式：行内公式不能换行，块公式中央对齐 */
-            .katex { font-size: 1.06em; }
-            .katex-display { margin: 12px 0; text-align: center; }
+            .katex { font-size: 1em; }
+            .katex-display { margin: 8px 0; text-align: center; }
             .katex-display > .katex { text-align: center; }
             span.tex { white-space: nowrap; }
             @media print {

@@ -28,13 +28,21 @@ import androidx.collection.LruCache
 object SvgSanitizer {
 
     private val SCRIPT = Regex("<script\\b[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE)
+    private val SCRIPT_EMPTY = Regex("<script\\b[^>]*/?>", RegexOption.IGNORE_CASE)
     private val FOREIGN = Regex(
         "<foreignObject\\b[^>]*>[\\s\\S]*?</foreignObject>",
         RegexOption.IGNORE_CASE
     )
-    /** 带 http(s) 外链的 image 元素（含自闭合与成对两种写法）。 */
+    /** 其它可嵌入可执行内容 / 外链的容器（v0.0.57：兼容性加固）。 */
+    private val IFRAME = Regex("<iframe\\b[^>]*>[\\s\\S]*?</iframe>", RegexOption.IGNORE_CASE)
+    private val OBJECT = Regex("<object\\b[^>]*>[\\s\\S]*?</object>", RegexOption.IGNORE_CASE)
+    private val EMBED = Regex("<embed\\b[^>]*/?>", RegexOption.IGNORE_CASE)
+    /** XML 声明 / DOCTYPE：AndroidSVG 对不规范的这些前缀较敏感，直接去掉。 */
+    private val XML_DECL = Regex("<\\?xml[\\s\\S]*?\\?>", RegexOption.IGNORE_CASE)
+    private val DOCTYPE = Regex("<!doctype[^>]*>", RegexOption.IGNORE_CASE)
+    /** 带 http(s) 外链的 image 元素（含自闭合与成对两种写法，也认协议相对 `//`）。 */
     private val REMOTE_IMAGE = Regex(
-        "<image\\b[^>]*?(?:xlink:)?href\\s*=\\s*[\"']\\s*https?:[^\"']*[\"'][^>]*?(?:/>|>[\\s\\S]*?</image>)",
+        "<image\\b[^>]*?(?:xlink:)?href\\s*=\\s*[\"']\\s*(?:https?:)?//[^\"']*[\"'][^>]*?(?:/>|>[\\s\\S]*?</image>)",
         RegexOption.IGNORE_CASE
     )
     private val EVENT_ATTR = Regex(
@@ -42,10 +50,14 @@ object SvgSanitizer {
         RegexOption.IGNORE_CASE
     )
     private val JS_HREF = Regex(
-        "(xlink:)?href\\s*=\\s*[\"']\\s*javascript:[^\"']*[\"']",
+        "(xlink:)?href\\s*=\\s*[\"']\\s*(?:javascript|data:text/html):[^\"']*[\"']",
         RegexOption.IGNORE_CASE
     )
     private val XMLNS = Regex("xmlns\\s*=", RegexOption.IGNORE_CASE)
+    private val HTML_OPEN = Regex("<html\\b[^>]*>", RegexOption.IGNORE_CASE)
+    private val HTML_CLOSE = Regex("</html\\s*>", RegexOption.IGNORE_CASE)
+    private val BODY_OPEN = Regex("<body\\b[^>]*>", RegexOption.IGNORE_CASE)
+    private val BODY_CLOSE = Regex("</body\\s*>", RegexOption.IGNORE_CASE)
 
     private const val SVG_SANITIZE_CACHE_ENTRIES = 64
 
@@ -87,8 +99,20 @@ object SvgSanitizer {
     private fun computeSanitized(source: String): String {
         var out = source.trim()
         if (out.isBlank()) return ""
+        // 先剥外壳：模型常把 svg 包在 ```html / <?xml?> / <!DOCTYPE> 里。
+        // AndroidSVG 遇到 `<html>` 包裹会解析失败 —— 剥掉后图才出得来。
+        out = out.replace(XML_DECL, "")
+        out = out.replace(DOCTYPE, "")
+        out = out.replace(HTML_OPEN, "")
+        out = out.replace(HTML_CLOSE, "")
+        out = out.replace(BODY_OPEN, "")
+        out = out.replace(BODY_CLOSE, "")
         out = out.replace(SCRIPT, "")
+        out = out.replace(SCRIPT_EMPTY, "")
         out = out.replace(FOREIGN, "")
+        out = out.replace(IFRAME, "")
+        out = out.replace(OBJECT, "")
+        out = out.replace(EMBED, "")
         out = out.replace(REMOTE_IMAGE, "")
         out = out.replace(EVENT_ATTR, "")
         // javascript: 伪协议的 href 直接清空，而不是删掉整个元素——
@@ -124,20 +148,83 @@ object SvgSanitizer {
 internal fun sanitizeSvg(source: String): String = SvgSanitizer.sanitize(source)
 
 /**
- * 从 viewBox 取宽高比（`viewBox="0 0 400 300"` → 400/300）。
+ * 从模型输出里抠出一段完整 `<svg>…</svg>` 并清洗（v0.0.57）。
  *
+ * 模型很少老老实实「只输出 SVG」：常见的是
+ * 「下面是示意图：」+ ```svg 围栏 + 解释。这里做三件事：
+ * 1. 取**最外层** `<svg ...>...</svg>`（含嵌套时按配对深度找到正确结尾）；
+ * 2. 去掉 XML 声明 / DOCTYPE；
+ * 3. 过一遍 [SvgSanitizer.sanitize]。
+ *
+ * @return 清洗后的 SVG；没有可用的 `<svg>` 或清洗后为空时返回 null。
+ *   纯函数，可单测。
+ */
+fun extractSvgDocument(raw: String): String? {
+    if (raw.isBlank()) return null
+    val start = Regex("<svg\\b", RegexOption.IGNORE_CASE).find(raw)?.range?.first ?: return null
+    // 按嵌套深度找配对的 </svg>：模型偶尔会写 <svg><svg>…</svg></svg>。
+    var depth = 0
+    var index = start
+    var end = -1
+    val openTag = Regex("<svg\\b[^>]*>", RegexOption.IGNORE_CASE)
+    val closeTag = Regex("</svg\\s*>", RegexOption.IGNORE_CASE)
+    while (index < raw.length) {
+        val open = openTag.find(raw, index)
+        val close = closeTag.find(raw, index)
+        if (open == null && close == null) break
+        if (open != null && (close == null || open.range.first < close.range.first)) {
+            depth++
+            index = open.range.last + 1
+        } else if (close != null) {
+            depth--
+            index = close.range.last + 1
+            if (depth <= 0) {
+                end = index
+                break
+            }
+        } else {
+            break
+        }
+    }
+    if (end <= start) return null
+    val doc = SvgSanitizer.sanitize(raw.substring(start, end))
+    return doc.takeIf { it.contains("<svg", ignoreCase = true) }
+}
+
+/**
+ * 从 viewBox 取宽高比（`viewBox="0 0 400 300"` → 400/300）。
  * 渲染层按它给 SVG 定高度：宽度铺满、高度等比，图才不会被压扁或拉长。
- * 取不到（没写 viewBox、格式不对）时返回 null，调用方用兜底比例。
+ *
+ * 取不到 viewBox 时退回 `<svg width=".." height="..">`（v0.0.57：很多模型
+ * 只写 width/height 不写 viewBox，此前一律按 4:3 兜底，比例不对的图会被
+ * 压扁）。都取不到返回 null，调用方再用兜底比例。
  *
  * 注意 viewBox 四个数是 `min-x min-y width height`，宽高是**后两个**。
  */
 fun svgAspectRatio(source: String): Float? {
     val match = Regex("viewBox\\s*=\\s*[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
-        .find(source) ?: return null
-    val parts = match.groupValues[1].trim().split(Regex("[\\s,]+")).filter { it.isNotBlank() }
-    if (parts.size < 4) return null
-    val width = parts[2].toFloatOrNull() ?: return null
-    val height = parts[3].toFloatOrNull() ?: return null
+        .find(source)
+    if (match != null) {
+        val parts = match.groupValues[1].trim().split(Regex("[\\s,]+")).filter { it.isNotBlank() }
+        if (parts.size >= 4) {
+            val width = parts[2].toFloatOrNull()
+            val height = parts[3].toFloatOrNull()
+            if (width != null && height != null && width > 0f && height > 0f) {
+                return width / height
+            }
+        }
+    }
+    // 退回根 <svg> 标签上的 width/height（可带 px 单位）
+    val openTag = Regex("<svg\\b[^>]*>", RegexOption.IGNORE_CASE).find(source)?.value ?: return null
+    val width = numberAttr(openTag, "width") ?: return null
+    val height = numberAttr(openTag, "height") ?: return null
     if (width <= 0f || height <= 0f) return null
     return width / height
+}
+
+/** 取标签属性里的数值（忽略 `px` 等单位）；百分比 / `auto` 返回 null。 */
+private fun numberAttr(tag: String, name: String): Float? {
+    val raw = Regex("""\b$name\s*=\s*["']\s*([0-9.]+)""", RegexOption.IGNORE_CASE)
+        .find(tag)?.groupValues?.get(1) ?: return null
+    return raw.toFloatOrNull()
 }

@@ -602,12 +602,10 @@ private fun AuxImageBlock(
             }
         }
 
-        auxState.path != null -> {
+        auxState.svg != null -> {
             Column {
-                AsyncImage(
-                    model = auxState.path,
-                    contentDescription = stringResource(R.string.detail_aux_image),
-                    contentScale = ContentScale.FillWidth,
+                com.mistakebook.ui.common.SvgBlock(
+                    source = auxState.svg,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))

@@ -173,7 +173,9 @@ fun ChatScreen(
     questionId: Long?,
     sessionId: Long? = null,
     onBack: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    /** 打开 App 内置相机（v0.0.57：替代系统相机；返回的图经容器交接）。 */
+    onOpenCamera: () -> Unit = {}
 ) {
     val viewModel = containerViewModel(
         container = container,
@@ -251,28 +253,9 @@ fun ChatScreen(
         uris.forEach { uri -> viewModel.onAttachmentPicked(uri) }
     }
 
-    // 会话拍照（v0.0.52）：系统相机直拍 → 落 cacheDir → 当轮附件，
-    // 喂给识图/vision 模型。**不再跳错题扫描相机页**——那是拍题链路
-    // （增强档位/连拍批次/裁切接力都是为 OCR 服务的），会话要的只是
-    // 一张能发给模型的图。系统 TakePicture 在个别 ROM 上可能回
-    // RESULT_OK 却不落盘，用「文件存在且非空」兜底校验，失败给明确提示。
-    var pendingCameraFile by remember { mutableStateOf<File?>(null) }
-    val takePictureLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        val file = pendingCameraFile
-        pendingCameraFile = null
-        if (success && file != null && file.exists() && file.length() > 0) {
-            viewModel.onAttachmentPicked(Uri.fromFile(file))
-        } else {
-            runCatching { file?.delete() }
-            Toast.makeText(
-                context,
-                context.getString(R.string.chat_camera_failed),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }
+    // 会话拍照（v0.0.57）：改为跳转内置相机页，交回的图经
+    // [AppContainer.pendingChatAttachmentPaths] 进入当轮附件。
+    // 系统 TakePicture 路径已移除（见 onTakePhoto 注释）。
 
     // 裁切页交回的聊天附件（T12）：扫描相机 + 裁切确认后经容器标志交接。
     // 快照状态驱动重组 → LaunchedEffect 重跑；取走即清，防旧图误入下一轮。
@@ -424,31 +407,11 @@ fun ChatScreen(
                 )
             },
             onTakePhoto = {
-                // v0.0.52：系统相机直拍 → 当轮附件（识图/vision 管线）。
-                // 旧的 T12 决策是改走错题扫描相机（有增强/闪光/裁切），
-                // 但那是为 OCR 拍题服务的：会话里拍张图想问模型，
-                // 跳进拍题页既违和又绕路。FileProvider 授权见
-                // AndroidManifest 与 res/xml/file_paths.xml。
+                // v0.0.57：改走 App 内的相机页，不再拉系统相机。
+                // 系统 TakePicture 在部分 ROM 上不落盘，也没有跟随主题的
+                // 取景/增强体验；内置相机与错题扫描共用一套（见 NavHost）。
                 showAttachSheet = false
-                val dir = File(context.cacheDir, "chat_captures").apply { mkdirs() }
-                val file = File(dir, "chat_${System.currentTimeMillis()}.jpg")
-                val uri = runCatching {
-                    FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        file
-                    )
-                }.getOrNull()
-                if (uri == null) {
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.chat_camera_failed),
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else {
-                    pendingCameraFile = file
-                    takePictureLauncher.launch(uri)
-                }
+                onOpenCamera()
             },
             onPickFile = { filePicker.launch(DOCUMENT_MIME_TYPES) },
             // T6 降级：资料库文件选择 → 加入待注入列表（发送时前置为当轮上下文）
@@ -956,6 +919,9 @@ private fun MessageBubble(
                         mathRenderer = mathRenderer,
                         modifier = if (isStreaming) Modifier.animateContentSize() else Modifier,
                         streaming = isStreaming,
+                        // 聊天里绝不回退 LaTeX 源码（v0.0.57）：用户反馈
+                        // 「流式正常、结束后显示原始源码」。给「公式无法渲染」提示。
+                        showFailedMathSource = false,
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (isUser) {
                             MaterialTheme.colorScheme.onPrimaryContainer
@@ -1310,7 +1276,8 @@ private fun ThinkingBlock(
                 style = MaterialTheme.typography.bodySmall,
                 // 思考过程同样加深：onSurfaceVariant 在浅色主题下对比度不足
                 color = MaterialTheme.colorScheme.onSurface,
-                streaming = streaming
+                streaming = streaming,
+                showFailedMathSource = false
             )
         }
     }

@@ -1,13 +1,23 @@
 package com.mistakebook.ui.common
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
 import com.mistakebook.markdown.svgAspectRatio
@@ -25,6 +35,12 @@ import com.mistakebook.markdown.svgAspectRatio
  * 宽度铺满、高度按 viewBox 的宽高比算（[svgAspectRatio] 取不到时用
  * 4:3 兜底，也就是任务书约定的 400×300）。**不给固定高度的话
  * Compose 会按 0 高度布局，图根本不显示**——这是最容易踩的一个坑。
+ *
+ * ## 失败兜底（v0.0.57）
+ *
+ * 用户反馈「SVG 兼容性 / 健壮性差」：模型偶尔写出解码器不认的 SVG
+ * （缺 viewBox、错误嵌套、非法属性），此前失败时**整块空白**，用户
+ * 完全不知道这里有图。现在解码失败给一条可见的提示，而不是空气。
  */
 @Composable
 fun SvgBlock(
@@ -41,10 +57,27 @@ fun SvgBlock(
             .decoderFactory(SvgDecoder.Factory())
             .build()
     }
+    var failed by remember(source) { mutableStateOf(false) }
+    if (failed) {
+        Text(
+            text = "示意图无法显示",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                .padding(10.dp)
+        )
+        return
+    }
     AsyncImage(
         model = request,
         contentDescription = "示意图",
         contentScale = ContentScale.Fit,
+        onState = { state ->
+            // 只认 Error；Loading / Success 不动，避免成功后又翻成失败态。
+            if (state is AsyncImagePainter.State.Error) failed = true
+        },
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(ratio)

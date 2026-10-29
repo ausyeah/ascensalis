@@ -104,7 +104,16 @@ fun RichText(
      * 静态文本（编辑页/详情页/历史消息）保持原行为：失败与半截内容显示源码，
      * 那是文本体检和可读性的兜底。
      */
-    streaming: Boolean = false
+    streaming: Boolean = false,
+    /**
+     * 公式**渲染失败**时是否回退显示 LaTeX 源码（v0.0.57）。
+     *
+     * 默认 true（编辑页 / 详情页的旧行为）。聊天气泡传 false：用户反馈
+     * 「流式渲染正常，结束后显示原始源码」——根因就是失败分支在
+     * `streaming=false` 时把 `\frac{...}` 原样摊出来。聊天里给一句
+     * 「公式无法渲染」比糊一段源码更不刺眼，源码仍可通过 onMathFailures 上报体检。
+     */
+    showFailedMathSource: Boolean = true
 ) {
     // 走缓存：item 滑出视口销毁后滑回来不再重解（列表滑动卡顿的主因之一）。
     // 流式期间调用方（MessageBubble）已按 100ms 防抖喂入文本（见 streamTextDebounced），
@@ -182,7 +191,7 @@ fun RichText(
                     },
                     color = color,
                     modifier = Modifier.padding(top = 4.dp),
-                    showSourceFallback = !streaming
+                    showSourceFallback = !streaming && showFailedMathSource
                 )
 
                 is MarkdownParser.Block.Paragraph -> InlineText(
@@ -191,7 +200,7 @@ fun RichText(
                     targetFontPx = targetFontPx,
                     style = style,
                     color = color,
-                    showSourceFallback = !streaming
+                    showSourceFallback = !streaming && showFailedMathSource
                 )
 
                 is MarkdownParser.Block.ListItem -> Row(
@@ -210,7 +219,7 @@ fun RichText(
                         style = style,
                         color = color,
                         modifier = Modifier.weight(1f),
-                        showSourceFallback = !streaming
+                        showSourceFallback = !streaming && showFailedMathSource
                     )
                 }
 
@@ -229,7 +238,7 @@ fun RichText(
                         style = style.copy(fontStyle = FontStyle.Italic),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
-                        showSourceFallback = !streaming
+                        showSourceFallback = !streaming && showFailedMathSource
                     )
                 }
 
@@ -249,6 +258,12 @@ fun RichText(
                 // ```svg 围栏：渲染成图形而不是等宽文本。
                 // 详情页与对话页共用 RichText，这里接一次两处都生效。
                 is MarkdownParser.Block.Svg -> SvgBlock(
+                    source = block.source,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
+                // ```html 围栏（v0.0.57）：WebView 渲染，不再当源码文本。
+                is MarkdownParser.Block.Html -> HtmlBlock(
                     source = block.source,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
@@ -280,7 +295,7 @@ fun RichText(
                             display = true,
                             centered = true,
                             color = color,
-                            showSourceFallback = !streaming
+                            showSourceFallback = !streaming && showFailedMathSource
                         )
                     }
                 } else if (streaming) {
@@ -640,6 +655,13 @@ private fun MathImage(
             color = color,
             fontFamily = FontFamily.Monospace
         )
+    } else if (!pending) {
+        // 渲染失败且调用方不希望看到源码：给一句可见提示，别留空气。
+        Text(
+            text = "公式无法渲染",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -850,6 +872,12 @@ private fun InlineRow(
                                         Text(
                                             text = span.latex,
                                             style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1
+                                        )
+                                    } else if (!pending) {
+                                        Text(
+                                            text = "公式",
+                                            style = MaterialTheme.typography.labelSmall,
                                             maxLines = 1
                                         )
                                     }

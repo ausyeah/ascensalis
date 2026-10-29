@@ -70,13 +70,18 @@ data class VariantState(
  */
 data class AuxImageState(
     val generating: Boolean = false,
-    /** 已生成的图片路径（磁盘缓存文件）。 */
-    val path: String? = null,
-    /** 模型写的生图描述（出图后展示来源）。 */
+    /**
+     * 已生成的 SVG 源码（v0.0.57：辅助图从「生图模型」改为「LLM 直接出 SVG」）。
+     *
+     * 用户反馈「生成辅助图还是用生图模型太不可控」：几何画歪、坐标轴标错、
+     * 数字乱写。SVG 是代码，结构确定、可缩放、可裁剪，才适合数学/物理图。
+     */
+    val svg: String? = null,
+    /** 生成说明（例如「按题干画的函数图像」）。 */
     val prompt: String? = null,
     val error: String? = null
 ) {
-    val visible: Boolean get() = generating || path != null || error != null
+    val visible: Boolean get() = generating || svg != null || error != null
 }
 
 class DetailViewModel(
@@ -97,40 +102,65 @@ class DetailViewModel(
         "q$questionId-${question.stem.hashCode()}"
 
     /**
-     * 生成这道题的辅助图：**LLM 出英文描述 → 生图 API 出图 → 磁盘缓存**。
+     * 生成这道题的辅助图（v0.0.57 重做）：**让对话大模型直接输出 SVG**。
      *
-     * 与单词场景图共用 [com.mistakebook.pipeline.SceneImageGenerator]，
-     * 差别只在提示词与缓存种子。
+     * ## 为什么不再走生图 API
+     *
+     * 旧实现是「LLM 写英文描述 → 生图模型画」。用户实测的问题很集中：
+     * 生图模型会把三角形画歪、坐标轴标错、把题目里的数字改掉——
+     * 而错题辅助图恰恰要求**精确**。SVG 是代码：形状、坐标、标注都由
+     * 文本决定，模型写错了也能从源码看出来，渲染出来不会「像那么回事但全是错的」。
+     *
+     * 提示词强约束：
+     * - 只输出一个 `<svg>...</svg>`，不要解释、不要 Markdown 围栏；
+     * - viewBox 固定 `0 0 400 300`，只允许基本形状；
+     * - 题里的数字/字母必须原样标注。
      */
     fun generateAuxImage() {
         viewModelScope.launch {
             val question = uiState.value.question ?: return@launch
             if (_auxImage.value.generating) return@launch
             _auxImage.value = AuxImageState(generating = true)
-            val body = buildString {
-                append(question.stem.trim())
-                if (question.answer.isNotBlank()) append("\nAnswer: ").append(question.answer.trim())
+            val profile = container.settingsStore.snapshotNow().activeProfile
+            if (profile == null || !profile.isConfigured()) {
+                _auxImage.value = AuxImageState(error = "尚未配置对话模型：请到设置 → 接口配置里添加")
+                return@launch
             }
-            val result = container.sceneImageGenerator.generate(
-                cacheKeySeed = auxSeed(question),
-                systemPrompt = "Based on this problem, describe a simple educational illustration. " +
-                    "Reply with ONLY the image prompt, 50 words max.",
-                userPrompt = body
+            val user = buildString {
+                val subject = uiState.value.subjectName
+                if (!subject.isNullOrBlank()) append("学科：").append(subject).append('\n')
+                append("题目：").append(question.stem.trim()).append('\n')
+                if (question.answer.isNotBlank()) append("答案：").append(question.answer.trim()).append('\n')
+            }
+            val result = container.llmClient.plainText(
+                profile = profile,
+                systemPrompt = AUX_SVG_SYSTEM_PROMPT,
+                userPrompt = user,
+                maxTokens = 4096
             )
             _auxImage.value = when (result) {
-                is com.mistakebook.pipeline.SceneImageResult.Cached ->
-                    AuxImageState(path = result.file.absolutePath)
+                is com.mistakebook.net.ApiResult.Success -> {
+                    val svg = com.mistakebook.markdown.extractSvgDocument(result.data)
+                    if (svg == null) {
+                        AuxImageState(error = "模型没有给出可用的 SVG，请重试")
+                    } else {
+                        runCatching { auxFile(question).writeText(svg, Charsets.UTF_8) }
+                        AuxImageState(svg = svg, prompt = "由 AI 按题干生成的结构示意图")
+                    }
+                }
 
-                is com.mistakebook.pipeline.SceneImageResult.Generated ->
-                    AuxImageState(path = result.file.absolutePath, prompt = result.prompt)
-
-                is com.mistakebook.pipeline.SceneImageResult.NotConfigured ->
-                    AuxImageState(error = "尚未配置生图渠道：请到设置 → 生图设置里添加一套")
-
-                is com.mistakebook.pipeline.SceneImageResult.Failed ->
-                    AuxImageState(error = result.message)
+                is com.mistakebook.net.ApiResult.Failure ->
+                    AuxImageState(
+                        error = result.error.serverMessage.ifBlank { "生成失败，请重试" }
+                    )
             }
         }
+    }
+
+    /** 辅助图缓存文件：题目 id + 题干 hash（改题=换图）。 */
+    private fun auxFile(question: Question): java.io.File {
+        val dir = java.io.File(container.files.rootDir, "aux").apply { mkdirs() }
+        return java.io.File(dir, "${auxSeed(question)}.svg")
     }
 
     /** 关掉辅助图（失败提示用；图本身留在缓存里，下次进来还在）。 */
@@ -150,11 +180,15 @@ class DetailViewModel(
         viewModelScope.launch {
             runCatching {
                 val question = uiState.value.question
-                val profile = container.settingsStore.snapshotNow().activeImageProfile
-                if (question != null && profile != null) {
-                    container.imageDiskCache.remove(
-                        container.imageDiskCache.keyFor(auxSeed(question), profile.model)
-                    )
+                if (question != null) {
+                    auxFile(question).delete()
+                    // 兼容老版本生成的 PNG 缓存
+                    val profile = container.settingsStore.snapshotNow().activeImageProfile
+                    if (profile != null) {
+                        container.imageDiskCache.remove(
+                            container.imageDiskCache.keyFor(auxSeed(question), profile.model)
+                        )
+                    }
                 }
             }
             _auxImage.value = AuxImageState()
@@ -189,13 +223,14 @@ class DetailViewModel(
         viewModelScope.launch {
             runCatching {
                 val question = uiState.mapNotNull { it.question }.first()
-                val profile = container.settingsStore.snapshotNow().activeImageProfile
-                    ?: return@runCatching
-                val key = container.imageDiskCache.keyFor(auxSeed(question), profile.model)
-                container.imageDiskCache.peek(key)?.let { file ->
-                    _auxImage.value = AuxImageState(path = file.absolutePath)
+                // v0.0.57：辅助图现在是缓存目录里的 .svg 文本文件
+                val file = auxFile(question)
+                if (file.isFile) {
+                    _auxImage.value = AuxImageState(
+                        svg = file.readText(Charsets.UTF_8),
+                        prompt = "由 AI 按题干生成的结构示意图"
+                    )
                 }
-                // 兜底：这张图既然要显示了，就不能被 LRU 淘汰掉（见 auxImage 注释）
             }.onFailure { /* 回填失败不影响看题 */ }
         }
     }
@@ -397,3 +432,21 @@ class DetailViewModel(
         _variant.value = VariantState()
     }
 }
+
+/**
+ * 辅助图的系统提示词（v0.0.57）：直接让模型写 SVG，不再经生图 API。
+ *
+ * 约束都来自真实翻车：模型爱写解释性文字（「下面是示意图」）、爱用
+ * Markdown 围栏、爱省略 viewBox、爱在 SVG 里塞外链图片。逐条禁掉，
+ * 剩下的就是一段能直接被 SvgSanitizer / AndroidSVG 吃进去的图。
+ */
+private const val AUX_SVG_SYSTEM_PROMPT = """你是教学绘图助手。根据用户给的题目，画一张**精确**的示意图。
+只输出一个完整的 SVG 文档，不要任何解释、不要 Markdown 代码围栏、不要前后缀。
+要求：
+1. 根标签必须带 viewBox="0 0 400 300"，不要写 width/height 百分比。
+2. 只用基本元素：<line> <circle> <path> <polygon> <polyline> <rect> <text>。
+3. 不引用外部图片/字体/脚本，不用 <foreignObject>。
+4. 题目里出现的数字、字母、坐标必须原样标注，不要改数。
+5. 线条用 stroke，填充用 fill，文字用 <text> 并标在对应位置。
+6. 白色/浅色背景假设下可读：线条用深色（如 #333），不要纯白线。
+如果这张题确实不需要图（例如纯代数运算），输出一个空的 <svg viewBox="0 0 400 300"></svg>。"""
