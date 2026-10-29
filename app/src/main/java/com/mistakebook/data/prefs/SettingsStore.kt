@@ -150,25 +150,20 @@ class SettingsStore(context: Context) {
      * 再也不会重新播种，于是这套装了预填 Key 的包也永远过不了 Key 门禁。
      */
     private fun loadProfiles(): List<LlmProfile> {
-        val raw = readSecure(SECURE_LLM_PROFILES)
-        val stored = if (raw.isBlank()) {
-            emptyList()
-        } else {
-            runCatching { json.decodeFromString<List<LlmProfile>>(raw) }.getOrDefault(emptyList())
-        }
+        val stored = loadProfileList<LlmProfile>(SECURE_LLM_PROFILES)
         val seed = buildConfigSeed()
         if (stored.none { it.isConfigured() } && seed != null) {
             val merged = stored.filterNot { it == seed } + seed
             Log.i(TAG, "已存接入配置均不可用，注入 buildConfig 预填兜底: ${merged.size} 套")
-            // 用 writeProfiles 而不是 saveProfiles：这里正在 snapshot() 内部，
-            // 而 snapshot() 又是 secureVersion 的收集者。saveProfiles 会 bump 版本号，
+            // 用 write 而不是 save：这里正在 snapshot() 内部，
+            // 而 snapshot() 又是 secureVersion 的收集者。save 会 bump 版本号，
             // 等于在 combine 的 transform 里自触发重发，绕成活锁。
-            writeProfiles(merged)
+            writeProfileList(SECURE_LLM_PROFILES, merged)
             return merged
         }
         if (stored.isNotEmpty()) return stored
         if (seed == null) return emptyList()
-        writeProfiles(listOf(seed))
+        writeProfileList(SECURE_LLM_PROFILES, listOf(seed))
         return listOf(seed)
     }
 
@@ -195,143 +190,145 @@ class SettingsStore(context: Context) {
         ).normalized()
     }
 
-    /**
-     * 只落盘、不通知观察者。
-     *
-     * 供 [loadProfiles] 的自愈播种使用——那条路径运行在 `settings` Flow 的
-     * 收集栈里，此时 bump [secureVersion] 会让上游立刻重发，形成活锁。
-     * 自愈本身已经把结果 `return` 出去了，调用方拿到的就是最新值，
-     * 不需要额外的重发。
-     */
-    private fun writeProfiles(profiles: List<LlmProfile>) {
-        val normalized = profiles.map { it.normalized() }
-        securePrefs.edit()
-            .putString(SECURE_LLM_PROFILES, json.encodeToString(normalized))
-            .apply()
-    }
-
     fun saveProfiles(profiles: List<LlmProfile>) {
-        writeProfiles(profiles)
+        writeProfileList(SECURE_LLM_PROFILES, profiles)
         secureVersion.value += 1
     }
 
     suspend fun upsertProfile(profile: LlmProfile) {
-        val hadActive = appContext.settingsDataStore.data.first()[KEY_ACTIVE_PROFILE].isNullOrBlank()
-        val current = loadProfiles().toMutableList()
-        val index = current.indexOfFirst { it.id == profile.id }
-        val normalized = profile.normalized()
-        if (index >= 0) current[index] = normalized else current.add(normalized)
-        saveProfiles(current)
-        if (hadActive) setActiveProfileId(normalized.id)
+        upsertProfileInternal(KEY_ACTIVE_PROFILE, profile,
+            load = { loadProfileList<LlmProfile>(SECURE_LLM_PROFILES) },
+            save = { saveProfiles(it) })
     }
 
     suspend fun deleteProfile(id: String) {
-        val prefs = appContext.settingsDataStore.data.first()
-        val remaining = loadProfiles().filterNot { it.id == id }
-        saveProfiles(remaining)
-        if (prefs[KEY_ACTIVE_PROFILE] == id) {
-            setActiveProfileId(remaining.firstOrNull()?.id)
-        }
+        deleteProfileInternal(KEY_ACTIVE_PROFILE, id,
+            load = { loadProfileList<LlmProfile>(SECURE_LLM_PROFILES) },
+            save = { saveProfiles(it) })
     }
 
-    suspend fun setActiveProfileId(id: String?) {
-        appContext.settingsDataStore.edit { prefs ->
-            if (id == null) prefs.remove(KEY_ACTIVE_PROFILE) else prefs[KEY_ACTIVE_PROFILE] = id
-        }
-    }
+    suspend fun setActiveProfileId(id: String?) = setActiveIdByKey(KEY_ACTIVE_PROFILE, id)
 
     // ===== 生图渠道（多套，可切换；同 LlmProfile 体系，字段更少） =====
 
     /**
-     * 读已保存的生图渠道。
-     *
-     * 与 [loadProfiles] 不同：**没有 buildConfig 预填兜底**——生图渠道
-     * 没有任何默认值可填（公开包不预置任何密钥），存量为空就是空，
-     * 各功能按「未配置」给出友好提示。
+     * 生图渠道**没有 buildConfig 预填兜底**——生图渠道没有任何默认值可填
+     * （公开包不预置任何密钥），存量为空就是空，各功能按「未配置」给出友好提示。
      */
-    private fun loadImageProfiles(): List<ImageProfile> {
-        val raw = readSecure(SECURE_IMAGE_PROFILES)
-        if (raw.isBlank()) return emptyList()
-        return runCatching { json.decodeFromString<List<ImageProfile>>(raw) }
-            .getOrDefault(emptyList())
-    }
-
-    private fun writeImageProfiles(profiles: List<ImageProfile>) {
-        val normalized = profiles.map { it.normalized() }
-        securePrefs.edit()
-            .putString(SECURE_IMAGE_PROFILES, json.encodeToString(normalized))
-            .apply()
-    }
+    private fun loadImageProfiles(): List<ImageProfile> =
+        loadProfileList(SECURE_IMAGE_PROFILES)
 
     fun saveImageProfiles(profiles: List<ImageProfile>) {
-        writeImageProfiles(profiles)
+        writeProfileList(SECURE_IMAGE_PROFILES, profiles)
         secureVersion.value += 1
     }
 
     suspend fun upsertImageProfile(profile: ImageProfile) {
-        val hadActive = appContext.settingsDataStore.data.first()[KEY_ACTIVE_IMAGE_PROFILE].isNullOrBlank()
-        val current = loadImageProfiles().toMutableList()
-        val index = current.indexOfFirst { it.id == profile.id }
-        val normalized = profile.normalized()
-        if (index >= 0) current[index] = normalized else current.add(normalized)
-        saveImageProfiles(current)
-        // 第一套渠道保存后自动激活：用户不该面对「配好了但没启用」的空态。
-        if (hadActive) setActiveImageProfileId(normalized.id)
+        upsertProfileInternal(KEY_ACTIVE_IMAGE_PROFILE, profile,
+            load = { loadImageProfiles() },
+            save = { saveImageProfiles(it) })
     }
 
     suspend fun deleteImageProfile(id: String) {
-        val prefs = appContext.settingsDataStore.data.first()
-        val remaining = loadImageProfiles().filterNot { it.id == id }
-        saveImageProfiles(remaining)
-        if (prefs[KEY_ACTIVE_IMAGE_PROFILE] == id) {
-            setActiveImageProfileId(remaining.firstOrNull()?.id)
-        }
+        deleteProfileInternal(KEY_ACTIVE_IMAGE_PROFILE, id,
+            load = { loadImageProfiles() },
+            save = { saveImageProfiles(it) })
     }
+
+    suspend fun setActiveImageProfileId(id: String?) =
+        setActiveIdByKey(KEY_ACTIVE_IMAGE_PROFILE, id)
 
     // ===== 识图模型（独立多套，可切换；字段全由用户填，含模型名） =====
 
-    private fun loadVisionProfiles(): List<LlmProfile> {
-        val raw = readSecure(SECURE_VISION_PROFILES)
-        if (raw.isBlank()) return emptyList()
-        return runCatching { json.decodeFromString<List<LlmProfile>>(raw) }
-            .getOrDefault(emptyList())
-    }
-
-    private fun writeVisionProfiles(profiles: List<LlmProfile>) {
-        val normalized = profiles.map { it.normalized() }
-        securePrefs.edit()
-            .putString(SECURE_VISION_PROFILES, json.encodeToString(normalized))
-            .apply()
-    }
+    private fun loadVisionProfiles(): List<LlmProfile> =
+        loadProfileList(SECURE_VISION_PROFILES)
 
     suspend fun saveVisionProfiles(profiles: List<LlmProfile>) {
-        writeVisionProfiles(profiles)
+        writeProfileList(SECURE_VISION_PROFILES, profiles)
         secureVersion.value += 1
     }
 
     suspend fun upsertVisionProfile(profile: LlmProfile) {
-        val hadActive = appContext.settingsDataStore.data.first()[KEY_ACTIVE_VISION_PROFILE].isNullOrBlank()
-        val current = loadVisionProfiles().toMutableList()
-        val index = current.indexOfFirst { it.id == profile.id }
-        val normalized = profile.normalized()
-        if (index >= 0) current[index] = normalized else current.add(normalized)
-        saveVisionProfiles(current)
-        if (hadActive) setActiveVisionProfileId(normalized.id)
+        upsertProfileInternal(KEY_ACTIVE_VISION_PROFILE, profile,
+            load = { loadVisionProfiles() },
+            save = { saveVisionProfiles(it) })
     }
 
     suspend fun deleteVisionProfile(id: String) {
+        deleteProfileInternal(KEY_ACTIVE_VISION_PROFILE, id,
+            load = { loadVisionProfiles() },
+            save = { saveVisionProfiles(it) })
+    }
+
+    suspend fun setActiveVisionProfileId(id: String?) =
+        setActiveIdByKey(KEY_ACTIVE_VISION_PROFILE, id)
+
+    // ===== 多套 Provider 配置的通用存取（v0.0.63 收敛） =====
+    //
+    // LLM 接入 / 生图渠道 / 识图模型三套配置的存储逻辑完全同构，差异只在
+    // 序列化类型与存储键。此前每套 5 个方法逐字复制三份（约 180 行），
+    // 改一处漏两处是这类复制的必然结局——收敛为下面四个泛型方法，
+    // 上面的公共 API 全部保留（调用方零改动）。
+
+    /** 读一组配置（JSON 落在 EncryptedSharedPreferences）。坏数据按空列表处理。 */
+    private inline fun <reified T : KeyedProfile> loadProfileList(storageKey: String): List<T> {
+        val raw = readSecure(storageKey)
+        if (raw.isBlank()) return emptyList()
+        return runCatching { json.decodeFromString<List<T>>(raw) }.getOrDefault(emptyList())
+    }
+
+    /** 只落盘、不 bump 版本号（loadProfiles 的自愈播种用，见其注释的活锁说明）。 */
+    private inline fun <reified T : KeyedProfile> writeProfileList(storageKey: String, profiles: List<T>) {
+        @Suppress("UNCHECKED_CAST")
+        val normalized = profiles.map { it.normalized() as T }
+        securePrefs.edit()
+            .putString(storageKey, json.encodeToString(normalized))
+            .apply()
+    }
+
+    /**
+     * upsert：按 id 覆盖或追加。原本**没有**激活配置时自动激活这套——
+     * 用户不该面对「配好了但没启用」的空态。
+     */
+    private suspend fun <T : KeyedProfile> upsertProfileInternal(
+        activeKey: Preferences.Key<String>,
+        profile: T,
+        load: () -> List<T>,
+        save: (List<T>) -> Unit
+    ) {
+        val autoActivate = appContext.settingsDataStore.data.first()[activeKey].isNullOrBlank()
+        val current = load().toMutableList()
+        val normalized = profile.normalized()
+        val index = current.indexOfFirst { it.id == profile.id }
+        @Suppress("UNCHECKED_CAST")
+        val typed = normalized as T
+        if (index >= 0) current[index] = typed else current.add(typed)
+        save(current)
+        if (autoActivate) setActiveIdByKey(activeKey, normalized.id)
+    }
+
+    /** 删除：被删的是激活配置时切换到剩余的第一套（没有就清空激活）。 */
+    private suspend fun <T : KeyedProfile> deleteProfileInternal(
+        activeKey: Preferences.Key<String>,
+        id: String,
+        load: () -> List<T>,
+        save: (List<T>) -> Unit
+    ) {
         val prefs = appContext.settingsDataStore.data.first()
-        val remaining = loadVisionProfiles().filterNot { it.id == id }
-        saveVisionProfiles(remaining)
-        if (prefs[KEY_ACTIVE_VISION_PROFILE] == id) {
-            setActiveVisionProfileId(remaining.firstOrNull()?.id)
+        val remaining = load().filterNot { it.id == id }
+        save(remaining)
+        if (prefs[activeKey] == id) {
+            setActiveIdByKey(activeKey, remaining.firstOrNull()?.id)
         }
     }
 
-    suspend fun setActiveVisionProfileId(id: String?) {
+    /** 激活切换只存 id，不存整套配置——存副本就是两份真相（改了 Key 那边不知道）。 */
+    private suspend fun setActiveIdByKey(
+        activeKey: Preferences.Key<String>,
+        id: String?
+    ) {
         appContext.settingsDataStore.edit { prefs ->
-            if (id == null) prefs.remove(KEY_ACTIVE_VISION_PROFILE)
-            else prefs[KEY_ACTIVE_VISION_PROFILE] = id
+            if (id == null) prefs.remove(activeKey) else prefs[activeKey] = id
         }
     }
 
@@ -344,13 +341,6 @@ class SettingsStore(context: Context) {
     suspend fun setVisionProfileId(id: String?) {
         appContext.settingsDataStore.edit { prefs ->
             if (id == null) prefs.remove(KEY_VISION_PROFILE) else prefs[KEY_VISION_PROFILE] = id
-        }
-    }
-
-    suspend fun setActiveImageProfileId(id: String?) {
-        appContext.settingsDataStore.edit { prefs ->
-            if (id == null) prefs.remove(KEY_ACTIVE_IMAGE_PROFILE)
-            else prefs[KEY_ACTIVE_IMAGE_PROFILE] = id
         }
     }
 

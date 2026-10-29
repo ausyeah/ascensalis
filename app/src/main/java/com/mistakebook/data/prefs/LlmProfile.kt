@@ -93,7 +93,7 @@ data class LlmProfile(
      * 用户可以在设置里按模型单独关掉（不识图的模型关掉即可）。
      */
     val supportsVision: Boolean = true
-) {
+) : KeyedProfile {
     fun displayName(): String = name.ifBlank { model.ifBlank { "未命名配置" } }
 
     fun isConfigured(): Boolean =
@@ -187,7 +187,7 @@ data class LlmProfile(
      * 保存前规范化：只填了根域名（如 https://api.example.com）时自动补 /v1，
      * 已经带路径的（如 https://host/api）保持原样。
      */
-    fun normalized(): LlmProfile {
+    override fun normalized(): LlmProfile {
         val raw = baseUrl.trim().trimEnd('/')
         val hasPath = raw.removePrefix("https://").removePrefix("http://").contains('/')
         return copy(baseUrl = if (hasPath) raw else "$raw/v1")

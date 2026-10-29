@@ -33,7 +33,7 @@ data class ImageProfile(
      * 由代码替换。留空走内置默认体。
      */
     val requestBodyTemplate: String = ""
-) {
+) : KeyedProfile {
     fun displayName(): String =
         name.ifBlank { model.ifBlank { "未命名渠道" } }
 
@@ -41,7 +41,7 @@ data class ImageProfile(
         baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank()
 
     /** 归一化：只填了根域名时补 /v1，已带路径的原样保留（同 [LlmProfile.normalized]）。 */
-    fun normalized(): ImageProfile {
+    override fun normalized(): ImageProfile {
         val raw = baseUrl.trim().trimEnd('/')
         val hasPath = raw.removePrefix("https://").removePrefix("http://").contains('/')
         return copy(baseUrl = if (hasPath) raw else "$raw/v1")
