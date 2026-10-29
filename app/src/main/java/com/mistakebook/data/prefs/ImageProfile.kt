@@ -21,7 +21,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class ImageProfile(
-    val id: String = java.util.UUID.randomUUID().toString(),
+    override val id: String = java.util.UUID.randomUUID().toString(),
     val name: String = "",
     /** API 根地址，如 https://api.sensenova.cn/v1。 */
     val baseUrl: String = "",

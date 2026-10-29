@@ -38,7 +38,7 @@ data class LlmKeyEntry(
  */
 @Serializable
 data class LlmProfile(
-    val id: String = java.util.UUID.randomUUID().toString(),
+    override val id: String = java.util.UUID.randomUUID().toString(),
     val name: String = "",
     val baseUrl: String = "",
     val apiKey: String = "",

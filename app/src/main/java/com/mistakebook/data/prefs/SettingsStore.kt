@@ -294,7 +294,9 @@ class SettingsStore(context: Context) {
         activeKey: Preferences.Key<String>,
         profile: T,
         load: () -> List<T>,
-        save: (List<T>) -> Unit
+        // save 声明为 suspend：saveVisionProfiles 是挂起函数（识图模型保存
+        // 历史上就带 suspend），非挂起 lambda 里调用它会直接编译失败
+        save: suspend (List<T>) -> Unit
     ) {
         val autoActivate = appContext.settingsDataStore.data.first()[activeKey].isNullOrBlank()
         val current = load().toMutableList()
@@ -312,7 +314,7 @@ class SettingsStore(context: Context) {
         activeKey: Preferences.Key<String>,
         id: String,
         load: () -> List<T>,
-        save: (List<T>) -> Unit
+        save: suspend (List<T>) -> Unit
     ) {
         val prefs = appContext.settingsDataStore.data.first()
         val remaining = load().filterNot { it.id == id }
