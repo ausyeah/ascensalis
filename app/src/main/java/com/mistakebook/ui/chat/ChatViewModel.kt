@@ -796,7 +796,7 @@ class ChatViewModel(
         // input + 附件、清掉草稿，然后才校验「批改需要图片」——校验失败时
         // 用户打的字与选好的图已经全没了。
         if (current.gradingMode &&
-            ready.none { it.prepared?.kind == AttachmentKind.IMAGE && it.ok }
+            ready.none { it.prepared?.kind == AttachmentKind.IMAGE && it.prepared?.ok == true }
         ) {
             _events.trySend(ChatEvent.Error("批改模式需要附上手写过程照片"))
             return
