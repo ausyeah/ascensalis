@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -176,9 +177,17 @@ class RecognitionEngine(
                     val result = runCatching {
                         when (route) {
                             RecognitionPlan.Route.MINERU -> {
-                                val markdown = mineruMarkdown(taskId, task, file, settings)
-                                // MinerU 出的是原始文字，**最后一步交回大模型整理**
-                                // ——「自动」链条的终点就是大模型处理。
+                                // MinerU 整体加超时：服务端队列拥堵/卡住时不要一直挂住整条链，
+                                // 超时即按失败落锤、往链上下一条（大模型）回落。
+                                val markdown = withTimeoutOrNull(MINERU_RECOGNIZE_TIMEOUT_MS) {
+                                    mineruMarkdown(taskId, task, file, settings)
+                                } ?: throw PipelineException(
+                                    com.mistakebook.net.ApiError(
+                                        kind = com.mistakebook.net.ApiErrorKind.TIMEOUT,
+                                        serverMessage = "MinerU 识别超时（${MINERU_RECOGNIZE_TIMEOUT_MS / 1000} 秒），已转用大模型识别。"
+                                    )
+                                )
+                                // MinerU 出的是原始文字，**最后一步交回大模型整理**。
                                 refineWithLlm(taskId, task, markdown, settings)
                             }
 
@@ -577,6 +586,12 @@ class RecognitionEngine(
     )
 
     companion object {
+        /**
+         * AUTO 链里 MinerU 的整体超时（毫秒）。超时即按失败往链上下一条（大模型）回落，
+         * 避免服务端队列拥堵时把整条识别一直挂住。给得偏慷慨：正常 MinerU 一般远快于此，
+         * 真卡住时用户更愿意「转大模型出结果」而不是干等。
+         */
+        const val MINERU_RECOGNIZE_TIMEOUT_MS = 180_000L
         const val CANCELLED_MESSAGE = "已取消"
         const val INTERRUPTED_MESSAGE = "任务被中断"
         const val DEGRADED_MESSAGE = "AI 整理失败，已保留原始识别文本，请手动整理"

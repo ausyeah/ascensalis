@@ -186,3 +186,21 @@ Paparazzi 不模拟系统 fontScale，故 **fontScale 1.3 / 2.0 与「320dp+font
 ### CI 状态
 
 本地无 Android SDK，`testDebugUnitTest` / `lintDebug` / `assembleDebug` 均以 CI 为准（分支推送不触发 CI，需开 PR 或 `workflow_dispatch`）。
+
+---
+
+## v0.0.55 反馈轮（识别流水线收敛）
+
+### 背景（用户反馈）
+自动识别原链条是 MinerU → 当前大模型 → 识图模型，会把大模型转给另一个大模型重试；MinerU 卡住时没有超时、一直挂住。
+
+### 改动
+1. `RecognitionPlan.decide`（AUTO）：大模型**只出一条**——当前模型能识图 → `CURRENT_LLM`，否则 → `VISION_LLM`；不再把两者串成连续重试。
+2. `RecognitionEngine`：AUTO 链里 MinerU 路线整体加 `MINERU_RECOGNIZE_TIMEOUT_MS = 180s` 超时，超时按 `TIMEOUT` 失败往链上下一条（大模型）回落，不再干等。
+3. 更新 AUTO 提示文案（`settings_recognition_hint_auto`）与 `RecognitionPlanTest`（原「三条路排序」用例改为断「大模型只出一条」，新增识图模型独立兜底用例）。
+
+### 效果
+- 自动识别最多两条路：MinerU（带 180s 超时）+ 一次大模型（当前能识图用当前，否则识图模型跑全程）。
+- MinerU 拥堵/卡住 → 超时后自动转大模型出结果。
+
+> 同轮还有「配置删除二次确认」（单独 PR）：设置页大模型/识图/生图三类配置删除前弹确认框。

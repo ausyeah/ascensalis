@@ -110,7 +110,7 @@ class RecognitionPlanTest {
     // ---- decide：AUTO 模式（自动回落链） ----
 
     @Test
-    fun `AUTO 模式三条路按 MinerU 到当前模型到识图模型排序`() {
+    fun `AUTO 模式大模型只出一条_当前能识图时用当前、不串识图模型`() {
         val plan = RecognitionPlan.decide(
             RecognitionMode.AUTO,
             mineruConfigured = true,
@@ -121,15 +121,14 @@ class RecognitionPlanTest {
         assertEquals(
             listOf(
                 RecognitionPlan.Route.MINERU,
-                RecognitionPlan.Route.CURRENT_LLM,
-                RecognitionPlan.Route.VISION_LLM
+                RecognitionPlan.Route.CURRENT_LLM
             ),
             (plan as RecognitionPlan.Chain).routes
         )
     }
 
     @Test
-    fun `AUTO 模式没配 MinerU 时链条从当前模型开始`() {
+    fun `AUTO 模式没配 MinerU 时大模型只出一条`() {
         val plan = RecognitionPlan.decide(
             RecognitionMode.AUTO,
             mineruConfigured = false,
@@ -137,7 +136,7 @@ class RecognitionPlanTest {
             visionConfigured = true
         )
         assertEquals(
-            listOf(RecognitionPlan.Route.CURRENT_LLM, RecognitionPlan.Route.VISION_LLM),
+            listOf(RecognitionPlan.Route.CURRENT_LLM),
             (plan as RecognitionPlan.Chain).routes
         )
     }
@@ -166,6 +165,20 @@ class RecognitionPlanTest {
         )
         assertEquals(
             listOf(RecognitionPlan.Route.MINERU),
+            (plan as RecognitionPlan.Chain).routes
+        )
+    }
+
+    @Test
+    fun `AUTO 模式当前模型不识图也没配 MinerU 时只用识图模型`() {
+        val plan = RecognitionPlan.decide(
+            RecognitionMode.AUTO,
+            mineruConfigured = false,
+            supportsVision = false,
+            visionConfigured = true
+        )
+        assertEquals(
+            listOf(RecognitionPlan.Route.VISION_LLM),
             (plan as RecognitionPlan.Chain).routes
         )
     }
