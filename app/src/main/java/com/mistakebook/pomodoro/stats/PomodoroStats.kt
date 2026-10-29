@@ -103,6 +103,12 @@ object PomodoroStats {
         val totalCompleted = dao.completedSessionCount(from)
         val sessionCount = dao.sessionCountSince(from)
 
+        // 「今日」是**固定口径**，不随统计范围变（v0.0.67 修复）：
+        // 旧实现把它也挂到 range 上，统计页切到「全部」再生成打卡海报，
+        // 海报上就写「今日专注 300h」。UiState.todaySec / 海报都用这里的值。
+        val todaySec = dao.totalSecSince(today.toString())
+        val todayPomodoros = dao.pomodoroCountSince(today.toString())
+
         val from7 = today.minusDays(6).toString()
         val byDay7 = dao.dailyTotalsSince(from7).associate { it.day to it.sec }
         val last7 = (0..6).map { offset ->
@@ -130,10 +136,16 @@ object PomodoroStats {
         val recent = dao.recentSessions(from, RECENT_LIMIT)
 
         // ---- 近 12 个月：按 'yyyy-MM' 分组，缺月补 0 ----
+        // 「累计活跃月」用**全量**月份查询（v0.0.67 修复）：旧实现取
+        // 12 个月窗口里的键数，用满一年后「累计 X 个月」永远 ≤ 12，
+        // 与旁边「累计」卡的口径不符。
+        val allMonths = dao.monthlyTotalsSince("")
+        val activeMonths = allMonths.size
+        val monthFloor = YearMonth.from(today).minusMonths(11).toString()
+        val monthMap = allMonths
+            .filter { it.month >= monthFloor }
+            .associate { it.month to it.sec }
         val monthKeys = (11 downTo 0).map { YearMonth.from(today).minusMonths(it.toLong()).toString() }
-        val monthMap = dao.monthlyTotalsSince(
-            YearMonth.from(today).minusMonths(11).toString() + "-01"
-        ).associate { it.month to it.sec }
         val months12 = monthKeys.map { monthMap[it] ?: 0L }
 
         // ---- 本月按周：第 1–7 天是第 1 周，8–14 第 2 周，以此类推 ----
@@ -150,8 +162,8 @@ object PomodoroStats {
         }
 
         return Snapshot(
-            todaySec = rangeSec,
-            todayPomodoros = rangePomodoros,
+            todaySec = todaySec,
+            todayPomodoros = todayPomodoros,
             streakDays = streak,
             totalSec = rangeSec,
             totalCompleted = totalCompleted,

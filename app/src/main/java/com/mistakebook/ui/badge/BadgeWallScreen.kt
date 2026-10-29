@@ -46,7 +46,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -79,11 +78,18 @@ private const val GRID_COLUMNS = 2
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BadgeWallScreen(onBack: () -> Unit) {
-    val container = run {
-        val app = com.mistakebook.MistakeBookApp.instanceOrNull()
-        app?.container ?: com.mistakebook.di.AppContainer(
-            LocalContext.current.applicationContext as android.app.Application
-        )
+    // Application 未初始化时给占位而不是现场 new 一整套 AppContainer
+    // （v0.0.67 修复）：那等于为读一次徽章数据建起网络客户端 + 两个
+    // Room 连接，纯浪费且有连接泄漏风险。理论不可达路径，防御即可。
+    val container = com.mistakebook.MistakeBookApp.instanceOrNull()?.container
+    if (container == null) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("应用尚未初始化，请返回重试")
+        }
+        return
     }
     val unlocked by container.badgeDao.observeAll()
         .collectAsStateWithLifecycle(initialValue = emptyList())

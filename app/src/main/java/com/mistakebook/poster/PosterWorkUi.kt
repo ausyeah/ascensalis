@@ -43,7 +43,11 @@ fun rememberPosterWorkHandler(
     LaunchedEffect(state.value) {
         when (val current = state.value) {
             is PosterWorkState.Done -> {
-                val bitmap = decodeBitmap(current.filePath)
+                // 解码放 IO 线程（v0.0.67）：一张海报位图约 6.6MB ARGB，
+                // 主线程 BitmapFactory.decodeFile 低端机直接掉帧甚至 ANR。
+                val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    decodeBitmap(current.filePath)
+                }
                 if (bitmap == null) {
                     currentOnFailed("海报文件读取失败")
                 } else {

@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,7 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
 
 // debounce 是 FlowPreview 的预览 API，稳定版已在多渠道验证（见下方错词本监听注释）。
-@OptIn(kotlinx.coroutines.FlowPreview::class)
+@OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class WordbookViewModel(private val container: AppContainer) : ViewModel() {
 
     /** 顶部摘要四个计数的合并载体（combine 四路 Flow 的产物）。 */
@@ -337,11 +338,27 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun observeDatabaseStats() {
-        val startOfDayMs = getStartOfDayMillis()
+        // 「今日」零点参数**每日刷新**（v0.0.67 修复）：旧实现在 VM 构建时
+        // 定死，App 常驻过午夜后「今日已学」永远冻结在昨天口径。
+        val todayStart = kotlinx.coroutines.flow.MutableStateFlow(getStartOfDayMillis())
         viewModelScope.launch {
-            // 5 个流：combine 的类型化重载正好支持到 5 个
+            while (true) {
+                val now = java.time.ZonedDateTime.now()
+                val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.zone)
+                kotlinx.coroutines.delay(
+                    java.time.Duration.between(now, nextMidnight).toMillis().coerceAtLeast(1L)
+                )
+                todayStart.value = getStartOfDayMillis()
+            }
+        }
+        viewModelScope.launch {
+            // 5 个流：combine 的类型化重载正好支持到 5 个；
+            // 「今日已学」的零点参数经 flatMapLatest 跟随跨天刷新
+            val studiedToday = todayStart.flatMapLatest { start ->
+                dao.observeStudiedTodayCount(start)
+            }
             combine(
-                dao.observeStudiedTodayCount(startOfDayMs),
+                studiedToday,
                 dao.observeMasteredCount(),
                 dao.observeWrongBookCount(),
                 dao.observeFavoriteCount(),

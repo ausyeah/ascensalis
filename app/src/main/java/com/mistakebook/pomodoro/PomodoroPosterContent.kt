@@ -13,8 +13,9 @@ import java.util.Locale
  * 只是数据口径不同：这里讲的是**专注**，不是**背单词**。
  *
  * 口径说明：
- * - 今日专注时长：当前统计范围内的实际计时秒数（[PomodoroUiState.totalSec]），
- *   与统计页「今日专注」卡片同一个数；
+ * - 今日专注时长：**固定的今日口径**（[PomodoroUiState.todaySec]，
+ *   v0.0.67 修复）——此前取 `totalSec`（统计页所选区间），用户在统计页
+ *   切到「全部」再生成海报，上面就写着「今日专注 300h」；
  * - 完成番茄：只认 `mode = POMODORO` 且完成的那几次（与统计页同口径）；
  * - 连续天数：连续有专注记录的天数。
  */
@@ -22,7 +23,7 @@ fun buildPomodoroPosterContent(
     state: PomodoroUiState,
     now: Long = System.currentTimeMillis()
 ): PosterContent {
-    val todaySec = state.totalSec
+    val todaySec = state.todaySec
     val hours = todaySec / 3600
     val minutes = (todaySec % 3600) / 60
     val durationText = when {
