@@ -236,7 +236,15 @@ fun rememberAutoScrollEffect(
                     bottomMostFlush = isFlushAtBottom(info),
                     lastNewestKey = lastNewestKey
                 )
-                if (transient) return@collect
+                if (transient) {
+                    // 主动 resume 而不是静默返回：贴底是几何事实，跟跟随态无关。
+                    // 若此前因某一帧的误判被置成 false，这里把它纠回来——
+                    // 否则接下来 path ④ 会认为「用户在看历史」而启动滚动锚定
+                    // 补偿，把视口往上推，用户看到的就是「不跟随，反而小范围
+                    // 往上跳一下」（v0.0.56 反馈）。
+                    coordinator.resume()
+                    return@collect
+                }
                 policy.onGap(null)
                 coordinator.pause()
                 return@collect
@@ -325,16 +333,23 @@ fun rememberAutoScrollEffect(
         snapshotFlow {
             // 视口为空时 topMost 为 null：key 传 null 让纯函数走「无从锚定」
             // 那一支（offset 用 0 占位，那一支根本不读它）。
-            val topMost = state.layoutInfo.visibleItemsInfo.lastOrNull()
-            Triple(topMost?.key, topMost?.offset ?: 0, state.isScrollInProgress)
-        }.collect { (key, offset, scrolling) ->
+            val info = state.layoutInfo
+            val topMost = info.visibleItemsInfo.lastOrNull()
+            AnchorFrame(
+                key = topMost?.key,
+                offset = topMost?.offset ?: 0,
+                scrolling = state.isScrollInProgress,
+                awayFromBottom = !isFlushAtBottom(info)
+            )
+        }.collect { frame ->
             val outcome = scrollAnchorDecision(
-                frameKey = key,
-                frameOffset = offset,
-                scrolling = scrolling,
+                frameKey = frame.key,
+                frameOffset = frame.offset,
+                scrolling = frame.scrolling,
                 dragged = draggedNow,
                 programmaticScroll = coordinator.programmaticScroll,
                 following = coordinator.following,
+                awayFromBottom = frame.awayFromBottom,
                 baseline = baseline
             )
             baseline = outcome.baseline
@@ -348,6 +363,22 @@ fun rememberAutoScrollEffect(
 
     return coordinator
 }
+
+/**
+ * path ④ 每帧的观察结果（原来是个 `Triple`，v0.0.56 加了 [awayFromBottom]）。
+ *
+ * 之所以从 Triple 换成数据类：第四个字段是「是否确实离开了底部」，
+ * 用 Triple 就得写成 `Triple(Triple(a, b, c), d)` 或者把布尔塞进偏移里，
+ * 两者都比命名字段难读。而 snapshotFlow 的去重依赖 `equals`，
+ * 数据类自动生成，行为与 Triple 一致。
+ */
+private data class AnchorFrame(
+    val key: Any?,
+    val offset: Int,
+    val scrolling: Boolean,
+    /** 最底部可见 item 是否**不**贴底（见 [scrollAnchorDecision] 的对应参数）。 */
+    val awayFromBottom: Boolean
+)
 
 /**
  * 滚动锚定判定的**基线**：上一帧留下的锚点状态。
@@ -398,6 +429,7 @@ internal data class ScrollAnchorOutcome(
  * | [dragged] | `collectIsDraggedAsState()`（经 rememberUpdatedState 取实时值） |
  * | [programmaticScroll] | `coordinator.programmaticScroll` |
  * | [following] | `coordinator.following` |
+ * | [awayFromBottom] | 最底部可见 item 是否**不**贴底（`!isFlushAtBottom`） |
  * | [baseline] | 上一帧的 [ScrollAnchorBaseline] |
  *
  * ## 分支顺序即优先级，与原实现逐行同构
@@ -412,11 +444,23 @@ internal data class ScrollAnchorOutcome(
  *    不是内容增长——不区分就会跟惯性滑动打架；
  * 3. **手指按着 / 回底动画中** → 不插手，且**不重取基线**（基线维持按住前
  *    那一刻，松手后的静止帧会重新取）；
- * 4. **跟随态** → 内容上推就是「跟随」本身，不干扰；但仍重取基线，
- *    这样退出跟随态后的第一帧就有新鲜基线可比；
+ * 4. **贴底**（[following] 或 `!awayFromBottom`）→ 内容上推就是「跟随」本身，
+ *    不干扰；但仍重取基线，这样退出跟随态后的第一帧就有新鲜基线可比；
  * 5. **锚点 key 变了** → 重取基线，不当成增长（滑着换了一条 / 列表结构变了）；
  * 6. **同 key** → `drift = offset - anchorOffset`；`drift <= 0` 不补偿
  *    （offset 变小是用户在往上翻，那正是他要的方向），`drift > 0` 才补偿。
+ *
+ * ## 分支 4 为什么把「贴底」和「跟随态」并列（v0.0.56）
+ *
+ * 补偿只为一种场景存在：**用户翻进历史区后，新内容长高不要把他正在读的
+ * 段落往上拽**。贴在底部时反向布局把最新一条钉在内容区底边，它长高只是
+ * 向上延伸，视口里的东西一动不动——补了反而把人从底部往上推。
+ *
+ * 原先只靠 [following] 挡。但插入瞬态那几帧 `following` 可能被误置为
+ * false（见 `rememberAutoScrollEffect` path ② 的注释），补偿于是照常执行，
+ * 用户看到的就是「新消息来了不跟随，内容反而小范围往上跳一下」。
+ * 所以这里按**几何事实**再挡一道：最底部可见 item 仍贴底（含插入瞬态）
+ * 就一律不补偿，与跟随态是否误判无关。
  *
  * ## 模糊点（按现有实现的行为建模，未擅自修正）
  *
@@ -437,6 +481,7 @@ internal fun scrollAnchorDecision(
     dragged: Boolean,
     programmaticScroll: Boolean,
     following: Boolean,
+    awayFromBottom: Boolean,
     baseline: ScrollAnchorBaseline
 ): ScrollAnchorOutcome {
     // 视口里一条都没有（极端短列表 / 正在重建）：无从锚定。
@@ -464,7 +509,9 @@ internal fun scrollAnchorDecision(
         return ScrollAnchorOutcome(baseline, compensatePx = 0)
     }
     // 跟随态下内容上推就是「跟随」本身，不能干扰。
-    if (following) {
+    // 贴底时同理（哪怕跟随态被误置为 false）——理由见函数注释里
+    // 「分支 4 为什么把贴底和跟随态并列」。
+    if (following || !awayFromBottom) {
         return ScrollAnchorOutcome(baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset), compensatePx = 0)
     }
     if (frameKey != baseline.anchorKey) {

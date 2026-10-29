@@ -683,6 +683,18 @@ class ChatViewModel(
      * 追加而不是覆盖：`updateNote` 会 trim，这里自己拼好换行——
      * 用户此前的笔记一个字都不能丢。
      *
+     * ## 只存答案，不存思考（v0.0.56 用户反馈）
+     *
+     * 早先直接 `message.content.trim().take(2000)`，两个问题：
+     * 1. **把思考过程也存进去了**。消息正文与思考过程在流式层是分开的两路
+     *    （见 `SseLineParser.Delta.thinking`），但落库时拼在同一条 content 里，
+     *    于是备注里一大段「让我想想…」——备注是给人回头看思路的，不是复盘
+     *    模型的内心独白。
+     * 2. **2000 字硬截断**。备注没有字数限制（Room 里是 TEXT），截断只会
+     *    让用户存进去半句话，还以为自己存错了。
+     *
+     * 现在：先剥掉思考段，再原样存全文。
+     *
      * ## 没有静默出口（用户反馈「点了没反应」后补的）
      *
      * 每个走不下去的分支都给 snackbar 说明；正常情况下自由会话
@@ -701,7 +713,10 @@ class ChatViewModel(
                 _events.trySend(ChatEvent.Error("这条消息已不存在，无法存入备注"))
                 return@launch
             }
-            val body = message.content.trim().take(2000)
+            // 只存正文：思考段用 ChatThinking 的同一套规则剥掉（见方法注释）。
+            // `answerOf` 就是界面渲染正文用的那个函数——这样「备注里存的」
+            // 与「气泡里显示的」必然是同一份文本，不会各自为政。
+            val body = ChatThinking.answerOf(message.content).trim()
             if (body.isBlank()) {
                 _events.trySend(ChatEvent.Info("这条回复没有内容可存"))
                 return@launch

@@ -2102,10 +2102,120 @@ internal fun SearchProviderSection(
                     value = snapshot.tavilyApiKey,
                     onValueChange = viewModel::setTavilyApiKey
                 )
+                TavilyQuotaBlock(snapshot = snapshot, viewModel = viewModel)
             }
         }
     }
 }
+
+/**
+ * Tavily 额度查询块（v0.0.57）。
+ *
+ * ## 为什么放在 Key 输入框正下方
+ *
+ * 用户关心的是「这把 Key 还能不能用」。查额度是验证 Key 有效性的最直接方式：
+ * 能查到额度 = Key 有效 + 网络通；查不到 = Key 错或没网。放在这里比放到
+ * 「用量统计」区更贴合使用场景——那边统计的是本地调用次数，与官方额度无关。
+ *
+ * ## 为什么失败也保留上次结果
+ *
+ * 「这次没查成」不代表「额度变了」。把上次的数字留在屏幕上、下面挂一条
+ * 失败提示，比直接清空成一片空白更有信息量。清空只发生在换 Key 时
+ * （见 `SettingsViewModel.setTavilyApiKey`）。
+ */
+@Composable
+private fun TavilyQuotaBlock(
+    snapshot: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    val usage = snapshot.tavilyUsage
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedButton(
+            onClick = viewModel::queryTavilyUsage,
+            enabled = !snapshot.tavilyUsageLoading
+        ) {
+            if (snapshot.tavilyUsageLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.width(16.dp).height(16.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("查询中")
+            } else {
+                Text("查询额度")
+            }
+        }
+        if (usage != null) {
+            Text(
+                text = if (usage.hasQuota) "额度可用" else "额度已用尽",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (usage.hasQuota) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+            )
+        }
+    }
+
+    if (usage != null) {
+        // 账号级与 Key 级都展示：一个账号可能有多把 Key，单看一边会漏。
+        // 只显示「有值」的行，避免一片「—」占满屏幕。
+        if (usage.plan.isNotBlank()) {
+            UsageRow(label = "当前套餐", value = usage.plan)
+        }
+        if (usage.planLimit != null || usage.planUsage != null) {
+            UsageRow(
+                label = "本周期用量",
+                value = quotaPair(usage.planUsage, usage.planLimit)
+            )
+        }
+        if (usage.keyLimit != null || usage.keyUsage != null) {
+            UsageRow(
+                label = "此 Key 用量",
+                value = quotaPair(usage.keyUsage, usage.keyLimit)
+            )
+        }
+        if (usage.paygoLimit != null || usage.paygoUsage != null) {
+            UsageRow(
+                label = "按量付费",
+                value = quotaPair(usage.paygoUsage, usage.paygoLimit)
+            )
+        }
+    }
+
+    if (snapshot.tavilyUsageError != null) {
+        Text(
+            text = snapshot.tavilyUsageError,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    } else if (usage == null) {
+        Text(
+            text = "额度用尽后搜索会静默失效，建议定期查询。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+/** 「已用 / 上限」；上限为 null（不限量）时只显示已用。 */
+private fun quotaPair(used: Long?, limit: Long?): String {
+    val usedText = used?.let { formatQuota(it) } ?: "0"
+    return if (limit == null) "$usedText（不限量）" else "$usedText / ${formatQuota(limit)}"
+}
+
+/** 千分位。额度可能超过 Int 上限，所以按 Long 格式化而不是复用 formatCount。 */
+private fun formatQuota(n: Long): String = "%,d".format(n)
 
 @Composable
 internal fun MineruParamsSection(

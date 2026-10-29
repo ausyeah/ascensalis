@@ -118,4 +118,71 @@ class WebSearchTest {
         assertEquals(ChatSearchProvider.DEEPSEEK, ChatSearchProvider.fromKey(null))
         assertEquals(ChatSearchProvider.DEEPSEEK, ChatSearchProvider.fromKey("whatever"))
     }
+
+    // ---- v0.0.57：Tavily 额度查询 ----
+
+    @Test
+    fun tavilyUsageParseReadsKeyAndAccount() {
+        // 官方 GET /usage 的典型响应（字段名以文档为准）。
+        val body = """
+            {
+              "key": {"usage": 42, "limit": 1000, "search_usage": 40},
+              "account": {
+                "current_plan": "researcher",
+                "plan_usage": 4200,
+                "plan_limit": 10000,
+                "paygo_usage": 0,
+                "paygo_limit": 5000
+              }
+            }
+        """.trimIndent()
+        val usage = TavilySearch.parseUsage(body)
+        assertEquals(42L, usage.keyUsage)
+        assertEquals(1000L, usage.keyLimit)
+        assertEquals(4200L, usage.planUsage)
+        assertEquals(10000L, usage.planLimit)
+        assertEquals(0L, usage.paygoUsage)
+        assertEquals(5000L, usage.paygoLimit)
+        assertEquals("researcher", usage.plan)
+        assertTrue(usage.hasQuota)
+    }
+
+    @Test
+    fun tavilyUsageNullLimitMeansUnlimited() {
+        // 付费计划常见 limit 为 null（不限量）——不能当成 0，否则会误报「已用尽」。
+        val body = """{"key":{"usage":9,"limit":null},"account":{"current_plan":"paygo","plan_usage":9,"plan_limit":null}}"""
+        val usage = TavilySearch.parseUsage(body)
+        assertEquals(null, usage.keyLimit)
+        assertEquals(null, usage.planLimit)
+        assertTrue(usage.hasQuota)
+    }
+
+    @Test
+    fun tavilyUsageExhaustedWhenReachedLimit() {
+        val body = """{"key":{"usage":1000,"limit":1000},"account":{"plan_usage":10000,"plan_limit":10000}}"""
+        val usage = TavilySearch.parseUsage(body)
+        assertFalse(usage.hasQuota)
+    }
+
+    @Test
+    fun tavilyUsageParseToleratesGarbageAndFloats() {
+        // 完全非法：返回全空的 Usage，不抛异常
+        val empty = TavilySearch.parseUsage("not json")
+        assertEquals(null, empty.keyUsage)
+        assertEquals("", empty.plan)
+        assertTrue(empty.hasQuota) // 未知视为不限量，不能误报用尽
+
+        // 浮点数字（按量计费折算）也要能读
+        val floats = TavilySearch.parseUsage("""{"account":{"plan_usage":12.7,"plan_limit":100.0}}""")
+        assertEquals(12L, floats.planUsage)
+        assertEquals(100L, floats.planLimit)
+    }
+
+    @Test
+    fun tavilyUsageMissingAccountSectionIsSafe() {
+        val usage = TavilySearch.parseUsage("""{"key":{"usage":3,"limit":100}}""")
+        assertEquals(3L, usage.keyUsage)
+        assertEquals(null, usage.planLimit)
+        assertTrue(usage.hasQuota)
+    }
 }

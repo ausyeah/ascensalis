@@ -429,6 +429,17 @@ class ChatRepository(
         val usable = attachments.filter { it.status == AttachmentStatus.READY }
         val imageAttachments = usable.filter { it.kind == AttachmentKind.IMAGE }
         val docAttachments = usable.filter { it.kind != AttachmentKind.IMAGE }
+        // 先把「实际会发出去的图片」算出来，清单据此如实描述。
+        // 不能只看 supportsVision：data URL 转换失败时那张图根本发不出去，
+        // 清单若还写「图片已随消息发送」，模型会以为自己看漏了。
+        val images = if (supportsVision) {
+            imageAttachments.mapNotNull { attachment ->
+                runCatching { imageDataUrls.dataUrlOf(attachment) }.getOrNull()
+            }
+        } else {
+            emptyList()
+        }
+
         val text = buildString {
             append(content)
             // 文档类附件的正文：一直都要带。
@@ -470,17 +481,23 @@ class ChatRepository(
             //
             // 附件清单把「发过什么、能不能读、怎么读」讲清楚，
             // 模型据此决定要不要调用 describe_image / ocr_image。
-            if (!supportsVision && usable.isNotEmpty()) {
+            //
+            // v0.0.56：**清单不再只在「模型不识图」时拼**。`supportsVision`
+            // 默认就是 true，一旦用户配的是纯文本模型却忘了关这个开关，
+            // 图片 data URL 发不进去、清单和工具又都被跳过——模型只能回一句
+            // 「我没有看图的工具」。现在无条件拼，并如实说明图片是否已随请求
+            // 发出（见 [AttachmentManifest.build] 的 imagesAttached）。
+            if (usable.isNotEmpty()) {
                 append("\n\n")
-                append(attachmentManifest(usable, visionToolAvailable, ocrToolAvailable))
+                append(
+                    attachmentManifest(
+                        usable,
+                        visionToolAvailable,
+                        ocrToolAvailable,
+                        imagesAttached = images.isNotEmpty()
+                    )
+                )
             }
-        }
-        val images = if (supportsVision) {
-            imageAttachments.mapNotNull { attachment ->
-                runCatching { imageDataUrls.dataUrlOf(attachment) }.getOrNull()
-            }
-        } else {
-            emptyList()
         }
         return OutgoingMessage(
             id = id,
@@ -497,11 +514,13 @@ class ChatRepository(
     private fun attachmentManifest(
         attachments: List<com.mistakebook.data.local.entities.ChatAttachment>,
         visionToolAvailable: Boolean,
-        ocrToolAvailable: Boolean
+        ocrToolAvailable: Boolean,
+        imagesAttached: Boolean
     ): String = com.mistakebook.data.chat.AttachmentManifest.build(
         attachments = attachments,
         visionToolAvailable = visionToolAvailable,
-        ocrToolAvailable = ocrToolAvailable
+        ocrToolAvailable = ocrToolAvailable,
+        imagesAttached = imagesAttached
     )
 
     /**

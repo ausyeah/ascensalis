@@ -350,8 +350,13 @@ class LlmClient(private val api: LlmApi) {
         /**
          * 多题 + 详细解析的输出预算。
          * 4096 会把多题结果拦腰截断，JSON 残缺必然解析失败。
+         *
+         * v0.0.56 从 16384 提到 32768：与对话侧同一个理由（见
+         * [com.mistakebook.net.llm.ChatCompletionStream.MAX_TOKENS]）——
+         * 用户实测 16K 在中文下约 26000 字就被截断。多题 + 每道题带完整解析
+         * 与 SVG 附图时，JSON 很容易超过这个量。撞服务端硬上限时有降档重试兜底。
          */
-        const val DEFAULT_MAX_TOKENS = 16384
+        const val DEFAULT_MAX_TOKENS = 32768
 
         /** [plainText] 的默认上限：一段场景 prompt / 一个标题，512 足够。 */
         const val DEFAULT_PLAIN_MAX_TOKENS = 512

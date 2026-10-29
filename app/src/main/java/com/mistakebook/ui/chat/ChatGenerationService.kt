@@ -191,16 +191,22 @@ class ChatGenerationService : Service() {
         val searchEnabled = settings.chatSearchEnabled
         val effort = settings.reasoningEffort
 
-        // 媒体工具按配置给，且**优先级服从模型自身能力**：
-        // 当前模型本身支持识图（supportsVision，图片本体已随请求发出）时，
-        // 不给 describe_image / ocr_image——它们是给「看不见图」的模型准备的
-        // 降级路径。工具挂在多模态模型上会诱发绕路：模型放着眼睛不用，
-        // 转而去调识图模型 / MinerU，多烧一次按页计费的额度，还多一轮往返。
-        // 生图与识图无关，配了就给。
+        // 媒体工具按配置给。
+        //
+        // v0.0.56 改了策略：**不再**用 `!profile.supportsVision` 把识图/OCR
+        // 工具挡掉。用户反馈「大模型在对话里居然说自己没有看图的工具」——
+        // 根因就是 `supportsVision` 默认 true，用户配了纯文本模型却忘了关，
+        // 于是图片 DataURL 发不进去（转换失败或服务端不收），而工具与附件清单
+        // 又都被这个标志跳过了，模型只能回一句「我没有看图的工具」。
+        //
+        // 现在两条降级路径**只要有配置就一直挂上**（用户要求的「两种」：
+        // 配好的识图模型 / 配好的 MinerU OCR）。担心多烧额度的顾虑交给工具
+        // 描述去约束：明确写「只有当图片读不到时才调用，能直接看到就不要调」。
+        // 模型对这类指令的遵循度远高于「宁可不用工具」的隐式期望。
         val mediaTools = MediaTools.all(
-            visionConfigured = settings.visionConfigured && !profile.supportsVision,
+            visionConfigured = settings.visionConfigured,
             imageConfigured = settings.imageConfigured,
-            mineruConfigured = settings.mineruConfigured && !profile.supportsVision
+            mineruConfigured = settings.mineruConfigured
         )
 
         // 本次会话最近一张用户发的图（识图 / OCR 工具的输入）。

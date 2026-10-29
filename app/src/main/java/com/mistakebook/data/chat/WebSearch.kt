@@ -125,6 +125,100 @@ object TavilySearch {
             return parse(text)
         }
     }
+
+    /**
+     * Tavily 额度快照（v0.0.57）。
+     *
+     * ## 为什么要查额度
+     *
+     * 用户反映「Tavily 搜着搜着就不搜了」——免费额度用尽后 `/search` 返回
+     * 432/433 一类错误，但客户端只当成「这次没搜到」，模型继续若无其事地
+     * 编答案。有了额度查询，设置页可以直接显示「本月已用 X / Y」，
+     * 用尽时明确告诉用户，而不是让模型默默降级。
+     *
+     * ## 字段语义（以官方 GET /usage 为准）
+     *
+     * - [keyUsage] / [keyLimit]：**这把 Key** 的已用 / 上限；
+     *   [keyLimit] 为 null 表示不限量（付费计划常为 null）。
+     * - [planUsage] / [planLimit]：**整个账号**本计费周期已用 / 配额；
+     *   同样可能为 null（= 不限量）。
+     * - [paygoUsage] / [paygoLimit]：按量付费（超出套餐后的部分）。
+     *
+     * 之所以两组都留：一个账号可能配多把 Key（项目级），
+     * 单看账号额度会掩盖「某个 Key 单独被限」的情况。
+     */
+    data class Usage(
+        val keyUsage: Long? = null,
+        val keyLimit: Long? = null,
+        val planUsage: Long? = null,
+        val planLimit: Long? = null,
+        val paygoUsage: Long? = null,
+        val paygoLimit: Long? = null,
+        /** 当前套餐名（`researcher` / `paygo` 等），没有就为空串。 */
+        val plan: String = ""
+    ) {
+        /** 是否够用：账号额度还有剩余（limit 为 null 视为不限量）。 */
+        val hasQuota: Boolean
+            get() {
+                val limit = planLimit ?: return true
+                return (planUsage ?: 0L) < limit
+            }
+    }
+
+    /**
+     * 纯解析函数（可单测）：`GET /usage` 响应体 → [Usage]。
+     *
+     * 数字字段官方给的是整数，但历史上出现过浮点（按量计费折算），
+     * 所以这里用 [numOrNull] 同时兼容两种。任何字段缺失都退回 null，
+     * 不抛异常——额度查询失败不应该影响搜索本身。
+     */
+    fun parseUsage(body: String): Usage {
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+            ?: return Usage()
+        val key = root["key"] as? JsonObject
+        val account = root["account"] as? JsonObject
+        return Usage(
+            keyUsage = key.numOrNull("usage"),
+            keyLimit = key.numOrNull("limit"),
+            planUsage = account.numOrNull("plan_usage"),
+            planLimit = account.numOrNull("plan_limit"),
+            paygoUsage = account.numOrNull("paygo_usage"),
+            paygoLimit = account.numOrNull("paygo_limit"),
+            plan = (account?.get("current_plan") as? JsonPrimitive)?.contentOrNull.orEmpty()
+        )
+    }
+
+    /**
+     * 查询额度：`GET https://api.tavily.com/usage`，Bearer 鉴权。
+     *
+     * 返回 null 表示这次没查成（网络错误 / Key 无效 / 响应异常）。
+     * 调用方据此决定是「显示查不到」还是「显示真实额度」，
+     * **不要**把失败当成 0 用——那会让用户以为额度用光了。
+     */
+    suspend fun fetchUsage(
+        client: OkHttpClient,
+        apiKey: String
+    ): Usage? {
+        val request = Request.Builder()
+            .url("https://api.tavily.com/usage")
+            .header("Authorization", "Bearer $apiKey")
+            .get()
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                if (!r.isSuccessful) return@use null
+                parseUsage(text)
+            }
+        }.getOrNull()
+    }
+
+    /** JSON 数字字段，兼容整数 / 浮点 / 缺少。 */
+    private fun JsonObject?.numOrNull(name: String): Long? {
+        val p = this?.get(name) as? JsonPrimitive ?: return null
+        val s = p.contentOrNull ?: return null
+        return s.toDoubleOrNull()?.toLong()
+    }
 }
 
 /**

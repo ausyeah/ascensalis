@@ -108,4 +108,34 @@ class AttachmentManifestTest {
         )
         assertTrue(text.contains("未能提取到正文"))
     }
+
+    // ---- v0.0.57：图片确实随请求发出时也要给降级提示 ----
+
+    @Test
+    fun `图片已随消息发送时仍告诉模型读不到可以调工具`() {
+        // 用户反馈「大模型说自己没有看图的工具」：supportsVision 默认 true，
+        // 图片 data URL 确实发了，但服务端/模型其实读不到。清单必须说明
+        // 「已随消息发送」并给出降级工具，模型才不会断言「我没有看图工具」。
+        val text = AttachmentManifest.build(
+            attachments = listOf(image()),
+            visionToolAvailable = true,
+            ocrToolAvailable = true,
+            imagesAttached = true
+        )
+        assertTrue(text.contains("图片已随消息发送"))
+        assertTrue(text.contains("describe_image"))
+        assertTrue(text.contains("ocr_image"))
+    }
+
+    @Test
+    fun `图片已发送但没有工具时不给不存在的工具`() {
+        val text = AttachmentManifest.build(
+            attachments = listOf(image()),
+            visionToolAvailable = false,
+            ocrToolAvailable = false,
+            imagesAttached = true
+        )
+        assertTrue(text.contains("图片已随消息发送"))
+        assertTrue(text.contains("没有可用的识图/OCR 工具"))
+    }
 }

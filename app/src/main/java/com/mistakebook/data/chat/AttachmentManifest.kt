@@ -38,7 +38,17 @@ object AttachmentManifest {
     fun build(
         attachments: List<ChatAttachment>,
         visionToolAvailable: Boolean,
-        ocrToolAvailable: Boolean
+        ocrToolAvailable: Boolean,
+        /**
+         * 图片本体是否**已经随这条请求发给模型**了（当前模型标记为支持识图）。
+         *
+         * v0.0.56 新增。原先清单只在「模型不识图」时才拼，于是
+         * `supportsVision` 一旦被误标为 true（它默认就是 true！），模型既拿不到
+         * 图（data URL 转换失败 / 服务端不收）也拿不到清单和工具，只能回一句
+         * 「我没有看图的工具」。现在清单**总是**拼，并如实说明图片是否已随
+         * 请求发出、读不到时该调哪个工具。
+         */
+        imagesAttached: Boolean = false
     ): String = buildString {
         append(HEADER)
         append("用户随这条消息发送了 ${attachments.size} 个附件：\n")
@@ -49,6 +59,8 @@ object AttachmentManifest {
                     append("- 图片：$name")
                     if (attachment.textExcerpt.isNotBlank()) {
                         append("（图片文字已提取，见上文）")
+                    } else if (imagesAttached) {
+                        append("（图片已随消息发送；若你读不到图片内容，可调用 describe_image 识图、ocr_image 取文字）")
                     } else if (visionToolAvailable) {
                         append("（你无法直接查看图片；需要内容请调用 describe_image 工具识图）")
                     } else if (ocrToolAvailable) {

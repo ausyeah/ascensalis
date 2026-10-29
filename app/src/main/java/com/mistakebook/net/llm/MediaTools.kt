@@ -43,7 +43,8 @@ object MediaTools {
         function = ToolFunction(
             name = DESCRIBE_IMAGE,
             description = "读取并理解用户发来的图片。" +
-                "当你看不到图片内容、或需要看清图片里的文字、公式、图形时调用。" +
+                "**只有当随消息发来的图片你读不到、看不清，或需要确认图里细节时才调用**；" +
+                "能直接看到图片就正常回答，不要为了保险每次都调。" +
                 "用 question 说明你想从图里知道什么（例如「完整转录图中的题目」" +
                 "或「这张示意图表达了什么」）。" +
                 "用户没发图片、或问题与图片无关时不要调用。",
@@ -114,9 +115,9 @@ object MediaTools {
         function = ToolFunction(
             name = OCR_IMAGE,
             description = "用 OCR 服务把图片里的文字逐字读出来，包括题目、公式、表格、文档截图。 " +
-                "适合需要**精确文字**的场景，公式会被转成 LaTeX。 " +
+                "适合需要**精确文字**的场景（要抄题、要原样转录公式时），公式会被转成 LaTeX。 " +
                 "想知道「图里画的是什么、表达什么意思」请改用 describe_image。 " +
-                "图里没有文字时不要调用。",
+                "能直接读到图片文字、或图里没有文字时不要调用。",
             parameters = buildJsonObject {
                 put("type", "object")
                 put(

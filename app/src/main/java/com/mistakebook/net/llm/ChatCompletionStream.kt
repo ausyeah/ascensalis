@@ -594,8 +594,22 @@ class ChatCompletionStream(
          * 真撞上限时会有 [FINISH_REASON_LENGTH]，界面挂常驻的「已截断」标记，
          * 而不是静默给一段残缺回答。
          */
-        /** 单次回答上限；长题目需要完整推导，仍由 finish_reason=length 标记真实截断。 */
-        const val MAX_TOKENS = 16_384
+        /**
+         * 单次回答上限；长题目需要完整推导，仍由 finish_reason=length 标记真实截断。
+         *
+         * v0.0.56 从 16_384 提到 65_536：用户实测「长问题大思考」在 **27000 多字**
+         * 就被截断，而那时模型的上下文远没用满——瓶颈是我们自己设的 16K。
+         * 中文约 1 token ≈ 1.6 字，16K ≈ 26000 字，正好是用户看到的断点。
+         *
+         * 提到 64K 不是拍脑袋：现在主流模型（GPT-5 系 / Claude / DeepSeek-V3.2 /
+         * Qwen 长思考版）的输出上限都在 32K~64K 以上。设高了不会浪费——服务端
+         * 只按实际生成量计费，`max_tokens` 只是上限而非目标。
+         *
+         * 撞上服务端更低的硬上限时不会炸：请求会带上「max_tokens is too large」
+         * 一类错误，[com.mistakebook.pipeline.LlmClient] 捕获后按半数降档重试
+         * （见 `maxTokensDowngradeMessage`），最坏情况是回落到服务端允许的档位。
+         */
+        const val MAX_TOKENS = 65_536
 
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 

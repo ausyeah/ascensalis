@@ -32,7 +32,12 @@ class ScrollAnchorLogicTest {
         val scrolling: Boolean = false,
         val dragged: Boolean = false,
         val programmaticScroll: Boolean = false,
-        val following: Boolean = false
+        val following: Boolean = false,
+        /**
+         * 最底部可见 item 是否**不**贴底。默认 true：绝大多数用例描写的都是
+         * 「用户翻进历史区」的场景。贴底的用例显式传 false。
+         */
+        val awayFromBottom: Boolean = true
     )
 
     /**
@@ -54,6 +59,7 @@ class ScrollAnchorLogicTest {
                 dragged = frame.dragged,
                 programmaticScroll = frame.programmaticScroll,
                 following = frame.following,
+                awayFromBottom = frame.awayFromBottom,
                 baseline = baseline
             )
             baseline = outcome.baseline
@@ -326,8 +332,50 @@ class ScrollAnchorLogicTest {
         assertEquals(25, s.feed(Frame(key = "m5", offset = 65)))
     }
 
-    // ---- 视口为空：不崩 ----
+    // ---- v0.0.56：贴底时绝不补偿（「不跟随 + 小范围上跳」的修复）----
 
+    @Test
+    fun `贴底时即使跟随态被误置为false也不补偿`() {
+        val s = Session()
+        s.feed(Frame(key = "m5", offset = 100, awayFromBottom = false))
+
+        // 用户其实贴在底部（最底部可见 item 仍贴底），但 following 因为
+        // 插入瞬态被误置成了 false。此时内容长高**不能**补——反向布局把
+        // 最新一条钉在底边，长高只是向上延伸，视口里的东西一动不动。
+        // 补了就会把人从底部往上推，用户看到的就是「新消息来了不跟随，
+        // 内容反而小范围往上跳一下」。
+        assertTrue(s.feed(Frame(key = "m5", offset = 140, following = false, awayFromBottom = false)) <= 0)
+        assertTrue(s.feed(Frame(key = "m5", offset = 180, following = false, awayFromBottom = false)) <= 0)
+    }
+
+    @Test
+    fun `贴底时仍重取基线以便退出贴底后能比增量`() {
+        val s = Session()
+        s.feed(Frame(key = "m5", offset = 100, awayFromBottom = false))
+
+        // 贴底期间基线照样推进（与「跟随态」那一支同行为）
+        assertTrue(s.feed(Frame(key = "m5", offset = 140, awayFromBottom = false)) <= 0)
+        assertEquals(140, s.baseline.anchorOffset)
+
+        // 用户上滑离开底部：从 140 这个新鲜基线开始比增量，
+        // 不会把贴底期间累积的 40px 一次性补出去
+        assertTrue(s.feed(Frame(key = "m5", offset = 140, awayFromBottom = true)) <= 0)
+        assertEquals(20, s.feed(Frame(key = "m5", offset = 160, awayFromBottom = true)))
+    }
+
+    @Test
+    fun `贴底判断优先于锚点key变化那一支`() {
+        val s = Session()
+        s.feed(Frame(key = "m5", offset = 100, awayFromBottom = false))
+
+        // 贴底期间锚点换了一条（流式增长让最顶部可见 item 变化）：
+        // 照样不补偿，且重取基线
+        assertTrue(s.feed(Frame(key = "m9", offset = 260, awayFromBottom = false)) <= 0)
+        assertEquals("m9", s.baseline.anchorKey)
+        assertEquals(260, s.baseline.anchorOffset)
+    }
+
+    // ---- 视口为空：不崩 ----
     @Test
     fun `视口为空时不崩也不补偿`() {
         val fresh = Session()

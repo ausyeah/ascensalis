@@ -68,7 +68,14 @@ data class SettingsUiState(
     val fetchedModelsByProfile: Map<String, List<String>> = emptyMap(),
     /** 每个模型的来源 key 标签（「主 Key」/「Key 2」…），勾选区用来标注。 */
     val modelSourcesByProfile: Map<String, Map<String, String>> = emptyMap(),
-    val backupMessage: String? = null
+    val backupMessage: String? = null,
+
+    /** 最近一次查到的 Tavily 额度；null 表示还没查过或查失败。 */
+    val tavilyUsage: com.mistakebook.data.chat.TavilySearch.Usage? = null,
+    /** 正在查询 Tavily 额度。 */
+    val tavilyUsageLoading: Boolean = false,
+    /** 查询失败的说明（成功或还没查时为 null）。 */
+    val tavilyUsageError: String? = null
 ) {
     val activeProfile: LlmProfile? get() = snapshot.activeProfile
 
@@ -94,8 +101,7 @@ private data class TestState(
     val flags: TestFlags,
     val llmTestingId: String?,
     val llmOutcomes: Map<String, TestOutcome>
-) {
-    val testingMineru: Boolean get() = flags.testingMineru
+) {    val testingMineru: Boolean get() = flags.testingMineru
     val loadingModels: Boolean get() = flags.loadingModels
     val mineruResult: String? get() = flags.mineruResult
     val mineruOk: Boolean get() = flags.mineruOk
@@ -107,6 +113,18 @@ private data class TestFlags(
     val loadingModels: Boolean = false,
     val mineruResult: String? = null,
     val mineruOk: Boolean = false
+)
+
+/**
+ * Tavily 额度查询的瞬时状态（v0.0.57）。
+ *
+ * 三个字段必须**一起**在 combine 里推进，否则会出现「转圈还没停 / 结果已显示」
+ * 或者「错误提示盖着上一次的成功结果」这类不一致画面。
+ */
+private data class TavilyUsageState(
+    val usage: com.mistakebook.data.chat.TavilySearch.Usage? = null,
+    val loading: Boolean = false,
+    val error: String? = null
 )
 
 class SettingsViewModel(private val container: AppContainer) : ViewModel() {
@@ -124,6 +142,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val modelSourcesByProfile = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
     private val modelsError = MutableStateFlow<String?>(null)
     private val backupMessage = MutableStateFlow<String?>(null)
+    private val tavilyUsageState = MutableStateFlow(TavilyUsageState())
 
     val uiState: StateFlow<SettingsUiState> = combine(
         store.settings,
@@ -146,8 +165,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 sourcesByProfile = values[2] as Map<String, Map<String, String>>
             )
         },
-        backupMessage
-    ) { snapshot, test, modelsPair, backup ->
+        backupMessage,
+        tavilyUsageState
+    ) { snapshot, test, modelsPair, backup, tavilyUsage ->
         SettingsUiState(
             snapshot = snapshot,
             testingMineru = test.testingMineru,
@@ -159,7 +179,10 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             modelsError = modelsPair.error,
             fetchedModelsByProfile = modelsPair.byProfile,
             modelSourcesByProfile = modelsPair.sourcesByProfile,
-            backupMessage = backup
+            backupMessage = backup,
+            tavilyUsage = tavilyUsage.usage,
+            tavilyUsageLoading = tavilyUsage.loading,
+            tavilyUsageError = tavilyUsage.error
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -302,6 +325,52 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     /** 保存 Tavily API Key（去首尾空白）。 */
     fun setTavilyApiKey(key: String) = viewModelScope.launch {
         store.setTavilyApiKey(key)
+        // Key 变了，上一次查到的额度不再属于这把 Key——清掉，
+        // 否则用户换 Key 后会看到一个「别的 Key 的额度」，还以为新 Key 也能用。
+        tavilyUsageState.value = TavilyUsageState()
+    }
+
+    /**
+     * 查询 Tavily 额度（v0.0.57）：`GET https://api.tavily.com/usage`。
+     *
+     * ## 为什么做成手动按钮而不是进页面自动查
+     *
+     * 1. 额度查询也要走一次网络，进设置页就发请求会在离线时无谓地失败；
+     * 2. 用户真正关心额度的时点是「搜着搜着不搜了」，那时点一下即可，
+     *    不需要每秒轮询；
+     * 3. 官方对 `/usage` 有频率限制（文档写的是每分钟 10 次），
+     *    自动查容易触发。
+     *
+     * 失败时**保留上一次的成功结果**，只在下面挂一条错误提示——
+     * 「这次没查成」不等于「额度变了」，没理由把已知信息擦掉。
+     */
+    fun queryTavilyUsage() {
+        val key = store.snapshotNow().tavilyApiKey
+        if (key.isBlank()) {
+            tavilyUsageState.value = TavilyUsageState(
+                usage = tavilyUsageState.value.usage,
+                loading = false,
+                error = "先填写 Tavily API Key 再查询额度"
+            )
+            return
+        }
+        viewModelScope.launch {
+            tavilyUsageState.value = tavilyUsageState.value.copy(loading = true, error = null)
+            val usage = com.mistakebook.data.chat.TavilySearch.fetchUsage(
+                container.searchHttpClient,
+                key
+            )
+            tavilyUsageState.value = if (usage != null) {
+                TavilyUsageState(usage = usage, loading = false, error = null)
+            } else {
+                // 失败时保留 usage（见方法注释），只更新 loading / error。
+                TavilyUsageState(
+                    usage = tavilyUsageState.value.usage,
+                    loading = false,
+                    error = "查询失败：请检查 Key 是否正确、网络是否可用"
+                )
+            }
+        }
     }
 
     fun testMineru() {
