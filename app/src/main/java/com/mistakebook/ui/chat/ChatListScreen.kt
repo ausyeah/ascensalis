@@ -89,6 +89,10 @@ fun ChatListScreen(
     var renameText by remember { mutableStateOf("") }
     val untitled = stringResource(R.string.chat_untitled)
 
+    // 删除撤销（v0.0.66）：软删不再删附件，恢复即完整还原。
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
@@ -177,6 +181,9 @@ fun ChatListScreen(
             }) {
                 Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_list_new))
             }
+        },
+        snackbarHost = {
+            androidx.compose.material3.SnackbarHost(hostState = snackbarHostState)
         }
     ) { padding ->
         if (state.items.isEmpty() && !state.loading) {
@@ -225,7 +232,21 @@ fun ChatListScreen(
                         renameText = item.session.title
                         renaming = item
                     },
-                    onDelete = { viewModel.delete(item.session.id) }
+                    onDelete = {
+                        // 删除可撤销（v0.0.66）：软删保留附件，撤销即完整还原
+                        val sessionId = item.session.id
+                        viewModel.delete(sessionId)
+                        scope.launch {
+                            val result = snackbarHostState.showSnackbar(
+                                message = "会话已删除",
+                                actionLabel = "撤销",
+                                duration = androidx.compose.material3.SnackbarDuration.Short
+                            )
+                            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                                viewModel.restore(sessionId)
+                            }
+                        }
+                    }
                 )
                 HorizontalDivider()
             }

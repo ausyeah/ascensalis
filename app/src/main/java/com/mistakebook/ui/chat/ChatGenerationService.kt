@@ -87,6 +87,7 @@ class ChatGenerationService : Service() {
                 // 用**进程级**的 job，而不是本实例的 job：
                 // 停止动作到达时，服务实例可能已被系统重建，
                 // 本实例的 job 是新的空壳，取消它等于什么都没停。
+                stopGeneration.incrementAndGet()
                 currentJob?.cancel()
                 currentJob = null
                 runningSessionId = 0L
@@ -111,8 +112,16 @@ class ChatGenerationService : Service() {
         // 否则系统抛 ANR/异常。
         startForeground(NOTIFICATION_ID, buildNotification())
 
+        // 记下启动代际：如果 stop 在 launch 与赋值之间到达（竞态窗口），
+        // 代际已变——刚启的 job 必须立刻取消，否则「停止」静默失效，
+        // 生成继续跑完白烧 token（v0.0.66 修复）。
+        val myGeneration = stopGeneration.get()
         job = scope.launch {
             runGeneration(sessionId, questionId.takeIf { it >= 0 }, modelOverride, libraryPaths)
+        }
+        if (stopGeneration.get() != myGeneration) {
+            job?.cancel()
+            return START_NOT_STICKY
         }
         // 记到**进程级**的静态槽位：停止动作是静态方法，拿不到服务实例。
         //
@@ -1031,6 +1040,13 @@ class ChatGenerationService : Service() {
         /** [currentJob] 正在为哪个会话生成。0 表示无。 */
         @Volatile
         private var runningSessionId: Long = 0L
+
+        /**
+         * 停止代际（v0.0.66）：每次 ACTION_STOP 递增。启动路径在
+         * 「launch 之后、currentJob 赋值之前」若代际已变，说明停止
+         * 恰好落在竞态窗口里——刚启的 job 立即取消，否则停止静默失效。
+         */
+        private val stopGeneration = java.util.concurrent.atomic.AtomicLong(0L)
 
         /** 清掉在途标记（只在确实是这个会话收尾时清）。 */
         private fun clearRunningSlot(sessionId: Long) {

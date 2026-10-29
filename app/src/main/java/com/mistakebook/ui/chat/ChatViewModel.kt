@@ -406,7 +406,14 @@ class ChatViewModel(
             // **但如果此刻真有生成在跑**（后台服务还活着），那条消息不是「陈旧」的——
             // 它正在被写入。此时把它标成 CANCELED 会把一次正常进行中的生成
             // 误判为中断（用户退出再回来就会看到）。
-            if (ChatGenerationBus.snapshot.value?.finished != false) {
+            // 生成归属必须按 sessionId 判定（v0.0.66 修复）：A 会话在生成时
+            // 打开 B，快照不属于 B——B 里上次进程死亡残留的 STREAMING 消息
+            // 旧实现会被跳过恢复，永久转圈。
+            val busSnapshot = ChatGenerationBus.snapshot.value
+            val foreignGenerationAlive = busSnapshot != null &&
+                !busSnapshot.finished &&
+                busSnapshot.sessionId == session.id
+            if (!foreignGenerationAlive) {
                 repository.recoverStaleStreaming(session.id)
             }
             if (questionId != null) {
@@ -784,6 +791,16 @@ class ChatViewModel(
         // 还在准备中的附件不算数：用户可能刚点发送就点附件
         val ready = current.pendingAttachments.filter { it.status == AttachmentStatus.READY }
         if (text.isEmpty() && ready.isEmpty()) return
+
+        // T13 批改校验**必须在清空状态之前**（v0.0.66 修复）：旧实现先清空
+        // input + 附件、清掉草稿，然后才校验「批改需要图片」——校验失败时
+        // 用户打的字与选好的图已经全没了。
+        if (current.gradingMode &&
+            ready.none { it.prepared?.kind == AttachmentKind.IMAGE && it.ok }
+        ) {
+            _events.trySend(ChatEvent.Error("批改模式需要附上手写过程照片"))
+            return
+        }
 
         viewModelScope.launch {
             val profile = settingsStore.settings.first().activeProfile

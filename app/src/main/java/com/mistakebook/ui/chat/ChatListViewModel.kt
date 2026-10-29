@@ -74,6 +74,11 @@ class ChatListViewModel(
         viewModelScope.launch { repository.softDeleteSession(id) }
     }
 
+    /** 撤销删除（v0.0.66）：软删不再删附件，恢复即完整还原。 */
+    fun restore(id: Long) {
+        viewModelScope.launch { repository.restoreSession(id) }
+    }
+
     fun clearAll() {
         viewModelScope.launch { repository.softDeleteAllSessions() }
     }

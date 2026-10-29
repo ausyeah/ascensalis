@@ -116,21 +116,28 @@ class ChatRepository(
         chatDao.updateSession(session.copy(title = title.trim(), titleLocked = true, updatedAt = System.currentTimeMillis()))
     }
 
+    /**
+     * 软删会话。**不再立即删附件文件**（v0.0.66 修复）：
+     * 软删的语义是「可撤销」（ChatDao 注释自述），旧实现当场
+     * deleteRecursively 把附件全删光——恢复出来的会话图片全是死链，
+     * restoreSession 因此成了死代码。文件清理交给将来的回收站
+     * 定期清理机制；在此之前宁可占一点磁盘，不丢用户数据。
+     */
     suspend fun softDeleteSession(id: Long) {
-        val now = System.currentTimeMillis()
-        chatDao.softDeleteSession(id, now)
-        appFiles.deleteRecursively(appFiles.chatDir(id))
+        chatDao.softDeleteSession(id, System.currentTimeMillis())
     }
 
     suspend fun restoreSession(id: Long) {
         chatDao.restoreSession(id, System.currentTimeMillis())
     }
 
+    /**
+     * 清空全部会话。同样不再删文件（与 [softDeleteSession] 同理）——
+     * 清空的会话在当前版本没有恢复入口，但消息与附件数据仍在库里
+     * /磁盘上，未来做回收站时直接可用。
+     */
     suspend fun softDeleteAllSessions() {
-        val now = System.currentTimeMillis()
-        val sessions = chatDao.observeSessionsOnce()
-        sessions.forEach { appFiles.deleteRecursively(appFiles.chatDir(it.id)) }
-        chatDao.softDeleteAllSessions(now)
+        chatDao.softDeleteAllSessions(System.currentTimeMillis())
     }
 
     // ------------------------------------------------------------ 消息
