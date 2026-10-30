@@ -67,6 +67,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -144,7 +145,7 @@ fun CaptureScreen(
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         )
     }
-    var permissionRequested by remember { mutableStateOf(false) }
+    var permissionRequested by rememberSaveable { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted -> hasCameraPermission = granted }
@@ -156,12 +157,15 @@ fun CaptureScreen(
         }
     }
 
-    var flashMode by remember { mutableIntStateOf(FLASH_AUTO) }
+    // 闪光灯 / 前后摄 / 拍照中 / 导入中：旋横屏与进程重建后要恢复原样
+    // （remember 只活在组合里，Activity 重建即丢——用户会看到闪光灯莫名变了）。
+    // 批次本体在 AppContainer 不随 Activity 重建丢，这两个 UI 态同理要保住。
+    var flashMode by rememberSaveable { mutableIntStateOf(FLASH_AUTO) }
     var flashAvailable by remember { mutableStateOf<Boolean?>(null) }
-    var lensFacing by remember { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
-    var capturing by remember { mutableStateOf(false) }
+    var lensFacing by rememberSaveable { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
+    var capturing by rememberSaveable { mutableStateOf(false) }
 
-    var importing by remember { mutableStateOf(false) }
+    var importing by rememberSaveable { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var cameraBound by remember { mutableStateOf(false) }
     var showKeyGate by remember { mutableStateOf(false) }

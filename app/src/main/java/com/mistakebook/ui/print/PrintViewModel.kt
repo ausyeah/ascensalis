@@ -243,21 +243,32 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
             )
 
             val target = container.exportPublisher.createTempFile(chosen)
+            // 生成与「发布到导出目录」**都**要兜底（v0.0.73 修复）：
+            // 旧实现只包了生成一步——publish（MediaStore 插入/拷贝）抛异常时
+            // 直接崩溃；两个阶段失败留下的半成品文件也不清理，导出目录慢性堆积。
             val run = runCatching {
                 when (chosen) {
                     ExportFormat.PDF -> com.mistakebook.print.PdfExporter(container.mathRenderer).export(doc, target)
                     ExportFormat.HTML -> HtmlExporter(container.mathRenderer).export(doc, target)
                 }
-            }
+            }.onFailure { target.delete() }
             generating.value = false
-            run.onSuccess { exported ->
-                val output = container.exportPublisher.publish(exported.file, chosen)
-                result.value = output
-                skipped.value = exported.skipped
-            }
-            run.onFailure { throwable ->
-                error.value = throwable.message ?: "导出失败"
-            }
+            run.fold(
+                onSuccess = { exported ->
+                    runCatching { container.exportPublisher.publish(exported.file, chosen) }
+                        .onSuccess { output ->
+                            result.value = output
+                            skipped.value = exported.skipped
+                        }
+                        .onFailure { throwable ->
+                            exported.file.delete()
+                            error.value = throwable.message ?: "保存到导出目录失败"
+                        }
+                },
+                onFailure = { throwable ->
+                    error.value = throwable.message ?: "导出失败"
+                }
+            )
         }
     }
 
