@@ -20,7 +20,7 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to create tag: $Tag" }
 
 for ($i = 1; $i -le 8; $i++) {
     Write-Host "[tag push attempt $i]"
-    git -c http.proxy=http://127.0.0.1:7890 push origin $Tag
+    git -c http.proxy=http://127.0.0.1:7890 push origin $Tag --force
     if ($LASTEXITCODE -eq 0) { Write-Host 'TAG_PUSH_OK'; exit 0 }
     Start-Sleep -Seconds 8
 }
