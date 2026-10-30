@@ -941,75 +941,262 @@ internal fun MineruKeySection(
     viewModel: SettingsViewModel
 ) {
     val snapshot = state.snapshot
-    SettingsGroup(title = "OCR 识别") {
-        // 供应商二选一
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            com.mistakebook.data.prefs.OcrProvider.entries.forEach { provider ->
-                FilterChip(
-                    selected = snapshot.ocrProvider == provider,
-                    onClick = { viewModel.setOcrProvider(provider) },
-                    label = { Text(provider.label) }
-                )
-            }
+    var expandedProfileId by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteName by remember { mutableStateOf("") }
+
+    SettingsGroup(title = "OCR 识别配置") {
+        snapshot.ocrProfiles.forEach { profile ->
+            OcrProfileCard(
+                profile = profile,
+                selected = profile.id == snapshot.activeOcrProfileId,
+                expanded = expandedProfileId == profile.id,
+                onToggleExpand = {
+                    expandedProfileId = if (expandedProfileId == profile.id) null else profile.id
+                },
+                onSelect = { viewModel.selectOcrProfile(profile.id) },
+                onSave = { draft -> viewModel.saveOcrProfile(draft) },
+                onDelete = {
+                    pendingDeleteId = profile.id
+                    pendingDeleteName = profile.displayName()
+                },
+                onTest = { draft -> viewModel.testOcrProfile(draft) },
+                testing = state.isTestingOcr(profile.id),
+                testResult = state.ocrOutcome(profile.id),
+                testOk = state.ocrOk(profile.id)
+            )
+            Spacer(Modifier.height(8.dp))
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = snapshot.ocrProvider.hint,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(10.dp))
 
-        when (snapshot.ocrProvider) {
-            com.mistakebook.data.prefs.OcrProvider.MINERU -> {
-                PasswordField(
-                    label = stringResource(R.string.settings_mineru_key),
-                    value = snapshot.mineruKey,
-                    onValueChange = viewModel::setMineruKey
+        OutlinedButton(
+            onClick = {
+                val newProfile = com.mistakebook.data.prefs.OcrProfile(
+                    name = "自定义 OCR",
+                    type = com.mistakebook.data.prefs.OcrType.OPENAI_VISION,
+                    baseUrl = "https://maas-api.cn-huabei-1.xf-yun.com/v2/chat/completions",
+                    model = "xopdeepseekocr"
                 )
-                Spacer(Modifier.height(8.dp))
-                TestButton(
-                    text = stringResource(R.string.settings_test_mineru),
-                    loading = state.testingMineru,
-                    onClick = viewModel::testMineru,
-                    result = state.mineruTestResult,
-                    resultOk = state.mineruTestOk
-                )
-            }
+                viewModel.addOcrProfile(newProfile)
+                expandedProfileId = newProfile.id
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("添加 OCR 供应商")
+        }
 
-            com.mistakebook.data.prefs.OcrProvider.DEEPSEEK -> {
-                OutlinedTextField(
-                    value = snapshot.deepseekOcrBaseUrl,
-                    onValueChange = { viewModel.setDeepseekOcrBaseUrl(it) },
-                    label = { Text("Base URL") },
-                    placeholder = { Text("https://api.deepseek.com") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                PasswordField(
-                    label = "API Key",
-                    value = snapshot.deepseekOcrApiKey,
-                    onValueChange = { viewModel.setDeepseekOcrApiKey(it) }
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = snapshot.deepseekOcrModel,
-                    onValueChange = { viewModel.setDeepseekOcrModel(it) },
-                    label = { Text("模型名") },
-                    placeholder = { Text("deepseek-ocr") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+        if (!snapshot.ocrConfigured) {
+            Spacer(Modifier.height(8.dp))
+            FirstRunHint(R.string.settings_hint_mineru_key)
         }
     }
 
-    if (!snapshot.ocrConfigured) {
-        FirstRunHint(R.string.settings_hint_mineru_key)
+    pendingDeleteId?.let { id ->
+        ConfirmDialog(
+            title = "删除 OCR 配置",
+            text = "确定要删除「$pendingDeleteName」吗？删除后不可恢复。",
+            confirmText = stringResource(R.string.action_confirm),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                viewModel.deleteOcrProfile(id)
+                pendingDeleteId = null
+            },
+            onDismiss = { pendingDeleteId = null }
+        )
+    }
+}
+
+@Composable
+private fun OcrProfileCard(
+    profile: com.mistakebook.data.prefs.OcrProfile,
+    selected: Boolean,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onSelect: () -> Unit,
+    onSave: (com.mistakebook.data.prefs.OcrProfile) -> Unit,
+    onDelete: () -> Unit,
+    onTest: (com.mistakebook.data.prefs.OcrProfile) -> Unit,
+    testing: Boolean,
+    testResult: String?,
+    testOk: Boolean
+) {
+    var draftName by remember(profile) { mutableStateOf(profile.name) }
+    var draftType by remember(profile) { mutableStateOf(profile.type) }
+    var draftBaseUrl by remember(profile) { mutableStateOf(profile.baseUrl) }
+    var draftApiKey by remember(profile) { mutableStateOf(profile.apiKey) }
+    var draftModel by remember(profile) { mutableStateOf(profile.model) }
+    var draftNote by remember(profile) { mutableStateOf(profile.note) }
+
+    val isBuiltin = profile.id == com.mistakebook.data.prefs.OcrProfile.DEFAULT_MINERU_ID ||
+        profile.id == com.mistakebook.data.prefs.OcrProfile.DEFAULT_DEEPSEEK_ID
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(
+            width = if (selected) 1.5.dp else 1.dp,
+            color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggleExpand() }
+            ) {
+                RadioButton(
+                    selected = selected,
+                    onClick = onSelect
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = profile.displayName(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        SuggestionChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    text = if (profile.type == com.mistakebook.data.prefs.OcrType.MINERU) "MinerU" else "视觉模型",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            modifier = Modifier.height(24.dp)
+                        )
+                    }
+                    if (profile.note.isNotBlank()) {
+                        Text(
+                            text = profile.note,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                IconButton(onClick = onToggleExpand) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "收起" else "展开"
+                    )
+                }
+            }
+
+            if (expanded) {
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Spacer(Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = draftName,
+                    onValueChange = { draftName = it },
+                    label = { Text("渠道名称") },
+                    placeholder = { Text("例如：讯飞星辰 DeepSeek OCR") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+
+                Text("服务类型", style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.mistakebook.data.prefs.OcrType.entries.forEach { type ->
+                        FilterChip(
+                            selected = draftType == type,
+                            onClick = { draftType = type },
+                            label = { Text(type.label) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+
+                if (draftType == com.mistakebook.data.prefs.OcrType.OPENAI_VISION) {
+                    OutlinedTextField(
+                        value = draftBaseUrl,
+                        onValueChange = { draftBaseUrl = it },
+                        label = { Text("Base URL / 完整端点") },
+                        placeholder = { Text("https://maas-api.cn-huabei-1.xf-yun.com/v2/chat/completions") },
+                        singleLine = true,
+                        supportingText = { Text("支持填写根路径或完整 endpoint（如 /v2/chat/completions 或 /v1/responses）") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = draftModel,
+                        onValueChange = { draftModel = it },
+                        label = { Text("模型名称") },
+                        placeholder = { Text("xopdeepseekocr 或 deepseek-chat") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                PasswordField(
+                    label = if (draftType == com.mistakebook.data.prefs.OcrType.MINERU) "MinerU API Key" else "API Key",
+                    value = draftApiKey,
+                    onValueChange = { draftApiKey = it }
+                )
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = draftNote,
+                    onValueChange = { draftNote = it },
+                    label = { Text("备注说明（可选）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+
+                val currentDraft = profile.copy(
+                    name = draftName,
+                    type = draftType,
+                    baseUrl = draftBaseUrl,
+                    apiKey = draftApiKey,
+                    model = draftModel,
+                    note = draftNote
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onSave(currentDraft) },
+                            enabled = currentDraft != profile
+                        ) {
+                            Text("保存")
+                        }
+                        TestButton(
+                            text = "测试连接",
+                            loading = testing,
+                            onClick = { onTest(currentDraft) },
+                            result = testResult,
+                            resultOk = testOk
+                        )
+                    }
+
+                    if (!isBuiltin) {
+                        IconButton(onClick = onDelete) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "删除",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

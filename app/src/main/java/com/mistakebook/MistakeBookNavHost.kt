@@ -520,11 +520,6 @@ fun MistakeBookNavHost(
                 questionId = entry.arguments?.getLong("questionId") ?: 0L,
                 onBack = { navController.popBackStack() },
                 onEdit = { id -> navController.navigate(Routes.questionEdit(id)) },
-                onRecrop = { path ->
-                    // 重新裁切：只换封面/显示图，不重新识别（recropping 标志）
-                    container.recropping = true
-                    navController.navigate(Routes.crop(path))
-                },
                 // 重新识别：确认后先到裁剪页让用户自己裁切/涂鸦，
                 // 裁完才提交识别（questionId 标志告诉裁剪页这是重新识别）。
                 onReRecognizeWithCrop = { path ->

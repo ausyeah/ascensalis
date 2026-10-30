@@ -242,17 +242,9 @@ fun RichText(
                     )
                 }
 
-                is MarkdownParser.Block.Code -> Text(
+                is MarkdownParser.Block.Code -> CodeBlock(
                     text = block.text,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = color,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(6.dp)
-                        )
-                        .padding(8.dp)
+                    language = block.language
                 )
 
                 // ```svg 围栏：渲染成图形而不是等宽文本。
@@ -654,12 +646,56 @@ private fun MathImage(
                 })
         )
     } else if (showSourceFallback) {
-        Text(
-            text = latex,
-            style = MaterialTheme.typography.bodySmall,
-            color = color,
-            fontFamily = FontFamily.Monospace
-        )
+        val err = com.mistakebook.math.MathRenderer.getLastError("d:$latex")
+            ?: com.mistakebook.math.MathRenderer.getLastError("i:$latex")
+            ?: com.mistakebook.math.MathRenderer.getLastError(latex)
+        if (display) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f))
+                    .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = if (!err.isNullOrBlank()) "公式解析失败: $err" else "公式解析失败",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                SelectionContainer {
+                    Text(
+                        text = latex,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = color,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        } else {
+            SelectionContainer {
+                Text(
+                    text = latex,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
     } else if (!pending) {
         // 渲染失败且调用方不希望看到源码：给一句可见提示，别留空气。
         Text(
@@ -1321,3 +1357,73 @@ fun rememberStreamTextDebounced(key: Any?, text: String, streaming: Boolean): St
 
 /** 流式文本防抖间隔（毫秒）。与生成端 220ms 节流错开，合并近一半的中间帧。 */
 private const val STREAM_DEBOUNCE_MS = 100L
+@Composable
+private fun CodeBlock(
+    text: String,
+    language: String,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = language.ifBlank { "code" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    fontFamily = FontFamily.Monospace
+                )
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable {
+                            clipboardManager.setText(AnnotatedString(text))
+                            Toast.makeText(context, "代码已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "复制",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "复制",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                thickness = 0.5.dp
+            )
+            SelectionContainer {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp)
+                )
+            }
+        }
+    }
+}

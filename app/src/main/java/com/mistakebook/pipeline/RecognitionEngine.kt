@@ -30,7 +30,8 @@ class RecognitionEngine(
     private val mineruClient: MineruClient,
     private val llmClient: LlmClient,
     private val settingsStore: SettingsStore,
-    private val files: com.mistakebook.data.AppFiles
+    private val files: com.mistakebook.data.AppFiles,
+    private val ocrEngineDeps: com.mistakebook.net.ocr.OcrEngineDeps? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val queue = Channel<Long>(Channel.UNLIMITED)
@@ -193,17 +194,14 @@ class RecognitionEngine(
                     val result = runCatching {
                         when (route) {
                             RecognitionPlan.Route.MINERU -> {
-                                // MinerU 整体加超时：服务端队列拥堵/卡住时不要一直挂住整条链，
-                                // 超时即按失败落锤、往链上下一条（大模型）回落。
                                 val markdown = withTimeoutOrNull(MINERU_RECOGNIZE_TIMEOUT_MS) {
-                                    mineruMarkdown(taskId, task, file, settings)
+                                    ocrMarkdown(taskId, task, file, settings)
                                 } ?: throw PipelineException(
                                     com.mistakebook.net.ApiError(
                                         kind = com.mistakebook.net.ApiErrorKind.TIMEOUT,
-                                        serverMessage = "MinerU 识别超时（${MINERU_RECOGNIZE_TIMEOUT_MS / 1000} 秒），已转用大模型识别。"
+                                        serverMessage = "OCR 识别超时（${MINERU_RECOGNIZE_TIMEOUT_MS / 1000} 秒），已转用大模型识别。"
                                     )
                                 )
-                                // MinerU 出的是原始文字，**最后一步交回大模型整理**。
                                 refineWithLlm(taskId, task, markdown, settings)
                             }
 
@@ -373,8 +371,8 @@ class RecognitionEngine(
             taskRepository.setStage(taskId, "读取 PDF 文本…", System.currentTimeMillis())
             return file.readText()
         }
-        // 纯 MinerU 路线：失败照旧抛 PipelineException（老行为，不回落）。
-        return mineruMarkdown(taskId, task, file, settings)
+        // 纯 OCR 路线：走当前激活的 OCR 配置
+        return ocrMarkdown(taskId, task, file, settings)
     }
 
     /**
@@ -398,6 +396,30 @@ class RecognitionEngine(
             else -> error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
         }
         return "$name：$detail"
+    }
+
+    /** 统一走当前激活的 OCR 渠道提取 markdown */
+    private suspend fun ocrMarkdown(
+        taskId: Long,
+        task: CaptureTask,
+        file: File,
+        settings: SettingsSnapshot
+    ): String {
+        val ocrProfile = settings.activeOcrProfile
+        if (ocrProfile != null && ocrProfile.type == com.mistakebook.data.prefs.OcrType.OPENAI_VISION && ocrEngineDeps != null) {
+            val engine = com.mistakebook.net.ocr.OcrEngine.forSettings(settings, ocrEngineDeps)
+            taskRepository.setStatusIfParsing(taskId, System.currentTimeMillis())
+            taskRepository.setStage(taskId, "正在调用 ${ocrProfile.displayName()} 识别题目…", System.currentTimeMillis())
+            val result = engine.recognizeText(file, settings) { stage ->
+                taskRepository.setStatusIfParsing(taskId, System.currentTimeMillis())
+                taskRepository.setStage(taskId, stage, System.currentTimeMillis())
+            }
+            return when (result) {
+                is com.mistakebook.net.ApiResult.Success -> result.data
+                is com.mistakebook.net.ApiResult.Failure -> throw PipelineException(result.error)
+            }
+        }
+        return mineruMarkdown(taskId, task, file, settings)
     }
 
     /** 调 MinerU 拿 markdown；失败抛 [PipelineException]（由调用方决定是否回落）。 */

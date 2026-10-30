@@ -92,6 +92,8 @@ class SettingsStore(context: Context) {
         val activeImageId = prefs[KEY_ACTIVE_IMAGE_PROFILE] ?: imageProfiles.firstOrNull()?.id
         val visionProfiles = loadVisionProfiles()
         val activeVisionId = prefs[KEY_ACTIVE_VISION_PROFILE] ?: visionProfiles.firstOrNull()?.id
+        val ocrProfiles = loadOcrProfiles()
+        val activeOcrId = prefs[KEY_ACTIVE_OCR_PROFILE] ?: ocrProfiles.firstOrNull()?.id
         return SettingsSnapshot(
             // 占位符不能当成真 Key，否则「已配置」判断会误判为通过
             mineruKey = readSecure(SECURE_MINERU_KEY).ifBlank {
@@ -103,6 +105,8 @@ class SettingsStore(context: Context) {
                 ?: "https://api.deepseek.com",
             deepseekOcrApiKey = readSecure(SECURE_DEEPSEEK_OCR_KEY),
             deepseekOcrModel = prefs[KEY_DEEPSEEK_OCR_MODEL] ?: "deepseek-ocr",
+            ocrProfiles = ocrProfiles,
+            activeOcrProfileId = activeOcrId,
             llmProfiles = profiles,
             activeProfileId = activeId,
             imageProfiles = imageProfiles,
@@ -216,6 +220,47 @@ class SettingsStore(context: Context) {
     }
 
     suspend fun setActiveProfileId(id: String?) = setActiveIdByKey(KEY_ACTIVE_PROFILE, id)
+
+    // ===== OCR 渠道（多套，可随时切换；同 LlmProfile 体系） =====
+
+    fun loadOcrProfiles(): List<OcrProfile> {
+        val existing = loadProfileList<OcrProfile>(SECURE_OCR_PROFILES)
+        if (existing.isNotEmpty()) return existing
+
+        val legacyMineruKey = readSecure(SECURE_MINERU_KEY).ifBlank {
+            if (BuildConfigKeys.isPlaceholder(BuildConfig.MINERU_API_KEY)) "" else BuildConfig.MINERU_API_KEY
+        }
+        val legacyDeepSeekKey = readSecure(SECURE_DEEPSEEK_OCR_KEY)
+        val legacyDeepSeekBase = "https://api.deepseek.com"
+        val legacyDeepSeekModel = "deepseek-ocr"
+
+        val initial = listOf(
+            OcrProfile.defaultMineru(legacyMineruKey),
+            OcrProfile.defaultDeepSeek(legacyDeepSeekKey, legacyDeepSeekBase, legacyDeepSeekModel)
+        )
+        saveOcrProfiles(initial)
+        return initial
+    }
+
+    fun saveOcrProfiles(profiles: List<OcrProfile>) {
+        writeProfileList(SECURE_OCR_PROFILES, profiles)
+        secureVersion.value += 1
+    }
+
+    suspend fun upsertOcrProfile(profile: OcrProfile) {
+        upsertProfileInternal(KEY_ACTIVE_OCR_PROFILE, profile,
+            load = { loadOcrProfiles() },
+            save = { saveOcrProfiles(it) })
+    }
+
+    suspend fun deleteOcrProfile(id: String) {
+        deleteProfileInternal(KEY_ACTIVE_OCR_PROFILE, id,
+            load = { loadOcrProfiles() },
+            save = { saveOcrProfiles(it) })
+    }
+
+    suspend fun setActiveOcrProfileId(id: String?) =
+        setActiveIdByKey(KEY_ACTIVE_OCR_PROFILE, id)
 
     // ===== 生图渠道（多套，可切换；同 LlmProfile 体系，字段更少） =====
 
@@ -623,6 +668,8 @@ class SettingsStore(context: Context) {
         const val SECURE_LLM_PROFILES = "llm_profiles_json"
         const val SECURE_IMAGE_PROFILES = "image_profiles_json"
         const val SECURE_VISION_PROFILES = "vision_profiles_json"
+        const val SECURE_OCR_PROFILES = "ocr_profiles_json"
+        val KEY_ACTIVE_OCR_PROFILE = stringPreferencesKey("active_ocr_profile_id")
 
         // KEY_MINERU_MODEL / KEY_OCR_LANGUAGE / KEY_FORCE_OCR 已删：
         // 对应设置项固定为 vlm / ch / 开启，不再可配。旧库里的这些键会被忽略。

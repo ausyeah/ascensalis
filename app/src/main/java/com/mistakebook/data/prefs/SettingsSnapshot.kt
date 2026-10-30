@@ -72,6 +72,11 @@ data class SettingsSnapshot(
 
     /** DeepSeek OCR：模型名（如 deepseek-ocr / deepseek-vl2）。 */
     val deepseekOcrModel: String = "deepseek-ocr",
+
+    /** OCR 接入渠道配置列表（v0.0.81：多套配置，同 LlmProfile 体系）。 */
+    val ocrProfiles: List<OcrProfile> = emptyList(),
+    val activeOcrProfileId: String? = null,
+
     val llmProfiles: List<LlmProfile> = emptyList(),
     val activeProfileId: String? = null,
 
@@ -234,20 +239,25 @@ data class SettingsSnapshot(
         get() = imageProfiles.firstOrNull { it.id == activeImageProfileId }
             ?: imageProfiles.firstOrNull()
 
-    val mineruConfigured: Boolean get() = mineruKey.isNotBlank()
+    /** 当前激活的 OCR 渠道：显式选的优先，没选过时用第一套。 */
+    val activeOcrProfile: OcrProfile?
+        get() = ocrProfiles.firstOrNull { it.id == activeOcrProfileId }
+            ?: ocrProfiles.firstOrNull()
 
     /**
-     * **OCR 能力是否就绪**（v0.0.78，取代直接看 mineruKey）。
+     * **OCR 能力是否就绪**（v0.0.81 重构为 Profile 体系）。
      *
-     * 用户可以在 MinerU 与 DeepSeek OCR 之间选一个；两种都配时以所选
-     * 供应商为准——门禁问的是「现在这套能不能读图」，不是「装了哪几家」。
+     * 优先检查当前激活的 [activeOcrProfile]，兼容存量单独字段。
      */
     val ocrConfigured: Boolean
-        get() = when (ocrProvider) {
-            OcrProvider.MINERU -> mineruConfigured
-            OcrProvider.DEEPSEEK ->
-                deepseekOcrApiKey.isNotBlank() && deepseekOcrModel.isNotBlank()
-        }
+        get() = activeOcrProfile?.isConfigured() == true ||
+            (ocrProvider == OcrProvider.MINERU && mineruKey.isNotBlank()) ||
+            (ocrProvider == OcrProvider.DEEPSEEK && deepseekOcrApiKey.isNotBlank() && deepseekOcrModel.isNotBlank())
+
+    /** 存量兼容：旧代码直接等价于 ocrConfigured，彻底解决切换 DeepSeek 时提示「未配置 MinerU」的误报。 */
+    val mineruConfigured: Boolean get() = ocrConfigured
+
+    val ocrReady: Boolean get() = ocrConfigured
 
     val llmConfigured: Boolean get() = activeProfile?.isConfigured() == true
 

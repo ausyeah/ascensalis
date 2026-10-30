@@ -165,7 +165,7 @@ class ChatImageOcr(
             }
 
             is ApiResult.Failure -> {
-                tried.add(key)
+                // 失败不记入 tried：允许用户重试或再次发送，杜绝拦截死锁
                 result
             }
         }
@@ -177,8 +177,16 @@ class ChatImageOcr(
         files.deleteRecursively(files.chatOcrDir(sessionId))
     }
 
-    private fun keyOf(imageFile: File): String =
-        "${imageFile.absolutePath}:${imageFile.lastModified()}:${imageFile.length()}"
+    private fun keyOf(imageFile: File): String {
+        val headBytes = runCatching {
+            java.io.FileInputStream(imageFile).use { input ->
+                val buf = ByteArray(1024)
+                val read = input.read(buf)
+                if (read > 0) java.util.Arrays.hashCode(buf.copyOf(read)) else 0
+            }
+        }.getOrDefault(0)
+        return "${imageFile.absolutePath}:${imageFile.lastModified()}:${imageFile.length()}:$headBytes"
+    }
 
     private fun cacheFile(sessionId: Long, imageFile: File): File =
         File(files.chatOcrDir(sessionId), "${keyOf(imageFile).hashCode()}.md")

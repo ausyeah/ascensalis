@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -75,9 +76,15 @@ data class SettingsUiState(
     /** 正在查询 Tavily 额度。 */
     val tavilyUsageLoading: Boolean = false,
     /** 查询失败的说明（成功或还没查时为 null）。 */
-    val tavilyUsageError: String? = null
+    val tavilyUsageError: String? = null,
+    val ocrTestResults: Map<String, String?> = emptyMap(),
+    val ocrTestOks: Map<String, Boolean> = emptyMap(),
+    val ocrTestingProfileId: String? = null
 ) {
     val activeProfile: LlmProfile? get() = snapshot.activeProfile
+    fun ocrOutcome(profileId: String): String? = ocrTestResults[profileId]
+    fun ocrOk(profileId: String): Boolean = ocrTestOks[profileId] == true
+    fun isTestingOcr(profileId: String): Boolean = ocrTestingProfileId == profileId
 
     /** 有测试在进行（任意配置）。 */
     val testingLlm: Boolean get() = llmTestingProfileId != null
@@ -100,7 +107,10 @@ private data class ModelsState(
 private data class TestState(
     val flags: TestFlags,
     val llmTestingId: String?,
-    val llmOutcomes: Map<String, TestOutcome>
+    val llmOutcomes: Map<String, TestOutcome>,
+    val ocrTestingId: String? = null,
+    val ocrOutcomes: Map<String, String?> = emptyMap(),
+    val ocrOks: Map<String, Boolean> = emptyMap()
 ) {    val testingMineru: Boolean get() = flags.testingMineru
     val loadingModels: Boolean get() = flags.loadingModels
     val mineruResult: String? get() = flags.mineruResult
@@ -137,6 +147,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val mineruTestOk = MutableStateFlow(false)
     private val llmTestingProfileId = MutableStateFlow<String?>(null)
     private val llmTestResults = MutableStateFlow<Map<String, TestOutcome>>(emptyMap())
+    private val ocrTestingProfileId = MutableStateFlow<String?>(null)
+    private val ocrTestResults = MutableStateFlow<Map<String, String?>>(emptyMap())
+    private val ocrTestOks = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     private val fetchedModelsByProfile = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     /** 每个模型是从哪把 key 拉到的（profileId → model → 「主 Key」/「Key 2」）。 */
     private val modelSourcesByProfile = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
@@ -153,8 +166,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 testingMineru, loadingModels,
                 mineruTestResult, mineruTestOk
             ) { a, b, c, d -> TestFlags(a, b, c, d) },
-            combine(llmTestingProfileId, llmTestResults) { id, map -> id to map }
-        ) { flags, llm -> TestState(flags, llm.first, llm.second) },
+            combine(llmTestingProfileId, llmTestResults) { id, map -> id to map },
+            combine(ocrTestingProfileId, ocrTestResults, ocrTestOks) { id, res, oks -> Triple(id, res, oks) }
+        ) { flags, llm, ocr -> TestState(flags, llm.first, llm.second, ocr.first, ocr.second, ocr.third) },
         combine(
             modelsError, fetchedModelsByProfile, modelSourcesByProfile
         ) { values ->
@@ -176,6 +190,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             mineruTestOk = test.mineruOk,
             llmTestResults = test.llmOutcomes,
             llmTestingProfileId = test.llmTestingId,
+            ocrTestingProfileId = test.ocrTestingId,
+            ocrTestResults = test.ocrOutcomes,
+            ocrTestOks = test.ocrOks,
             modelsError = modelsPair.error,
             fetchedModelsByProfile = modelsPair.byProfile,
             modelSourcesByProfile = modelsPair.sourcesByProfile,
@@ -638,6 +655,71 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun consumeBackupMessage() {
         backupMessage.value = null
+    }
+
+    // ===== OCR 配置操作（同 LlmProfile 体系，v0.0.81） =====
+
+    fun saveOcrProfile(profile: com.mistakebook.data.prefs.OcrProfile) = viewModelScope.launch {
+        clearOcrTestResult(profile.id)
+        store.upsertOcrProfile(profile)
+    }
+
+    fun addOcrProfile(profile: com.mistakebook.data.prefs.OcrProfile) = viewModelScope.launch {
+        store.upsertOcrProfile(profile)
+    }
+
+    fun deleteOcrProfile(id: String) = viewModelScope.launch {
+        clearOcrTestResult(id)
+        store.deleteOcrProfile(id)
+    }
+
+    fun selectOcrProfile(id: String) = viewModelScope.launch {
+        store.setActiveOcrProfileId(id)
+    }
+
+    fun testOcrProfile(draft: com.mistakebook.data.prefs.OcrProfile) {
+        viewModelScope.launch {
+            ocrTestingProfileId.value = draft.id
+            clearOcrTestResult(draft.id)
+            if (draft.apiKey.isBlank()) {
+                ocrTestingProfileId.value = null
+                publishOcrResult(draft.id, "请先填写 API Key", ok = false)
+                return@launch
+            }
+            if (draft.type == com.mistakebook.data.prefs.OcrType.MINERU) {
+                val result = container.mineruClient.testConnection(draft.apiKey.trim())
+                ocrTestingProfileId.value = null
+                val ok = result is com.mistakebook.net.ApiResult.Success
+                val msg = if (ok) "MinerU 连接成功" else (result.errorOrNull()?.serverMessage ?: "连接失败")
+                publishOcrResult(draft.id, msg, ok)
+            } else {
+                if (draft.model.isBlank()) {
+                    ocrTestingProfileId.value = null
+                    publishOcrResult(draft.id, "请填写模型名称（如 xopdeepseekocr）", ok = false)
+                    return@launch
+                }
+                val result = com.mistakebook.net.ocr.DeepSeekOcrEngine.testConnection(
+                    draft.normalized(),
+                    container.httpClient
+                )
+                ocrTestingProfileId.value = null
+                result.onSuccess { msg ->
+                    publishOcrResult(draft.id, msg, ok = true)
+                }.onFailure { err ->
+                    publishOcrResult(draft.id, err.message ?: "连接失败", ok = false)
+                }
+            }
+        }
+    }
+
+    fun clearOcrTestResult(id: String) {
+        ocrTestResults.update { it - id }
+        ocrTestOks.update { it - id }
+    }
+
+    private fun publishOcrResult(id: String, msg: String, ok: Boolean) {
+        ocrTestResults.update { it + (id to msg) }
+        ocrTestOks.update { it + (id to ok) }
     }
 
     companion object {

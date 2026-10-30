@@ -82,6 +82,7 @@ internal object BatchProtocol {
          * 和 `fs`→`f` 是同一类错误，同一次协议自检里一起抓出来。
          */
         const val ITEM_ERR = "err"
+        const val ITEM_ERR_MSG = "errMsg"
     }
 
     /**
@@ -107,7 +108,8 @@ internal object BatchProtocol {
         val width: Int,
         val height: Int,
         val fontPx: Float,
-        val err: Int = Err.NONE
+        val err: Int = Err.NONE,
+        val errMsg: String = ""
     )
 
     data class Layout(val sheetWidth: Int, val sheetHeight: Int, val entries: List<Entry>)
@@ -160,7 +162,8 @@ internal object BatchProtocol {
                 height = height,
                 // 非正字号（JS 异常）同样兜底，绝不能让它流到缩放里
                 fontPx = if (fontPx > 0f) fontPx else FALLBACK_FONT_PX,
-                err = item.intOr(Key.ITEM_ERR)
+                err = item.intOr(Key.ITEM_ERR),
+                errMsg = item[Key.ITEM_ERR_MSG]?.jsonPrimitive?.content.orEmpty()
             )
         }
         return Layout(w, h, entries)
@@ -175,6 +178,7 @@ internal object SingleProtocol {
     const val HEIGHT = "h"
     const val FONT_PX = "fs"
     const val ERR = "err"
+    const val ERR_MSG = "errMsg"
 }
 
 /**

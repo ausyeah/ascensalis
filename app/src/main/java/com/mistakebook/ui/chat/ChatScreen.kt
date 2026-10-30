@@ -232,6 +232,14 @@ fun ChatScreen(
     var pendingDeleteId by remember { mutableStateOf(0L) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
+    var previewImagePath by remember { mutableStateOf<String?>(null) }
+
+    previewImagePath?.let { path ->
+        com.mistakebook.ui.common.FullScreenImageDialog(
+            imagePath = path,
+            onDismiss = { previewImagePath = null }
+        )
+    }
     var showAttachSheet by remember { mutableStateOf(false) }
     var showLibraryPicker by remember { mutableStateOf(false) }
     var showModelSheet by remember { mutableStateOf(false) }
@@ -471,6 +479,7 @@ fun ChatScreen(
                         bubbleImages = state.bubbleImages,
                         bubbleFiles = state.bubbleFiles,
                         truncatedMessageId = state.truncatedMessageId,
+                        onImageClick = { previewImagePath = it },
                         onCopy = { text ->
                             // 直接走 Android 原生剪贴板：Compose 的 clipboard API
                             // 一分为二（旧 ClipboardManager.setText 非 suspend 已弃用、
@@ -596,6 +605,7 @@ private fun MessageList(
     bubbleImages: Map<Long, List<String>>,
     bubbleFiles: Map<Long, List<BubbleFile>>,
     truncatedMessageId: Long?,
+    onImageClick: (String) -> Unit = {},
     onCopy: (String) -> Unit,
     // 重试必须带上被点消息的 id：重试按钮挂在每条失败消息上，
     // 无 id 的「重试最后一轮」在历史里有旧失败消息时会删错目标。
@@ -649,6 +659,7 @@ private fun MessageList(
                 },
                 truncated = truncatedMessageId == message.id,
                 mathRenderer = mathRenderer,
+                onImageClick = onImageClick,
                 onCopy = onCopy,
                 onRetry = onRetry,
                 onDelete = onDelete,
@@ -762,6 +773,7 @@ private fun MessageBubble(
     stage: String?,
     truncated: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer,
+    onImageClick: (String) -> Unit = {},
     onCopy: (String) -> Unit,
     onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
@@ -856,13 +868,13 @@ private fun MessageBubble(
                 if (images.isNotEmpty()) {
                     // 多图（T2 对话连拍）两两一行；单图保持全宽。
                     if (images.size == 1) {
-                        BubbleImage(images.first())
+                        BubbleImage(images.first(), onImageClick = onImageClick)
                     } else {
                         images.chunked(2).forEach { rowImages ->
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 rowImages.forEach { imagePath ->
                                     Box(modifier = Modifier.weight(1f)) {
-                                        BubbleImage(imagePath)
+                                        BubbleImage(imagePath, onImageClick = onImageClick)
                                     }
                                 }
                                 if (rowImages.size == 1) {
@@ -879,7 +891,7 @@ private fun MessageBubble(
                 if (files.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         files.forEach { file ->
-                            AttachmentFileChip(file = file)
+                            AttachmentFileChip(file = file, onImageClick = onImageClick)
                         }
                     }
                     if (message.content.isNotBlank()) Spacer(Modifier.height(8.dp))
@@ -1096,7 +1108,7 @@ private fun decodeSampled(bytes: ByteArray, maxPx: Int): Bitmap? {
  * 不缓存的话每帧都重新解码一张几百 KB 的图，滑不动。
  */
 @Composable
-private fun BubbleImage(path: String) {
+private fun BubbleImage(path: String, onImageClick: (String) -> Unit = {}) {
     // **解码不能在组合期做。** 读文件 + 两遍 BitmapFactory.decodeByteArray
     // 是几十毫秒的重活，放在 remember 里就是卡在合成这一帧上——带图的气泡
     // 每滑进屏幕一次就掉一次帧。produceState 让它在 IO 线程跑、完成后再回填。
@@ -1123,6 +1135,7 @@ private fun BubbleImage(path: String) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
+            .clickable { onImageClick(path) }
     )
 }
 
@@ -1166,7 +1179,10 @@ private fun StatusRow(
 
             message.status == MessageStatus.DONE && !isUser -> {
                 IconButton(
-                    onClick = { onCopy(message.content) },
+                    onClick = {
+                        val textToCopy = ChatThinking.split(message.content, false).answer.trim().ifEmpty { message.content }
+                        onCopy(textToCopy)
+                    },
                     modifier = Modifier.size(28.dp)
                 ) {
                     Icon(
@@ -1290,6 +1306,25 @@ private fun ThinkingBlock(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.width(4.dp))
+            if (expanded && text.isNotBlank()) {
+                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                val context = androidx.compose.ui.platform.LocalContext.current
+                androidx.compose.material3.IconButton(
+                    onClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                        android.widget.Toast.makeText(context, "思考过程已复制", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "复制思考",
+                        modifier = Modifier.size(13.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.width(2.dp))
+            }
             Icon(
                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                 contentDescription = stringResource(
@@ -1977,7 +2012,7 @@ private fun PendingAttachmentChip(
  * 不抛异常也不静默。
  */
 @Composable
-private fun AttachmentFileChip(file: BubbleFile) {
+private fun AttachmentFileChip(file: BubbleFile, onImageClick: (String) -> Unit = {}) {
     val context = LocalContext.current
     val failed = file.errorMessage != null
     Surface(
@@ -1989,7 +2024,13 @@ private fun AttachmentFileChip(file: BubbleFile) {
         },
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { openChatAttachment(context, file) }
+            .clickable {
+                if (file.kind == com.mistakebook.domain.AttachmentKind.IMAGE && file.localPath.isNotBlank()) {
+                    onImageClick(file.localPath)
+                } else {
+                    openChatAttachment(context, file)
+                }
+            }
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

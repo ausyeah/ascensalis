@@ -191,20 +191,6 @@ fun DetailScreen(
                                 .heightIn(min = 120.dp),
                             onClick = { showFullImage = true; fullImagePath = null }
                         )
-                        // 重新裁切：只换这张显示图/封面，不重新识别。
-                        // 与右上角「重新识别」的分工——那个是先裁切再识别。
-                        TextButton(
-                            onClick = { onRecrop(question.imagePath) },
-                            modifier = Modifier.align(Alignment.End)
-                        ) {
-                            Icon(
-                                Icons.Default.Crop,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.edit_recrop))
-                        }
                         Spacer(Modifier.height(12.dp))
                     }
                     // 题目附图：MinerU 从原图切出的图形部分。与上面的整张原图明显区分，

@@ -26,7 +26,7 @@
      * 这些 padding 没有排版代价：Android 侧拿到位图后会按不透明像素的包围盒
      * 把透明边裁掉（MathRenderer.trimTransparent），裁完紧贴墨水，Compose 侧无感。
      */
-    padding: 14px 10px 16px 10px;
+    padding: 16px 28px 18px 16px;
   }
 
   /*
@@ -57,7 +57,7 @@
    */
   #sheet .body {
     display: inline-block;
-    padding: 14px 10px 16px 10px;
+    padding: 16px 28px 18px 16px;
   }
 </style>
 </head>
@@ -82,6 +82,21 @@
       if (child.nodeType === 1 && hasRenderError(child)) return true;
     }
     return false;
+  }
+
+  function getRenderErrorMessage(node) {
+    if (!node) return '';
+    if (node.classList && node.classList.contains('katex-error')) {
+      return node.getAttribute('title') || node.textContent || 'KaTeX 解析错误';
+    }
+    for (var i = 0; i < node.childNodes.length; i++) {
+      var child = node.childNodes[i];
+      if (child.nodeType === 1) {
+        var msg = getRenderErrorMessage(child);
+        if (msg) return msg;
+      }
+    }
+    return '';
   }
 
   /**
@@ -271,14 +286,17 @@
     // 这样公式之间的相对大小才会一致；只按包围盒高度缩放会把单个字母撑得巨大。
     // err: 1 = 已被 JSON 转义破坏 / 2 = KaTeX 解析失败（红色错误）。
     // Android 侧据此回退成显示源码，而不是给用户看红色的乱码。
-    var err = looksCorrupted(latex) ? 1 : (hasRenderError(out) ? 2 : 0);
+    var hasErr = hasRenderError(out);
+    var err = looksCorrupted(latex) ? 1 : (hasErr ? 2 : 0);
+    var errMsg = err === 1 ? '文本编码破坏（反斜杠转义丢失）' : (hasErr ? getRenderErrorMessage(out) : '');
     // v0.0.76：宽度用 ceil 而不是 round——CSS→设备像素换算后 round 可能
     // 少 0.5px，光栅化时最右一列墨水被切（用户反馈「右边仍被裁」的常见来源）。
     return JSON.stringify({
       w: Math.ceil(rect.width * dpr),
       h: Math.ceil(rect.height * dpr),
       fs: Math.round(parseFloat(out.style.fontSize) * dpr),
-      err: err
+      err: err,
+      errMsg: errMsg
     });
   }
 
@@ -362,7 +380,8 @@
         fs: Math.round(holder.__fontSize * dpr),
         // 与单条路径同一套判定；PDF 导出走的是批量路径，
         // 漏了这里就会把红色错误原样印到纸上
-        err: looksCorrupted(items[j].t) ? 1 : (hasRenderError(holder) ? 2 : 0)
+        err: looksCorrupted(items[j].t) ? 1 : (hasRenderError(holder) ? 2 : 0),
+        errMsg: looksCorrupted(items[j].t) ? '文本编码破坏' : getRenderErrorMessage(holder)
       });
     }
 

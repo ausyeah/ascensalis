@@ -192,7 +192,8 @@ class MathRenderer(context: Context) {
                         // （那正是「一坨红色的字」的来源）——比显示源码糟糕得多：
                         // 源码至少还能看出题目原本是什么。
                         if (size.err != 0) {
-                            Log.w(TAG, "公式渲染失败 err=${size.err}，回退源码: $trimmed")
+                            recordError(key, size.errMsg.ifBlank { if (size.err == 1) "源文本已被破坏" else "KaTeX 解析失败" })
+                            Log.w(TAG, "公式渲染失败 err=${size.err} (${size.errMsg})，回退源码: $trimmed")
                             return@withLock null
                         }
 
@@ -577,7 +578,7 @@ class MathRenderer(context: Context) {
     /**
      * 解析 `render()` 返回的 `{"w":..,"h":..,"fs":..}`（单位已是设备像素）。
      */
-    private data class Size(val width: Int, val height: Int, val fontPx: Float, val err: Int = 0)
+    private data class Size(val width: Int, val height: Int, val fontPx: Float, val err: Int = 0, val errMsg: String = "")
 
     private fun parseSize(raw: String): Size? {
         val text = BatchProtocol.unwrap(raw)
@@ -587,7 +588,8 @@ class MathRenderer(context: Context) {
         val h = obj[SingleProtocol.HEIGHT]?.jsonPrimitive?.content?.toFloatOrNull()?.toInt() ?: return null
         val fs = obj[SingleProtocol.FONT_PX]?.jsonPrimitive?.content?.toFloatOrNull() ?: DEFAULT_FONT_PX
         val err = obj[SingleProtocol.ERR]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-        return Size(w, h, fs, err)
+        val errMsg = obj[SingleProtocol.ERR_MSG]?.jsonPrimitive?.content.orEmpty()
+        return Size(w, h, fs, err, errMsg)
     }
 
     /**
@@ -754,7 +756,8 @@ class MathRenderer(context: Context) {
                     // 绝不能把 KaTeX 的红色错误当成公式结果返回——
                     // 打印时那会变成纸上一片红字。
                     val value = if (entry.err != 0) {
-                        Log.w(TAG, "批量渲染失败 err=${entry.err}，回退源码: $key")
+                        recordError(entry.key, entry.errMsg.ifBlank { if (entry.err == 1) "源文本已被破坏" else "KaTeX 解析失败" })
+                        Log.w(TAG, "批量渲染失败 err=${entry.err} (${entry.errMsg})，回退源码: $key")
                         null
                     } else {
                         slice(sheet, entry.x, entry.y, entry.width, entry.height)
@@ -903,6 +906,12 @@ class MathRenderer(context: Context) {
 
     companion object {
         private const val TAG = "MathRenderer"
+        private val lastErrors = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        fun getLastError(key: String): String? = lastErrors[key]
+        fun recordError(key: String, error: String) {
+            if (error.isNotBlank()) lastErrors[key] = error
+        }
         private const val ASSET_URL = "file:///android_asset/katex/math.html"
         private const val MAX_BITMAP_EDGE = 2048
         private const val PAGE_LOAD_TIMEOUT_MS = 8_000L
@@ -956,7 +965,7 @@ class MathRenderer(context: Context) {
          * 又不至于把安全 padding 的收益全吃掉。
          * 调大 → 位图边缘留白变多；调小 → 可能剩一圈毛边。
          */
-        private const val INK_MARGIN_PX = 4
+        private const val INK_MARGIN_PX = 8
 
         /**
          * 浅色主题的公式前景色（墨黑），与 math.html 里 CSS 默认值一致。

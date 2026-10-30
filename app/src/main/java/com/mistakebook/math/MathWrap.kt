@@ -46,8 +46,7 @@ object MathWrap {
      */
     private val MULTILINE_ENVS = setOf(
         "aligned", "align", "alignat", "flalign", "eqnarray", "split", "gather", "gathered",
-        "cases", "dcases", "rcases", "matrix", "pmatrix", "bmatrix", "Bmatrix",
-        "vmatrix", "Vmatrix", "smallmatrix", "array"
+        "cases", "dcases", "rcases"
     )
 
     /**
@@ -307,6 +306,7 @@ object MathWrap {
         // `\left` / `\right` 深度：优先在配对定界符**外部**断行（更自然），
         // 内部断行也不是不行——[balanceDelimiters] 会把配平补回来。
         var delimDepth = 0
+        var envDepth = 0
         var i = from
         while (i < searchEnd) {
             val c = latex[i]
@@ -322,10 +322,13 @@ object MathWrap {
                     }
                     continue
                 }
-                // `\left` / `\right` 深度跟踪
-                when (latex.substring(i + 1, j)) {
+                // `\left` / `\right` 及 `\begin` / `\end` 深度跟踪
+                val cmd = latex.substring(i + 1, j)
+                when (cmd) {
                     "left" -> delimDepth++
                     "right" -> delimDepth = (delimDepth - 1).coerceAtLeast(0)
+                    "begin" -> envDepth++
+                    "end" -> envDepth = (envDepth - 1).coerceAtLeast(0)
                 }
                 // 吃掉紧跟的花括号参数（最多两层，够 \frac{a}{b}）
                 var guard = 0
@@ -339,14 +342,14 @@ object MathWrap {
                         guard++
                     } else break
                 }
-                if (j <= searchEnd && j > from + 4) {
+                if (envDepth == 0 && j <= searchEnd && j > from + 4) {
                     best = j
                     if (delimDepth == 0) bestTop = j
                 }
                 i = j
                 continue
             }
-            if (c == ' ' && i > from + 4) {
+            if (envDepth == 0 && c == ' ' && i > from + 4) {
                 best = i + 1
                 if (delimDepth == 0) bestTop = i + 1
             }
@@ -385,28 +388,32 @@ object MathWrap {
         var best: Int? = null
         var bestTop: Int? = null
         // `\left` / `\right` 深度：优先在配对定界符**外部**断行。
-        // 落在定界符内部的断点也不是不行——[balanceDelimiters] 会把配平补回来。
         var delimDepth = 0
+        // 环境深度：在 `\begin{...}` 与 `\end{...}` 内部绝对不断行，彻底保护矩阵与联立环境
+        var envDepth = 0
         var i = from
         while (i < latex.length) {
             val c = latex[i]
             if (c == '\\' && i + 1 < latex.length) {
-                // `\\`（行分隔符）本身就是断点
+                // `\\`（行分隔符）本身就是断点（仅在环境外部）
                 if (latex[i + 1] == '\\') {
-                    if (depth == 0 && i + 2 <= windowEnd + MAX_OVERSHOOT && i >= from) {
+                    if (depth == 0 && envDepth == 0 && i + 2 <= windowEnd + MAX_OVERSHOOT && i >= from) {
                         best = i + 2
                         if (delimDepth == 0) bestTop = i + 2
                     }
                     i += 2
                     continue
                 }
-                // `\left` / `\right` 深度跟踪
+                // `\left` / `\right` 及 `\begin` / `\end` 深度跟踪
                 val cmdEnd = matchCommand(latex, i)
-                when (commandName(latex, i)) {
+                val cmd = commandName(latex, i)
+                when (cmd) {
                     "left" -> delimDepth++
                     "right" -> delimDepth = (delimDepth - 1).coerceAtLeast(0)
+                    "begin" -> envDepth++
+                    "end" -> envDepth = (envDepth - 1).coerceAtLeast(0)
                 }
-                if (depth == 0 && i < windowEnd && cmdEnd != null) {
+                if (depth == 0 && envDepth == 0 && i < windowEnd && cmdEnd != null) {
                     best = cmdEnd
                     if (delimDepth == 0) bestTop = cmdEnd
                 }
@@ -417,7 +424,7 @@ object MathWrap {
                 '{', '(', '[' -> depth++
                 '}', ')', ']' -> depth = (depth - 1).coerceAtLeast(0)
             }
-            if (depth == 0 && c in BREAK_CHARS && i < windowEnd) {
+            if (depth == 0 && envDepth == 0 && c in BREAK_CHARS && i < windowEnd) {
                 best = i + 1
                 if (delimDepth == 0) bestTop = i + 1
             }
