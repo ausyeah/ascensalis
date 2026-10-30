@@ -133,7 +133,6 @@ import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.ExpandLess
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -848,13 +847,13 @@ private fun MessageBubble(
                 if (images.isNotEmpty()) {
                     // 多图（T2 对话连拍）两两一行；单图保持全宽。
                     if (images.size == 1) {
-                        BubbleImage(dataUrl = images.first())
+                        BubbleImage(images.first())
                     } else {
                         images.chunked(2).forEach { rowImages ->
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                rowImages.forEach { dataUrl ->
+                                rowImages.forEach { imagePath ->
                                     Box(modifier = Modifier.weight(1f)) {
-                                        BubbleImage(dataUrl = dataUrl)
+                                        BubbleImage(imagePath)
                                     }
                                 }
                                 if (rowImages.size == 1) {
@@ -1080,19 +1079,21 @@ private fun decodeSampled(bytes: ByteArray, maxPx: Int): Bitmap? {
 /**
  * 气泡里的图片。
  *
- * 直接把 data URL 喂给 `Image`，不引任何图片库（项目锁零新增依赖）。
- * `remember(dataUrl)` 是必须的：LazyColumn 滚动时每一帧都会重组，
- * 不缓存的话每帧都重新 base64 解码一张几百 KB 的图，滑不动。
+ * 入参是**本地文件路径**（v0.0.72 起不再是 data URL——base64 文本每张
+ * 几百 KB 且随会话常驻 UiState，路径只有几十字节）。直接读文件采样解码，
+ * 连 base64 那步都省了。
+ * `remember(path)` 是必须的：LazyColumn 滚动时每一帧都会重组，
+ * 不缓存的话每帧都重新解码一张几百 KB 的图，滑不动。
  */
 @Composable
-private fun BubbleImage(dataUrl: String) {
-    // **解码不能在组合期做。** base64 解码 + 两遍 BitmapFactory.decodeByteArray
+private fun BubbleImage(path: String) {
+    // **解码不能在组合期做。** 读文件 + 两遍 BitmapFactory.decodeByteArray
     // 是几十毫秒的重活，放在 remember 里就是卡在合成这一帧上——带图的气泡
     // 每滑进屏幕一次就掉一次帧。produceState 让它在 IO 线程跑、完成后再回填。
-    val bitmap by produceState<android.graphics.Bitmap?>(null, dataUrl) {
+    val bitmap by produceState<android.graphics.Bitmap?>(null, path) {
         value = withContext(Dispatchers.IO) {
             runCatching {
-                val bytes = Base64.decode(dataUrl.substringAfter("base64,"), Base64.NO_WRAP)
+                val bytes = java.io.File(path).readBytes()
                 decodeSampled(bytes, BUBBLE_IMAGE_MAX_PX)
             }.getOrNull()
         }

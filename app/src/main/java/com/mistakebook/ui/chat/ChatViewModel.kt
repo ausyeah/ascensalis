@@ -566,7 +566,7 @@ class ChatViewModel(
         role == ChatRole.SYSTEM && content.startsWith(ChatContextAssembler.SUMMARY_PREFIX)
 
     /**
-     * 把用户消息里的图片读成 data URL，供气泡显示。
+     * 把用户消息里的图片路径读出来，供气泡显示。
      *
      * ## 为什么要单独加载
      *
@@ -575,7 +575,11 @@ class ChatViewModel(
      * 用户发出去图、自己这边看不见，但模型那边看得到，
      * 于是表现成「图片发不出去」。
      *
-     * 走 `ChatImageDataUrls` 的 LRU 缓存，重复重组不会反复 base64。
+     * v0.0.72 起 Map 里存的是**本地文件路径**而不是 data URL：
+     * base64 文本每张几百 KB 且随会话常驻 UiState（图片多的会话几十 MB），
+     * 路径只有几十字节；渲染层（BubbleImage）按需读文件采样解码，
+     * 滑出屏幕即释放。发给模型的 data URL 仍由请求链路按需生成
+     * （ChatRepository.toOutgoing），两条链路各自职责。
      */
     private fun loadBubbleImages(messages: List<ChatMessage>) {
         // 附属在消息上的图片有两类来源：用户发的（attachmentIdsJson 登记过）
@@ -604,7 +608,7 @@ class ChatViewModel(
                 }
                 val urls = attachments
                     .filter { it.kind == AttachmentKind.IMAGE && it.status == AttachmentStatus.READY }
-                    .mapNotNull { attachment -> repository.imageDataUrlOf(attachment) }
+                    .mapNotNull { it.localPath.takeIf { path -> path.isNotBlank() } }
                 if (urls.isNotEmpty()) loaded[message.id] = urls
                 // 非图片附件：PDF/文档/其它，气泡里以文件芯片呈现（点击系统打开）。
                 // 处理失败的也带上——用户需要看到「这个附件没处理成功」而不是空白。
