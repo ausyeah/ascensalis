@@ -242,12 +242,19 @@ class LibraryStoreTest {
     }
 
     @Test
-    fun `pdf without text yields hint instead of null`() {
+    fun `pdf without text is flagged as scanned instead of null`() {
         val root = root()
         val f = LibraryStore.resolveLibraryPath(root, "扫描件.pdf")!!
         f.writeBytes(pdfWithContent("/F1 1 Tf 0 0 Td", flate = false))
+        // v0.0.77：扫描型 PDF 不再只吐一句「未能提取」——结构化标记
+        // scannedPdf，让上层转页面图走识图/OCR（用户反馈 5）
+        val result = LibraryStore.readDetailed(f)!!
+        assertTrue("扫描件应被打标记", result.scannedPdf)
+        assertTrue(result.text.contains("扫描件"))
+        assertFalse(result.truncated)
+        // read() 的旧契约保持：仍返回提示文案而不是 null
         val (text, truncated) = LibraryStore.read(f)!!
-        assertTrue(text.contains("未能"))
+        assertTrue(text.contains("扫描件"))
         assertFalse(truncated)
     }
 
@@ -257,7 +264,9 @@ class LibraryStoreTest {
         val w = LibraryTool.dispatch(root, "library_write", mapOf("name" to "a.pdf", "content" to "x"))
         assertFalse("应拒绝写入 pdf", w.ok)
         val f = LibraryStore.resolveLibraryPath(root, "a.pdf")!!
-        f.writeBytes(pdfWithContent("(keep) Tj", flate = false))
+        // 文本要够长：PdfTextQuality 要求 ≥8 个字符才认作文本层可用，
+        // 否则会被判成扫描件（那时 library_read 会走「请识图」分支）
+        f.writeBytes(pdfWithContent("(keep this readable text) Tj", flate = false))
         val e = LibraryTool.dispatch(root, "library_edit", mapOf("name" to "a.pdf", "content" to "x"))
         assertFalse("应拒绝编辑 pdf", e.ok)
         val r = LibraryTool.dispatch(root, "library_read", mapOf("name" to "a.pdf"))
