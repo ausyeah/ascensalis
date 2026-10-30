@@ -88,7 +88,6 @@ fun DetailScreen(
     questionId: Long,
     onBack: () -> Unit,
     onEdit: (Long) -> Unit,
-    onRecrop: (String) -> Unit = {},
     onReRecognize: (Long) -> Unit = {},
     /** 重新识别（先裁切再识别）：确认后带原图路径进裁剪页。 */
     onReRecognizeWithCrop: (String) -> Unit = {},

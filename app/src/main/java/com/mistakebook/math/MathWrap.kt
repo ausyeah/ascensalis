@@ -275,7 +275,11 @@ object MathWrap {
             val windowEnd = start + maxChars
             val cut = findBreak(latex, start, windowEnd)
                 ?: findSoftBreak(latex, start, windowEnd)
-                ?: windowEnd
+            if (cut == null) {
+                out += latex.substring(start).trim()
+                start = latex.length
+                break
+            }
             val line = latex.substring(start, cut).trim()
             if (line.isNotEmpty()) out += line
             start = cut
