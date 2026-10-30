@@ -1354,13 +1354,41 @@ class ChatViewModel(
         }
     }
 
-    /** T6 降级：把资料库文件加入待注入列表（发送时前置为当轮上下文）。 */
+    /**
+     * T6 降级：把资料库文件加入待注入列表（发送时前置为当轮上下文）。
+     *
+     * v0.0.77：**扫描型 PDF 自动转页面图**。文本层读不出来的 PDF 只把
+     * 「读不出」塞给模型是废物——用户已经配好了识图模型 / OCR，那就该用：
+     * 页面栅格化后作为图片附件跟着这一轮一起发，模型自然会调工具去读。
+     */
     fun addLibraryInjection(file: File) {
-        if (file.isFile && pendingLibraryFiles.none { it.absolutePath == file.absolutePath }) {
-            pendingLibraryFiles += file
-            _state.value = _state.value.copy(
-                libraryInjectionNames = pendingLibraryFiles.map { it.name }
-            )
+        if (!file.isFile || pendingLibraryFiles.any { it.absolutePath == file.absolutePath }) return
+        pendingLibraryFiles += file
+        _state.value = _state.value.copy(
+            libraryInjectionNames = pendingLibraryFiles.map { it.name }
+        )
+        if (file.extension.equals("pdf", ignoreCase = true)) {
+            viewModelScope.launch {
+                val sessionId = _state.value.sessionId
+                if (sessionId == 0L) return@launch
+                val read = withContext(Dispatchers.IO) {
+                    runCatching { com.mistakebook.data.library.LibraryStore.readDetailed(file) }.getOrNull()
+                }
+                if (read?.scannedPdf != true) return@launch
+                val pages = withContext(Dispatchers.IO) {
+                    runCatching { preparer.renderPdfPages(file, sessionId) }.getOrDefault(emptyList())
+                }
+                if (pages.isEmpty()) {
+                    _events.trySend(
+                        ChatEvent.Info("这份 PDF 抽不出文字、页面转图也失败了，换一份文件试试")
+                    )
+                    return@launch
+                }
+                _events.trySend(
+                    ChatEvent.Info("扫描型 PDF：已把 ${pages.size} 页转成图片，随这轮一起发给模型识别")
+                )
+                pages.forEach { addPageImageAttachment(it) }
+            }
         }
     }
 

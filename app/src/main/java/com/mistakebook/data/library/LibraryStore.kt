@@ -40,6 +40,28 @@ object LibraryStore {
     /** 读文件的内容上限；超过截断并在返回里注明。 */
     const val MAX_READ_BYTES = 50 * 1024
 
+    /**
+     * 扫描型 PDF（v0.0.77）：文本层提不出来（或提出来是乱码）。
+     *
+     * 与 [BINARY_EMPTY_HINT] 的区别：那个是「放弃」，这个是**交给识图链路**——
+     * 调用方据此把页面栅格化成图片附件，让已经配置好的识图模型 / OCR 去读
+     * （用户反馈：「不是配置好了识图模型和 OCR，这就是你的手段啊」）。
+     */
+    const val SCANNED_PDF_HINT =
+        "（该 PDF 是扫描件：文字层无法提取。页面图片已随本轮消息附上，" +
+            "请调用 describe_image 或 ocr_image 读取内容，不要向用户索要转换后的文件。）"
+
+    /**
+     * 读取结果（v0.0.77）：除了正文与截断标记，还要告诉调用方
+     * [scannedPdf]——是扫描件时上层要转图片走识图，而不是把提示文案
+     * 当正文塞进上下文。
+     */
+    data class ReadResult(
+        val text: String,
+        val truncated: Boolean,
+        val scannedPdf: Boolean = false
+    )
+
     /** 单文件大小上限（写入侧）：资料库文件不该塞整本书。 */
     const val MAX_FILE_BYTES = 2L * 1024 * 1024
 
@@ -84,20 +106,40 @@ object LibraryStore {
     /**
      * 读文件；超过 [MAX_READ_BYTES] 截断并返回「已截断」标记。
      * 二进制文档走正文提取，同样受 50KB 截断约束（对话注入的口径不变）。
+     *
+     * v0.0.77 起内部走 [readDetailed]，PDF 额外区分「文本型 / 扫描型」。
      */
-    fun read(file: File): Pair<String, Boolean>? {
+    fun read(file: File): Pair<String, Boolean>? =
+        readDetailed(file)?.let { it.text to it.truncated }
+
+    /**
+     * 读文件并给出结构化的结果（v0.0.77）。
+     *
+     * PDF 分两种：文本层能抽出**可用**文字 → 直接当正文；
+     * 抽不出来或抽出来是乱码（[PdfTextQuality] 判定）→ 标记 scannedPdf，
+     * 由上层把页面转成图片交给识图 / OCR。其余二进制文档维持原行为。
+     */
+    fun readDetailed(file: File): ReadResult? {
         if (!file.isFile || !file.exists()) return null
         if (isBinaryDoc(file)) {
             val text = DocumentTextExtractor.extract(file)
-            if (text.isBlank()) return BINARY_EMPTY_HINT to false
+            if (file.extension.lowercase() == "pdf") {
+                // 非标准内容流的兜底路径会把 PDF 二进制原文当文本返回，
+                // 因此「非空」不等于「可用」——必须过质量判定。
+                if (!com.mistakebook.data.chat.PdfTextQuality.isUsable(text)) {
+                    return ReadResult(SCANNED_PDF_HINT, truncated = false, scannedPdf = true)
+                }
+            } else if (text.isBlank()) {
+                return ReadResult(BINARY_EMPTY_HINT, truncated = false)
+            }
             val (cut, truncated) = truncateUtf8(text, MAX_READ_BYTES)
-            return cut to truncated
+            return ReadResult(cut, truncated)
         }
         val raw = file.readBytes()
         val truncated = raw.size > MAX_READ_BYTES
         val bytes = if (truncated) raw.copyOf(MAX_READ_BYTES) else raw
         val text = runCatching { String(bytes, Charsets.UTF_8) }.getOrDefault("")
-        return text to truncated
+        return ReadResult(text, truncated)
     }
 
     /** 在 UTF-8 字符边界上安全截断，不产生半个字符的乱码。 */

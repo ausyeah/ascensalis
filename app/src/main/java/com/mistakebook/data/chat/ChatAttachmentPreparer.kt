@@ -245,6 +245,25 @@ class ChatAttachmentPreparer(
         }
     }
 
+    /**
+     * 把 PDF 页面栅格化成图片（v0.0.77，供资料库的扫描型 PDF 复用）。
+     *
+     * 与附件路径同一套实现（[PdfPageImages]，最多 4 页、长边 1500px）：
+     * 资料库里的扫描件同样交给识图 / OCR 链路，而不是只吐一句「读不出文字」。
+     *
+     * @return 页面图路径（落在该会话附件目录）；失败返回空列表。
+     */
+    fun renderPdfPages(file: File, sessionId: Long): List<String> = PdfPageImages.render(
+        file,
+        targetFactory = { index ->
+            appFiles.chatFile(
+                sessionId,
+                "libpdfpage_${System.currentTimeMillis()}_$index",
+                "jpg"
+            )
+        }
+    )
+
     private fun processPdf(
         file: File,
         fileName: String,
