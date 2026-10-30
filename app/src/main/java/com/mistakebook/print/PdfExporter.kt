@@ -183,7 +183,10 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
         if (mathItems.isEmpty()) return emptyMap()
 
         return runCatching {
-            mathRenderer.renderAll(mathItems.distinctBy { it.first })
+            mathRenderer.renderAll(
+                mathItems.distinctBy { it.first },
+                colorCss = MathRenderer.FG_CSS_LIGHT
+            )
         }.getOrDefault(emptyMap())
     }
 

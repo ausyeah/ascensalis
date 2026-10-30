@@ -93,13 +93,17 @@ class MathRenderer(context: Context) {
         val css = String.format("#%06X", 0xFFFFFF and color)
         if (css == fgCss) return
         fgCss = css
-        cache.evictAll()
-        Log.i(TAG, "公式前景色切换为 $css，缓存已作废")
+        // 缓存键已包含 colorCss 维度（formatCacheKey），深浅色公式独立保存在 LRU 中，不再整表作废
+        Log.i(TAG, "公式前景色切换为 $css（缓存隔离保留）")
     }
 
-    /** 把当前前景色推进页面。同一 WebView 的 JS 队列保序，放在 render 脚本前调用即先生效。 */
-    private fun pushForegroundColor(view: WebView) {
-        view.evaluateJavascript("setFgColor('$fgCss')", null)
+    /** 主动清理公式位图缓存。 */
+    fun clearCache() {
+        cache.evictAll()
+    }
+
+    private fun pushForegroundColor(view: WebView, css: String = fgCss) {
+        view.evaluateJavascript("setFgColor('$css')", null)
     }
 
     /** 渲染结果为透明背景位图 + 实际字号；失败返回 null（调用方回退为源码文本）。 */
@@ -124,9 +128,11 @@ class MathRenderer(context: Context) {
         )
         val trimmed = com.mistakebook.pipeline.LatexSanitizer.clean(repaired)
         if (trimmed.isEmpty()) return null
-        val key = (if (displayMode) "d" else "i") + ":" + trimmed
+        val rawKey = (if (displayMode) "d" else "i") + ":" + trimmed
+        val color = fgCss
+        val key = formatCacheKey(color, rawKey)
         cache.get(key)?.let { return it }
-        Log.i(TAG, "render 请求: '$trimmed' display=$displayMode")
+        Log.i(TAG, "render 请求: '$trimmed' display=$displayMode color=$color")
         return withContext(Dispatchers.Main) {
             mutex.withLock {
                 try {
@@ -137,8 +143,8 @@ class MathRenderer(context: Context) {
                         Log.w(TAG, "KaTeX 页面加载超时: $trimmed")
                         return@withLock null
                     }
-                    // 先把主题前景色推上去，再发 render：JS 队列保序，颜色必然先生效。
-                    pushForegroundColor(view)
+                    // 先把目标前景色推上去，再发 render：JS 队列保序，颜色必然先生效。
+                    pushForegroundColor(view, color)
                     // 留 32px 余量给 #out 的 padding，避免抠图时切到最右侧
                     var maxDevicePx = MAX_BITMAP_EDGE - 32
                     var script = "render(${jsonString(trimmed)}, $displayMode, $maxDevicePx)"
@@ -656,11 +662,16 @@ class MathRenderer(context: Context) {
      */
     /** [cachedOf] 的实例版本，供界面直接调用。 */
     fun cachedOf(
-        items: List<Triple<String, String, Boolean>>
-    ): Map<String, RenderedMath> = cachedOf(cache::get, items)
+        items: List<Triple<String, String, Boolean>>,
+        colorCss: String = fgCss
+    ): Map<String, RenderedMath> = cachedOf(
+        cache = { key -> cache.get(formatCacheKey(colorCss, key)) },
+        items = items
+    )
 
     suspend fun renderAll(
-        items: List<Triple<String, String, Boolean>>
+        items: List<Triple<String, String, Boolean>>,
+        colorCss: String = fgCss
     ): Map<String, RenderedMath?> = withContext(Dispatchers.Main) {
         if (items.isEmpty()) return@withContext emptyMap()
 
@@ -668,7 +679,7 @@ class MathRenderer(context: Context) {
         val results = linkedMapOf<String, RenderedMath?>()
         val pending = mutableListOf<Triple<String, String, Boolean>>()
         items.forEach { (key, latex, display) ->
-            val hit = cache.get(key)
+            val hit = cache.get(formatCacheKey(colorCss, key))
             if (hit != null) {
                 results[key] = hit
             } else {
@@ -684,14 +695,15 @@ class MathRenderer(context: Context) {
         // 所以这里的批大小是「真正要画的条数」，不会因为缓存命中而被摊薄。
         splitPending(pending.map { it.first }, BATCH_LIMIT).forEach { batchKeys ->
             val subset = pending.filter { it.first in batchKeys }
-            results.putAll(renderPending(subset))
+            results.putAll(renderPending(subset, colorCss))
         }
         return@withContext results
     }
 
     /** 只渲染给定的（已剔除缓存命中的）一批。 */
     private suspend fun renderPending(
-        pending: List<Triple<String, String, Boolean>>
+        pending: List<Triple<String, String, Boolean>>,
+        colorCss: String = fgCss
     ): Map<String, RenderedMath?> {
         val results = linkedMapOf<String, RenderedMath?>()
         if (pending.isEmpty()) return results
@@ -710,12 +722,12 @@ class MathRenderer(context: Context) {
                 // 不去重的话同一个公式要过两遍 WebView，卡顿翻倍。
                 val deduped = mutableListOf<Triple<String, String, Boolean>>()
                 pending.forEach { item ->
-                    val hit = cache.get(item.first)
+                    val hit = cache.get(formatCacheKey(colorCss, item.first))
                     if (hit != null) results[item.first] = hit else deduped += item
                 }
                 if (deduped.isEmpty()) return@withLock
                 // 批量路径同样要先推主题色：长卷里每个公式都继承 #sheet 的 color。
-                pushForegroundColor(view)
+                pushForegroundColor(view, colorCss)
                 val script = buildBatchScript(deduped)
                 val raw = awaitJavascript(view, script)
                 if (raw == null) {
@@ -748,7 +760,7 @@ class MathRenderer(context: Context) {
                         slice(sheet, entry.x, entry.y, entry.width, entry.height)
                             ?.let { RenderedMath(it, entry.fontPx) }
                     }
-                    if (value != null) cache.put(key, value)
+                    if (value != null) cache.put(formatCacheKey(colorCss, key), value)
                     results[key] = value
                 }
                 sheet.recycle()
@@ -958,7 +970,17 @@ class MathRenderer(context: Context) {
          */
         const val FG_DARK = 0xFFECE9E2.toInt()
 
-        private const val FG_CSS_LIGHT = "#1B1F26"
+        const val FG_CSS_LIGHT = "#1B1F26"
+        const val FG_CSS_DARK = "#ECE9E2"
+
+        /**
+         * 生成携带前景色维度的公式位图缓存键。
+         *
+         * ## 为什么缓存键必须带颜色
+         * 公式位图是透明背景的，墨水颜色完全由前景色决定。
+         * 将颜色编入 key 后，深浅两套位图独立共存于 LRU 缓存中，切主题实现毫秒级秒切且旧主题位图不丢失。
+         */
+        fun formatCacheKey(colorCss: String, key: String): String = "$colorCss:$key"
     }
 }
 

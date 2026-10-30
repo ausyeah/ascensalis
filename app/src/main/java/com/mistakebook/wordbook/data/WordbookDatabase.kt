@@ -7,13 +7,15 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+const val WORDBOOK_DB_VERSION = 2
+
 @Database(
     entities = [
         WordProgress::class,
         WordStudyLog::class
     ],
-    version = 2,
-    exportSchema = false
+    version = WORDBOOK_DB_VERSION,
+    exportSchema = true
 )
 abstract class WordbookDatabase : RoomDatabase() {
 
