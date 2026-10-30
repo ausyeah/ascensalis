@@ -96,6 +96,17 @@ interface ChatDao {
     @Query("UPDATE chat_sessions SET deletedAt = :at, updatedAt = :at WHERE deletedAt IS NULL")
     suspend fun softDeleteAllSessions(at: Long)
 
+    /** 回收站列出：软删时刻早于 [before] 的会话（保留期已过）。 */
+    @Query("SELECT * FROM chat_sessions WHERE deletedAt IS NOT NULL AND deletedAt < :before")
+    suspend fun listSoftDeletedBefore(before: Long): List<ChatSession>
+
+    /**
+     * 回收站清掉：保留期已过的软删会话物理删除。
+     * 消息与附件行经外键 CASCADE 一并删除（session → messages → attachments）。
+     */
+    @Query("DELETE FROM chat_sessions WHERE deletedAt IS NOT NULL AND deletedAt < :before")
+    suspend fun hardDeleteSoftDeletedBefore(before: Long)
+
     // ------------------------------------------------------------ 消息
 
     @Insert

@@ -25,6 +25,12 @@ class MistakeBookApp : Application() {
         container.appScope.launch {
             container.captureTaskRepository.failUnfinished(RecognitionEngineInterruptedMessage)
         }
+        // 回收站清理（v0.0.71）：软删超过保留期的会话连同附件文件一起清掉。
+        // 软删本身保留文件（可撤销，见 ChatRepository.softDeleteSession），
+        // 但撤销窗口不该是无限的——30 天足够宽裕，此后磁盘开始回收。
+        container.appScope.launch {
+            runCatching { container.chatRepository.purgeExpiredDeletedSessions() }
+        }
         // T10 徽章判定：启动时跑一轮轻量判定，把新解锁徽章持久化
         container.appScope.launch {
             runCatching { container.badgeRepository.evaluateAndStore() }

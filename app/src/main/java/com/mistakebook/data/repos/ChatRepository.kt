@@ -132,6 +132,28 @@ class ChatRepository(
     }
 
     /**
+     * 回收站定期清理（v0.0.71）：软删超过 [RETENTION_DAYS] 天的会话
+     * 连同附件文件一起物理清掉。App 启动时跑一次。
+     *
+     * ## 为什么需要它
+     *
+     * v0.0.66 起「软删不再立即删附件」（可撤销优先），文件从那一刻起
+     * 只进不出——本方法就是当时承诺的清理机制：撤销窗口 30 天足够宽裕，
+     * 过期后磁盘开始回收。数据库侧一次 DELETE 经外键 CASCADE 级联清掉
+     * 消息与附件行；文件侧逐会话删目录。
+     *
+     * @return 清掉的会话数（日志用）。
+     */
+    suspend fun purgeExpiredDeletedSessions(now: Long = System.currentTimeMillis()): Int {
+        val before = now - RETENTION_DAYS * DAY_MS
+        val expired = chatDao.listSoftDeletedBefore(before)
+        if (expired.isEmpty()) return 0
+        expired.forEach { appFiles.deleteRecursively(appFiles.chatDir(it.id)) }
+        chatDao.hardDeleteSoftDeletedBefore(before)
+        return expired.size
+    }
+
+    /**
      * 清空全部会话。**这是两步确认后的破坏性终态**，与单个软删（可撤销）
      * 语义不同：附件文件随之清理（v0.0.70）——v0.0.66 曾为统一「软删不删
      * 文件」而保留，但清空全部没有恢复入口，文件只会慢性积累。
@@ -669,5 +691,9 @@ class ChatRepository(
     private companion object {
         const val TAG = "ChatRepository"
         const val TITLE_MAX_CHARS = 20
+
+        /** 软删会话的保留期（撤销窗口），过期后由 [purgeExpiredDeletedSessions] 清理。 */
+        const val RETENTION_DAYS = 30L
+        const val DAY_MS = 24L * 60 * 60 * 1000
     }
 }
