@@ -1,7 +1,8 @@
 @echo off
-REM 推送 main（带系统代理 + 8 次重试）。v0.0.78 交接新增。
-REM 用法：cmd /c scripts\push-retry.cmd
-REM 前置：系统代理 127.0.0.1:7890 在运行（本机 github.com 直连不通）
+REM Push main with system proxy + retries (added in v0.0.78 handoff).
+REM Usage: cmd /c scripts\push-retry.cmd
+REM Requires: local proxy at 127.0.0.1:7890 (direct github.com is blocked on this machine).
+REM Note: keep this file ASCII-only; cmd.exe garbles UTF-8 comments under GBK console.
 setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 set GIT_TERMINAL_PROMPT=0

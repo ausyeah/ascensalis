@@ -1,9 +1,10 @@
-# 打 tag 并推送（带代理 + 重试）。v0.0.78 交接新增。
+# Create and push a tag with proxy + retries (added in v0.0.78 handoff).
 #
-# 用法：
+# Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\tag-retry.ps1 -Tag v0.0.79
 #
-# 之后等 tag 触发的 CI：GitHub Actions 会构建签名 APK 并挂到 Release。
+# Afterwards the tag-triggered CI builds the signed APK and attaches it to the Release.
+# Keep this file ASCII-only: Windows PowerShell 5.1 misreads UTF-8 without BOM.
 param(
     [Parameter(Mandatory = $true)][string]$Tag
 )
@@ -13,10 +14,9 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 $env:GIT_TERMINAL_PROMPT = '0'
 
-# tag 已存在时先删（本地重建），已推到远端则跳过删除报错
 git tag -d $Tag 2>$null | Out-Null
 git tag -a $Tag -m $Tag
-if ($LASTEXITCODE -ne 0) { throw "创建 tag 失败：$Tag" }
+if ($LASTEXITCODE -ne 0) { throw "Failed to create tag: $Tag" }
 
 for ($i = 1; $i -le 8; $i++) {
     Write-Host "[tag push attempt $i]"
