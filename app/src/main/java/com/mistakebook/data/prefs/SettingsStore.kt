@@ -105,6 +105,7 @@ class SettingsStore(context: Context) {
             activeVisionProfileId = activeVisionId,
             visionProfileId = prefs[KEY_VISION_PROFILE],
             themeMode = ThemeMode.fromKey(prefs[KEY_THEME_MODE]),
+            accentTone = AccentTone.fromKey(prefs[KEY_ACCENT_TONE]),
             networkMode = NetworkMode.fromKey(prefs[KEY_NETWORK_MODE]),
             reasoningEffort = ReasoningEffort.fromKey(prefs[KEY_REASONING_EFFORT]),
             // mineruModelVersion / ocrLanguage / forceOcr 已固定，不再从 prefs 读。
@@ -535,6 +536,9 @@ class SettingsStore(context: Context) {
         editString(KEY_THEME_MODE, value)
     }
 
+    /** 设置自选主题色（v0.0.76）。 */
+    suspend fun setAccentTone(tone: AccentTone) = editString(KEY_ACCENT_TONE, tone.name)
+
     /** 设置网络出口模式。写入即生效（NetworkRouter 每次建连前读）。 */
     suspend fun setNetworkMode(mode: NetworkMode) {
         val value = when (mode) {
@@ -598,6 +602,9 @@ class SettingsStore(context: Context) {
         // KEY_MINERU_MODEL / KEY_OCR_LANGUAGE / KEY_FORCE_OCR 已删：
         // 对应设置项固定为 vlm / ch / 开启，不再可配。旧库里的这些键会被忽略。
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+
+        /** 自选主题色（v0.0.76）：存枚举名，认不出回默认。 */
+        val KEY_ACCENT_TONE = stringPreferencesKey("accent_tone")
         val KEY_NETWORK_MODE = stringPreferencesKey("network_mode")
         val KEY_REASONING_EFFORT = stringPreferencesKey("reasoning_effort")
         val KEY_ATTACH_IMAGE = booleanPreferencesKey("attach_original_image")

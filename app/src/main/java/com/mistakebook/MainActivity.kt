@@ -135,7 +135,7 @@ class MainActivity : ComponentActivity() {
                     else com.mistakebook.math.MathRenderer.FG_LIGHT
                 )
             }
-            MistakeBookTheme(darkTheme = isDark) {
+            MistakeBookTheme(darkTheme = isDark, accent = settings.accentTone) {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     if (probeRender) {
                         ProbeRichTextScreen(container.mathRenderer)

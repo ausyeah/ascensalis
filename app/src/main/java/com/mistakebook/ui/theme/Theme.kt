@@ -122,16 +122,34 @@ private val MistakeBookTypography = Typography(
 val LocalDarkTheme = compositionLocalOf { false }
 
 /**
- * 全局纸质化主题系统（支持浅色暖纸与深色墨砚自适应）。
+ * 全局纸质化主题系统（支持浅色暖纸与深色墨砚自适应 + 自选主题色）。
+ *
+ * @param accent 自选主题色（v0.0.76）。只替换 primary 一组色槽，
+ *   背景/卡片/文字仍走暖纸与墨砚两套基调——主题色是「强调」不是换肤，
+ *   整个 App 的背景与正文对比度不该随配色波动。
  */
 @Composable
 fun MistakeBookTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    accent: com.mistakebook.data.prefs.AccentTone = com.mistakebook.data.prefs.AccentTone.DEFAULT,
     content: @Composable () -> Unit
 ) {
     val activity = LocalContextActivity()
     val view = LocalView.current
-    val colorScheme = if (darkTheme) PaperDarkColors else PaperLightColors
+    val base = if (darkTheme) PaperDarkColors else PaperLightColors
+    val palette = accent.palette()
+    // 默认靛蓝直接用万彩本身（浅色模式与旧版逐像素一致；深色模式下
+    // 靛蓝条目返回的正是原琥珀，所以「默认」两种明暗都零变化）
+    val colorScheme = if (accent == com.mistakebook.data.prefs.AccentTone.DEFAULT) {
+        base
+    } else {
+        base.copy(
+            primary = if (darkTheme) palette.dark else palette.light,
+            onPrimary = if (darkTheme) Color(0xFF2A1F06) else Color.White,
+            primaryContainer = if (darkTheme) palette.darkContainer else palette.lightContainer,
+            onPrimaryContainer = if (darkTheme) palette.darkOnContainer else palette.lightOnContainer
+        )
+    }
 
     if (!view.isInEditMode) {
         SideEffect {

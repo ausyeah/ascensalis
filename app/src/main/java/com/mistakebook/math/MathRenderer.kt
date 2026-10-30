@@ -140,20 +140,42 @@ class MathRenderer(context: Context) {
                     // 先把主题前景色推上去，再发 render：JS 队列保序，颜色必然先生效。
                     pushForegroundColor(view)
                     // 留 32px 余量给 #out 的 padding，避免抠图时切到最右侧
-                    val script =
-                        "render(${jsonString(trimmed)}, $displayMode, ${MAX_BITMAP_EDGE - 32})"
+                    var maxDevicePx = MAX_BITMAP_EDGE - 32
+                    var script = "render(${jsonString(trimmed)}, $displayMode, $maxDevicePx)"
                     // 光栅化有竞态：抓到空白就重来一次
                     repeat(2) { attempt ->
-                        val raw = awaitJavascript(view, script)
+                        var raw = awaitJavascript(view, script)
                         if (raw == null) {
                             Log.w(TAG, "evaluateJavascript 无返回: $trimmed")
                             return@withLock null
                         }
-                        val size = parseSize(raw)
+                        var size = parseSize(raw)
                         if (size == null) {
                             Log.w(TAG, "尺寸解析失败, 原始返回: $raw")
                             return@withLock null
                         }
+
+                        // **宽度超上限时重渲染更小的字号，绝不静默裁右边**（v0.0.76）。
+                        // 旧实现 coerceIn(1, 2048) 直接把超出的部分切掉——某些 dpr
+                        // 组合下 JS 的 limit 计算会让 w 略超 2048，用户看到的就是
+                        // 「公式右边被裁」。这里换算一个更小的 maxDevicePx 再渲染一次。
+                        if (size.width > MAX_BITMAP_EDGE && maxDevicePx > 64) {
+                            val shrunk = ((MAX_BITMAP_EDGE - 16).toLong() * maxDevicePx / size.width)
+                                .toInt()
+                                .coerceAtLeast(maxDevicePx / 2)
+                            if (shrunk < maxDevicePx) {
+                                Log.w(
+                                    TAG,
+                                    "公式超宽(${size.width}px)，降版重渲染: maxDevicePx $maxDevicePx -> $shrunk"
+                                )
+                                maxDevicePx = shrunk
+                                script = "render(${jsonString(trimmed)}, $displayMode, $maxDevicePx)"
+                                val retryRaw = awaitJavascript(view, script)
+                                val retrySize = retryRaw?.let(::parseSize)
+                                if (retrySize != null) size = retrySize
+                            }
+                        }
+
                         val width = size.width.coerceIn(1, MAX_BITMAP_EDGE)
                         val height = size.height.coerceIn(1, MAX_BITMAP_EDGE)
                         if (width < 2 || height < 2) return@withLock null
@@ -922,7 +944,7 @@ class MathRenderer(context: Context) {
          * 又不至于把安全 padding 的收益全吃掉。
          * 调大 → 位图边缘留白变多；调小 → 可能剩一圈毛边。
          */
-        private const val INK_MARGIN_PX = 2
+        private const val INK_MARGIN_PX = 4
 
         /**
          * 浅色主题的公式前景色（墨黑），与 math.html 里 CSS 默认值一致。

@@ -92,6 +92,9 @@ data class SettingsSnapshot(
     val visionProfileId: String? = null,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
 
+    /** 自选主题色（v0.0.76）：只改强调色，不改背景基调。 */
+    val accentTone: AccentTone = AccentTone.DEFAULT,
+
     /**
      * 网络出口模式。默认 [NetworkMode.AUTO]：MinerU 直连、其余走系统代理。
      */

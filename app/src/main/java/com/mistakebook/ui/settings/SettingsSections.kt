@@ -1,6 +1,9 @@
 package com.mistakebook.ui.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -16,6 +21,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.filled.BrightnessAuto
@@ -1893,6 +1899,62 @@ internal fun ThemeModeSection(
             text = hintText,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(14.dp))
+        // 自选主题色（v0.0.76）：一排色点，选中描边。只换强调色
+        // （按钮/选中态/徽标），背景与正文基调不变。
+        Text(
+            text = "主题色",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(Modifier.height(8.dp))
+        val isDarkNow = com.mistakebook.ui.theme.LocalDarkTheme.current
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            com.mistakebook.data.prefs.AccentTone.entries.forEach { tone ->
+                val selected = state.snapshot.accentTone == tone
+                val circleShape = androidx.compose.foundation.shape.CircleShape
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(circleShape)
+                        .background(com.mistakebook.ui.theme.swatchColorFor(tone, isDarkNow))
+                        .then(
+                            if (selected) {
+                                Modifier.border(
+                                    width = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    shape = circleShape
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .clickable { viewModel.setAccentTone(tone) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selected) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = tone.label,
+                            tint = if (isDarkNow) {
+                                androidx.compose.ui.graphics.Color(0xFF1F1F1F)
+                            } else {
+                                androidx.compose.ui.graphics.Color.White
+                            },
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = state.snapshot.accentTone.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

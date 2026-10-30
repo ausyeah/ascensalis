@@ -304,6 +304,11 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         store.setThemeMode(mode)
     }
 
+    /** 设置自选主题色（v0.0.76）。 */
+    fun setAccentTone(tone: com.mistakebook.data.prefs.AccentTone) = viewModelScope.launch {
+        store.setAccentTone(tone)
+    }
+
     /** 设置对话思考强度（下一次请求生效）。 */
     fun setReasoningEffort(effort: ReasoningEffort) = viewModelScope.launch {
         store.setReasoningEffort(effort)
