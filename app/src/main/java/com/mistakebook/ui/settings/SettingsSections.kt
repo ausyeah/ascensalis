@@ -1,5 +1,8 @@
 package com.mistakebook.ui.settings
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.SuggestionChip
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
