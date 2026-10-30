@@ -493,7 +493,7 @@ fun ChatScreen(
                         onSaveToNote = questionId?.let { viewModel::saveToNote },
                         onToggleThinking = {
                             scope.launch {
-                                coordinator.resumeFollow()
+                                coordinator.resume()
                                 listState.scrollToItem(0, 0)
                             }
                         }
