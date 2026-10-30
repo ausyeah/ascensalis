@@ -231,12 +231,25 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     fun delete(question: Question) {
         viewModelScope.launch {
             repository.softDelete(question.id)
+            // 小组件「今日到期」要跟着变（v0.0.74）：删掉一道到期题，
+            // 拖回回收站又恢复，到期数都该立刻反映，而不是等系统 30 分钟轮询。
+            refreshWidget()
         }
     }
 
     fun undoDelete(question: Question) {
         viewModelScope.launch {
             repository.restore(question.id)
+            refreshWidget()
+        }
+    }
+
+    /** 刷小组件（到期数随题目增删变化）。失败静默——小组件是附属能力。 */
+    private fun refreshWidget() {
+        runCatching {
+            com.mistakebook.widget.TodayWidgetProvider.refreshAll(
+                container.appContext
+            )
         }
     }
 

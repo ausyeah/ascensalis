@@ -326,6 +326,12 @@ class ExamCountdownViewModel(private val container: AppContainer) : ViewModel() 
         viewModelScope.launch {
             container.settingsStore.setExamDate(date?.toEpochDay())
             refresh()
+            // 小组件有「考试倒计时」一格（v0.0.74）：改了日期立刻反映，
+            // 旧实现只在番茄钟结束/复习完成时刷新，改完考试日最迟 30 分钟
+            // 才更新——用户以为没保存成功。
+            runCatching {
+                com.mistakebook.widget.TodayWidgetProvider.refreshAll(container.appContext)
+            }
         }
     }
 

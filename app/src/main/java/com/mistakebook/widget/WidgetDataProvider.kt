@@ -2,7 +2,6 @@ package com.mistakebook.widget
 
 import com.mistakebook.di.AppContainer
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 
 /** 「今日」小组件的三块数据。null = 无数据（UI 显示占位）。 */
