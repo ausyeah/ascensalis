@@ -134,7 +134,7 @@
     <string name="progress_failed_title">识别失败</string>
     <string name="progress_group_format">第 %1$d / %2$d 张</string>
     <string name="progress_stage_uploading">上传照片</string>
-    <string name="progress_stage_parsing">MinerU 解析中</string>
+    <string name="progress_stage_parsing">OCR 解析中</string>
     <string name="progress_stage_llm">AI 整理中</string>
     <string name="progress_stage_done">识别完成</string>
     <string name="progress_queue_format">排队中，前方还有 %1$d 张</string>
@@ -224,21 +224,21 @@
     <string name="settings_title">设置</string>
     <string name="settings_collapse">收起</string>
     <string name="settings_expand">展开</string>
-    <string name="settings_mineru_key">MinerU API Key</string>
-    <string name="settings_hint_mineru_key">请在 MinerU 开放平台申请 API Key 后填入。公开分发的安装包不预置任何密钥。</string>
+    <string name="settings_mineru_key">OCR API Key</string>
+    <string name="settings_hint_mineru_key">请在 OCR 平台（如 MinerU 开放平台 mineru.net 等）申请 API Key 后填入。公开分发的安装包不预置任何密钥。</string>
     <string name="settings_hint_llm_key">请填入大模型的接口地址与 API Key，点「获取模型列表」可自动选择模型名。公开分发的安装包不预置任何密钥。</string>
 
     <string name="settings_llm_profiles">大模型接入配置</string>
 
     <!-- 用量概览（两处：大模型配置下一份、MinerU 配置下一份） -->
     <string name="settings_usage_title_llm">大模型用量</string>
-    <string name="settings_usage_title_mineru">MinerU 用量</string>
+    <string name="settings_usage_title_mineru">OCR 用量</string>
     <string name="settings_usage_llm_calls">大模型调用</string>
     <string name="settings_usage_prompt">输入 tokens</string>
     <string name="settings_usage_completion">输出 tokens</string>
     <string name="settings_usage_cached">缓存命中 tokens</string>
     <string name="settings_usage_total">总计 tokens（输入 + 输出）</string>
-    <string name="settings_usage_mineru_calls">MinerU 解析</string>
+    <string name="settings_usage_mineru_calls">OCR 解析</string>
     <string name="settings_usage_mineru_pages">解析页数（计费额度按页算）</string>
     <string name="settings_usage_reset">清零重算</string>
     <string name="settings_usage_reset_confirm">确认清零</string>
@@ -266,18 +266,18 @@
 
     <!-- 题目识别方式（v0.0.43） -->
     <string name="settings_recognition_title">识别方式</string>
-    <string name="settings_recognition_desc">拍照整理错题时，题目从图片变成结构化数据的途径。MinerU 是专业文档解析服务；大模型直连由可识图的对话模型直接看原图输出，不依赖 MinerU。</string>
-    <string name="settings_recognition_mineru">仅 MinerU</string>
+    <string name="settings_recognition_desc">拍照整理错题时，题目从图片变成结构化数据的途径。OCR 是专业文档/公式解析服务；大模型直连由可识图的对话模型直接看原图输出，不依赖 OCR 服务。</string>
+    <string name="settings_recognition_mineru">仅 OCR</string>
     <string name="settings_recognition_llm">当前模型</string>
     <string name="settings_recognition_vision">识图模型</string>
     <string name="settings_recognition_auto">自动</string>
-    <string name="settings_recognition_hint_mineru">只用 MinerU 解析图片。没配 Key 或解析失败时按失败处理，不自动改走大模型。适合网络稳定、MinerU 配额充足的场景。</string>
-    <string name="settings_recognition_hint_llm">跳过 MinerU，由当前对话模型直接看原图输出结构化题目。需要当前模型支持识图，消耗的是对话模型的额度；识别质量与模型识图能力直接相关。</string>
-    <string name="settings_recognition_hint_vision">跳过 MinerU 与对话模型，专用「识图模型」（设置 → 大模型 → 识图模型）直接看原图。主对话模型再普通也能拍照整理错题。</string>
-    <string name="settings_recognition_hint_auto">默认方式。先试 MinerU（带超时，超时或失败即转大模型）；再用大模型识别一次——当前模型能识图就用当前模型，否则用配置好的识图模型，不会转给另一个大模型重试。只有全部途径都不可用才失败。</string>
+    <string name="settings_recognition_hint_mineru">只用 OCR 解析图片。没配 Key 或解析失败时按失败处理，不自动改走大模型。适合网络稳定、OCR 配额充足的场景。</string>
+    <string name="settings_recognition_hint_llm">跳过 OCR，由当前对话模型直接看原图输出结构化题目。需要当前模型支持识图，消耗的是对话模型的额度；识别质量与模型识图能力直接相关。</string>
+    <string name="settings_recognition_hint_vision">跳过 OCR 与对话模型，专用「识图模型」（设置 → 大模型 → 识图模型）直接看原图。主对话模型再普通也能拍照整理错题。</string>
+    <string name="settings_recognition_hint_auto">默认方式。先试 OCR（带超时，超时或失败即转大模型）；再用大模型识别一次——当前模型能识图就用当前模型，否则用配置好的识图模型，不会转给另一个大模型重试。只有全部途径都不可用才失败。</string>
     <string name="settings_recognition_warn_vision">还没有配置可用的识图模型。请到设置 → 大模型 → 识图模型里填写地址、Key 与模型名，或把识别方式改成「自动」。</string>
-    <string name="settings_recognition_warn_llm">当前模型不支持识图（或尚未配置模型），大模型识别这条路走不通。请到下方切换到识图模型，或把识别方式改回「自动」/「仅 MinerU」。</string>
-    <string name="settings_recognition_warn_auto">当前模型不支持识图（或尚未配置模型），MinerU 不可用时将没有兜底。建议切换到识图模型以获得自动回落能力。</string>
+    <string name="settings_recognition_warn_llm">当前模型不支持识图（或尚未配置模型），大模型识别这条路走不通。请到下方切换到识图模型，或把识别方式改回「自动」/「仅 OCR」。</string>
+    <string name="settings_recognition_warn_auto">当前模型不支持识图（或尚未配置模型），OCR 不可用时将没有兜底。建议切换到识图模型以获得自动回落能力。</string>
 
     <!-- 生图渠道（v0.0.45） -->
     <string name="settings_image_profiles">生图设置</string>
@@ -298,7 +298,7 @@
     <string name="settings_vision_profile_model_hint">填渠道提供的具体模型名，不是供应商名。例如 qwen-vl-max、gpt-4o-mini、glm-4v-flash。</string>
     <string name="settings_hint_vision_key">尚未配置识图模型。配好后，不识图的主模型也能通过「看图」工具读取图片。</string>
     <string name="settings_vision_profile_none">不指定</string>
-    <string name="settings_vision_profile_hint">指定一套专门用来看图的模型。指定后，对话里会多出一个「看图」工具：主模型看不到图片时由它来读，也能回答「图里画了什么」这类问题。不指定时沿用原来的 MinerU 识别。</string>
+    <string name="settings_vision_profile_hint">指定一套专门用来看图的模型。指定后，对话里会多出一个「看图」工具：主模型看不到图片时由它来读，也能回答「图里画了什么」这类问题。不指定时沿用原来的 OCR 识别。</string>
     <string name="settings_save">保存</string>
 
     <string name="settings_active_profile">当前使用</string>
@@ -327,7 +327,7 @@
     <string name="settings_select_none">全不选</string>
     <string name="settings_supports_vision">该模型支持图片</string>
     <string name="settings_supports_vision_on">直接发送图片给模型</string>
-    <string name="settings_supports_vision_off">不识图：先用 MinerU 识别图片文字再发送</string>
+    <string name="settings_supports_vision_off">不识图：先用 OCR 识别图片文字再发送</string>
     <string name="settings_profile_saved">配置已保存</string>
     <string name="settings_profile_deleted">配置已删除</string>
     <string name="settings_profile_need_one">至少需要保留一套配置</string>
@@ -349,13 +349,13 @@
 
     <!-- 网络代理：系统代理 / 直连 / 自动（MinerU 国内服务默认直连） -->
     <string name="settings_network_title">网络代理</string>
-    <string name="settings_network_desc">选择 App 的网络请求怎么走。MinerU 是国内服务，走代理常常连不上。</string>
+    <string name="settings_network_desc">选择 App 的网络请求怎么走。OCR 服务（如 MinerU 等）多为国内服务，走代理常常连不上。</string>
     <string name="settings_network_system">系统代理</string>
     <string name="settings_network_direct">直连</string>
     <string name="settings_network_auto">自动</string>
     <string name="settings_network_hint_system">所有请求都跟随系统代理（Wi-Fi 代理 / 系统 VPN 代填的代理）。</string>
     <string name="settings_network_hint_direct">所有请求都直连，忽略系统代理。适合代理规则漏放行国内服务的场景。</string>
-    <string name="settings_network_hint_auto">MinerU 等国内服务直连，大模型等其余请求跟随系统代理（推荐）。</string>
+    <string name="settings_network_hint_auto">OCR 等国内服务直连，大模型等其余请求跟随系统代理（推荐）。</string>
 
     <string name="settings_print_defaults">打印默认项</string>
     <string name="settings_review_reminder">每日复习提醒</string>
@@ -367,7 +367,7 @@
     <string name="settings_fetch_models">获取模型列表</string>
     <string name="settings_test_reminder_done">已触发一次提醒检查</string>
     <string name="settings_test_connection">测试连接</string>
-    <string name="settings_test_mineru">测试 MinerU</string>
+    <string name="settings_test_mineru">测试 OCR</string>
     <string name="settings_test_llm">测试大模型</string>
     <string name="settings_testing">测试中…</string>
     <string name="settings_data_manage">数据管理</string>
@@ -501,7 +501,7 @@
     <string name="pdf_import_pick">选择 PDF 文件</string>
     <string name="pdf_import_parsing">正在解析 PDF…</string>
     <string name="pdf_import_text_mode">文本 PDF，直接提取文字（%1$d 页）</string>
-    <string name="pdf_import_image_mode">图片 PDF，逐页送 MinerU 识别（%1$d 页）</string>
+    <string name="pdf_import_image_mode">图片 PDF，逐页送 OCR 识别（%1$d 页）</string>
     <string name="pdf_import_range">页码范围</string>
     <string name="pdf_import_range_hint">例如 1-5,8,11-12</string>
     <string name="pdf_import_start">开始导入</string>

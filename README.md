@@ -102,7 +102,7 @@
 
 1. **下载安装**：[Releases 页面](https://github.com/ausyeah/ascensalis/releases/latest)拿最新 APK，直接装（覆盖安装不丢数据）。
 2. **想用完整功能就配 Key**：设置页填两项——
-   - **MinerU API Key**（题目识别用）：[mineru.net](https://mineru.net) 注册领取；
+   - **OCR API Key**（题目识别用，支持 MinerU / DeepSeek OCR 等）：[mineru.net](https://mineru.net) 注册领取；
    - **大模型 API**（AI 整理和讲解用）：任何 OpenAI 兼容接口都行（DeepSeek、通义、Kimi 等均可），填 Base URL + Key + 模型名。
 3. **不想配也能用**：手动录入错题、背单词、番茄钟，全部本地可用。
 
@@ -119,7 +119,7 @@
 ```
 app/src/main/java/com/mistakebook/
 ├── data/        # 数据库、偏好存储、备份
-├── net/         # MinerU / 大模型客户端
+├── net/         # OCR / 大模型客户端
 ├── pipeline/    # 识别流水线、LaTeX 修复
 ├── math/        # 公式渲染（KaTeX + 位图裁切）
 ├── pomodoro/    # 番茄钟与统计
@@ -153,4 +153,4 @@ app/src/main/java/com/mistakebook/
 
 ## 免责声明
 
-本项目仅提供客户端能力。MinerU 与大模型 API 均为第三方服务，账号注册、配额与费用由使用者自行承担；请在使用前阅读并遵守相应服务条款。
+本项目仅提供客户端能力。OCR 服务（MinerU 等）与大模型 API 均为第三方服务，账号注册、配额与费用由使用者自行承担；请在使用前阅读并遵守相应服务条款。

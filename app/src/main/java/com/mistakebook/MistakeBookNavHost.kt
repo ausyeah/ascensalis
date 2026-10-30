@@ -144,6 +144,8 @@ fun MistakeBookNavHost(
         if (paths.isNotEmpty()) {
             container.pendingChatAttachmentPaths = paths
         }
+        // v0.0.80：对话连拍/单张裁切完成后，弹出 CROP 返回对话页
+        navController.popBackStack()
     }
 
     /**
@@ -344,9 +346,17 @@ fun MistakeBookNavHost(
                 chatMode = chatCropping,
                 batchMode = batchMode,
                 onBatchNext = { next ->
-                    // 接力裁下一张：替换当前 crop 路由，返回栈保持 [HOME, CROP]
-                    navController.navigate(Routes.crop(next)) {
-                        popUpTo(Routes.HOME)
+                    // 接力裁下一张：区分 CHAT 与 QUESTION
+                    if (container.cameraPurpose == AppContainer.CameraPurpose.CHAT) {
+                        navController.navigate(Routes.crop(next)) {
+                            popUpTo(Routes.crop(entry.arguments?.getString("imagePath").orEmpty())) {
+                                inclusive = true
+                            }
+                        }
+                    } else {
+                        navController.navigate(Routes.crop(next)) {
+                            popUpTo(Routes.HOME) { inclusive = false }
+                        }
                     }
                 },
                 onBatchCompleted = {
@@ -362,8 +372,13 @@ fun MistakeBookNavHost(
                     container.captureBatch.dropCurrent()
                     val next = container.captureBatch.paths.firstOrNull()
                     if (next != null) {
+                        val isChat = container.cameraPurpose == AppContainer.CameraPurpose.CHAT
                         navController.navigate(Routes.crop(next)) {
-                            popUpTo(Routes.HOME)
+                            if (isChat) {
+                                popUpTo(Routes.CHAT) { inclusive = false }
+                            } else {
+                                popUpTo(Routes.HOME)
+                            }
                         }
                     } else if (container.captureBatch.cropped.isNotEmpty()) {
                         // 全部跳到只剩已裁成果，直接收尾：QUESTION → 识别，CHAT → 交接
@@ -383,8 +398,10 @@ fun MistakeBookNavHost(
                     }
                 },
                 onChatConfirmed = {
-                    // 栈此时应自然回到 ChatScreen（CAPTURE 已被 popUpTo 弹掉）
-                    navController.popBackStack()
+                    val popped = navController.popBackStack(Routes.CHAT, inclusive = false)
+                    if (!popped) {
+                        navController.popBackStack()
+                    }
                 },
                 onRecropped = { newPath ->
                     container.recroppedImagePath = newPath

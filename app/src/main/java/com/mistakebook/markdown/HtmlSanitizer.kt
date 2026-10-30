@@ -161,9 +161,11 @@ object HtmlDocument {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
             <style>
+            *, *::before, *::after { box-sizing: border-box; }
             html,body{margin:0;padding:0;background:transparent;}
             body{font-family:system-ui,-apple-system,"Noto Sans CJK SC","PingFang SC",sans-serif;
-                 color:$fg;font-size:15px;line-height:1.65;word-break:break-word;overflow-wrap:anywhere;}
+                 color:$fg;font-size:15px;line-height:1.65;word-break:break-word;overflow-wrap:anywhere;
+                 padding:4px 2px 20px 2px;}
             h1,h2,h3,h4{line-height:1.3;margin:.6em 0 .4em;}
             p{margin:.4em 0;}
             table{border-collapse:collapse;width:100%;margin:.5em 0;}
@@ -172,10 +174,40 @@ object HtmlDocument {
             img,svg,video,canvas{max-width:100%;height:auto;}
             pre{white-space:pre-wrap;word-break:break-word;margin:.4em 0;}
             code{font-family:ui-monospace,Menlo,monospace;}
-            a{color:#2f7bd8;}
+            a{color:#2f7bd8;text-decoration:underline;}
             </style>
             </head>
-            <body>$fragment</body>
+            <body>
+            $fragment
+            <script>
+            (function() {
+                function report() {
+                    try {
+                        var h = Math.max(
+                            document.body ? document.body.scrollHeight : 0,
+                            document.documentElement ? document.documentElement.scrollHeight : 0,
+                            document.body ? document.body.offsetHeight : 0
+                        );
+                        if (window.HtmlBridge && window.HtmlBridge.onHeight) {
+                            window.HtmlBridge.onHeight(h);
+                        }
+                    } catch(e) {}
+                }
+                if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                    report();
+                } else {
+                    window.addEventListener('DOMContentLoaded', report);
+                    window.addEventListener('load', report);
+                }
+                if (typeof ResizeObserver !== 'undefined' && document.body) {
+                    new ResizeObserver(report).observe(document.body);
+                }
+                setTimeout(report, 100);
+                setTimeout(report, 400);
+                setTimeout(report, 1000);
+            })();
+            </script>
+            </body>
             </html>
         """.trimIndent()
     }

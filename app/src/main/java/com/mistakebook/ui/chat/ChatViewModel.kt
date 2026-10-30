@@ -1018,17 +1018,7 @@ class ChatViewModel(
         //
         // 「后台」指的是**不阻塞界面**：整个过程在协程里跑，
         // 界面照常显示进度提示，用户随时可以点「停止」取消。
-        if (!effectiveProfile.supportsVision) {
-            // 直接在当前协程里跑（runOnce 本身就是 viewModelScope.launch 的协程），
-            // 这样取消能自然传播：用户点「停止」→ 外层协程取消 → OCR 一起停。
-            // 之前另起一个 job 再 join，取消传播是断的。
-            ocrJob = currentCoroutineContext()[Job]
-            try {
-                ensureImageOcr(sessionId)
-            } finally {
-                ocrJob = null
-            }
-        }
+        // v0.0.80：对话图片直发大模型，不再在发送前强行拦截跑 OCR
 
         // 这里只取「省略了多少轮历史」，真正的请求上下文由**服务**构建。
         //

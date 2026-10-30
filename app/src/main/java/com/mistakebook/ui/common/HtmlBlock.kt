@@ -1,6 +1,9 @@
 package com.mistakebook.ui.common
 
 import android.annotation.SuppressLint
+import android.content.Intent
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,13 +17,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.mistakebook.markdown.HtmlDocument
 
+private class HtmlBridge(private val onHeightReported: (Int) -> Unit) {
+    @JavascriptInterface
+    fun onHeight(cssPixels: Float) {
+        val dpValue = Math.ceil(cssPixels.toDouble()).toInt()
+        onHeightReported(dpValue)
+    }
+}
+
 /**
- * 渲染一段 ```html 围栏（v0.0.57，v0.0.58 修高度测量）。
+ * 渲染一段 ```html 围栏（v0.0.57，v0.0.80 重构高度测量与 JS 桥接通信）。
  *
  * ## 为什么用 WebView
  *
@@ -28,25 +38,12 @@ import com.mistakebook.markdown.HtmlDocument
  * 没有通用 HTML 渲染器；自己写一个解析/排版引擎既不现实也不可靠。
  * WebView 是系统自带、零额外依赖，且与打印链路（HTML → PDF）共用同一套排版。
  *
- * ## 安全
+ * ## 高度自适应（v0.0.80 彻底修复底部截断）
  *
- * 1. 进来的 [source] 已经过 [com.mistakebook.markdown.HtmlSanitizer]（去脚本/事件/外链）；
- * 2. 这里再关掉网络加载（`blockNetworkLoads`）与文件访问——即便清洗漏掉
- *    一个远程资源，也拉不下来，不会泄露 IP；
- * 3. 只允许执行我们注入的测量脚本（内容里已无任何 `<script>` / `on*`）。
- *
- * ## 高度：为什么要在三个时机都测（v0.0.58）
- *
- * 用户反馈「HTML 第一次不完整，第二次点进去就是对的」。根因是高度只测了一次：
- * `loadDataWithBaseURL` 是在 **WebView 还没有宽度**的时候调用的，浏览器按
- * 很窄的虚拟宽度排版，`scrollHeight` 因此偏小；等 Compose 把真实宽度给它、
- * 内容重新排版变高之后，再也没有人通知我们。
- *
- * 现在三个时机都会重测，且只取**最大**值（内容只会因为排版变窄而变高，
- * 取最大不会把已经够的高度改小）：
- * 1. `onPageFinished`（post 到布局之后，确保宽高已定）；
- * 2. WebView 自身布局变化（宽度从 0 → 真实值，这是第一次不完整的直接原因）；
- * 3. 文档整体变化（`update` 里换了 html）。
+ * 1. 视口 meta 标签声明了 width=device-width，DOM scrollHeight 测量值即为 CSS 像素（等同 Android dp）。
+ *    旧版将 CSS 像素二次除以 density，导致在 xxhdpi 屏幕上高度缩水为原来的 1/3，产生严重底部截断。
+ * 2. 注入 ResizeObserver 与 HtmlBridge，在 DOM 尺寸变动或异步内容就绪时主动双向回传真实高度；
+ * 3. 超链接通过 shouldOverrideUrlLoading 打开系统外部浏览器，避免在内部白屏或崩溃。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -56,32 +53,27 @@ fun HtmlBlock(
 ) {
     if (source.isBlank()) return
     val context = LocalContext.current
-    val density = LocalDensity.current
     val colorScheme = MaterialTheme.colorScheme
     val textColor = colorScheme.onSurface.toArgb()
     val backgroundColor = colorScheme.surfaceVariant.toArgb()
 
-    // 内容或配色变化都重新生成文档（深色/浅色切换要跟着变）。
     val html = remember(source, textColor, backgroundColor) {
         HtmlDocument.wrap(source, textColor, backgroundColor)
     }
-    var heightPx by remember(html) { mutableIntStateOf(1) }
+    var heightDp by remember(html) { mutableIntStateOf(60) }
 
     AndroidView(
         factory = { ctx ->
-            // 只在本次 WebView 生命周期内有效：记住上次测高度时的宽度，
-            // 宽度变了才重测（避免每次滚动/重绘都跑一遍 JS）。
             var lastLayoutWidth = -1
             fun measure(view: WebView) {
                 view.evaluateJavascript(
-                    "Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)"
+                    "Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0, document.body ? document.body.offsetHeight : 0)"
                 ) { value ->
-                    val px = value?.trim('"')?.toFloatOrNull()?.toInt() ?: 0
-                    if (px > heightPx) heightPx = px
+                    val dp = value?.trim('"')?.toFloatOrNull()?.let { Math.ceil(it.toDouble()).toInt() } ?: 0
+                    if (dp > heightDp) heightDp = dp
                 }
             }
             WebView(ctx).apply {
-                // 内容已清洗；这里只为跑我们注入的高度测量脚本。
                 settings.javaScriptEnabled = true
                 settings.blockNetworkLoads = true
                 settings.allowFileAccess = false
@@ -92,11 +84,31 @@ fun HtmlBlock(
                 isVerticalScrollBarEnabled = false
                 isHorizontalScrollBarEnabled = false
                 overScrollMode = WebView.OVER_SCROLL_NEVER
+
+                addJavascriptInterface(HtmlBridge { dp ->
+                    post {
+                        if (dp > heightDp) {
+                            heightDp = dp
+                        }
+                    }
+                }, "HtmlBridge")
+
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
-                        // post：onPageFinished 时 view 可能还没走完这一帧布局，
-                        // 直接测会拿到上一轮排版的高度。
                         view?.post { view.let { measure(it) } }
+                    }
+
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                        val uri = request?.url ?: return false
+                        val scheme = uri.scheme?.lowercase()
+                        if (scheme == "http" || scheme == "https") {
+                            runCatching {
+                                val intent = Intent(Intent.ACTION_VIEW, uri)
+                                context.startActivity(intent)
+                            }
+                            return true
+                        }
+                        return true
                     }
                 }
                 addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
@@ -111,8 +123,6 @@ fun HtmlBlock(
             }
         },
         update = { webView ->
-            // 复用同一个 WebView：只有文档真的变了才重新加载，
-            // 否则每次重组都 load 一次，滚动时疯狂闪白。
             if (webView.tag != html) {
                 webView.tag = html
                 webView.setBackgroundColor(backgroundColor)
@@ -121,6 +131,6 @@ fun HtmlBlock(
         },
         modifier = modifier
             .fillMaxWidth()
-            .height(with(density) { heightPx.toDp() }.coerceAtLeast(40.dp))
+            .height(heightDp.dp.coerceAtLeast(40.dp))
     )
 }

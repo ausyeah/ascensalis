@@ -38,8 +38,6 @@ internal fun CropToolbar(
     onRotate: () -> Unit,
     onReset: () -> Unit,
     onConfirm: () -> Unit,
-    /** T2 对话连拍：非空时显示「不裁切，下一张」跳过入口（本张用原图）。 */
-    onSkipCurrent: (() -> Unit)? = null,
     /** 对比度增强档位（0 关 / 1 轻 / 2 标准 / 3 强），v0.0.55 反馈。 */
     enhanceStrength: Int = 2,
     /** 增强档位条是否展开。默认收起，点「增强」才展开——见下方注释。 */
@@ -162,15 +160,6 @@ internal fun CropToolbar(
                 ) {
                     Text(stringResource(R.string.crop_rotate), color = Color.White)
                 }
-            }
-        }
-
-        if (onSkipCurrent != null) {
-            TextButton(
-                onClick = onSkipCurrent,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.crop_chat_skip), color = Color.White.copy(alpha = 0.8f))
             }
         }
     }

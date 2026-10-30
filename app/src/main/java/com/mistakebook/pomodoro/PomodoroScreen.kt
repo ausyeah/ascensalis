@@ -37,6 +37,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -163,13 +165,28 @@ fun PomodoroScreen(container: AppContainer) {
         viewModel.consumeMessage()
     }
 
-    // Tab 状态：0 番茄钟 / 1 正向计时 / 2 统计。
-    // 与 FocusMode 同步——切 Tab 就是切模式（运行中被 VM 拦下并提示）。
-    var tab by remember { mutableIntStateOf(if (state.mode == FocusMode.STOPWATCH) 1 else 0) }
+    // Tab 与左右滑动手势（v0.0.80）：使用 HorizontalPager 支持流畅左右滑屏。
+    val initialTab = if (state.mode == FocusMode.STOPWATCH) 1 else 0
+    val pagerState = rememberPagerState(initialPage = initialTab) { 3 }
+    val scope = rememberCoroutineScope()
+
+    // 页面滑动与模式联动
+    LaunchedEffect(pagerState.currentPage) {
+        if (state.status != RunStatus.RUNNING) {
+            if (pagerState.currentPage == 0 && state.mode != FocusMode.POMODORO) {
+                viewModel.setMode(FocusMode.POMODORO)
+            } else if (pagerState.currentPage == 1 && state.mode != FocusMode.STOPWATCH) {
+                viewModel.setMode(FocusMode.STOPWATCH)
+            }
+        }
+    }
 
     LaunchedEffect(state.mode) {
-        // 长按主按钮循环模式时，Tab 指示器跟着走
-        tab = if (state.mode == FocusMode.STOPWATCH) 1 else 0
+        // 长按主按钮循环模式时，Tab 指示器与 Pager 跟着切
+        val targetPage = if (state.mode == FocusMode.STOPWATCH) 1 else 0
+        if (pagerState.currentPage != targetPage && pagerState.currentPage != 2) {
+            pagerState.scrollToPage(targetPage)
+        }
     }
 
     // CSV 导入：系统文件选择器，选完交给 VM 解析落库
@@ -182,68 +199,77 @@ fun PomodoroScreen(container: AppContainer) {
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             TabRow(
-                selectedTabIndex = tab,
+                selectedTabIndex = pagerState.currentPage,
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.primary
             ) {
                 Tab(
-                    selected = tab == 0,
-                    // **同时写 tab**：早先只调 setMode()，靠 LaunchedEffect(state.mode)
-                    // 反过来改 tab。于是「已在番茄钟模式再点番茄钟」时 mode 不变、
-                    // effect 不重跑，tab 卡在统计页——点「番茄钟」没反应。
-                    // 而且每次切 Tab 都要绕一圈 ViewModel 状态，切换明显发顿。
+                    selected = pagerState.currentPage == 0,
                     onClick = {
-                        tab = 0
-                        viewModel.setMode(FocusMode.POMODORO)
+                        scope.launch { pagerState.animateScrollToPage(0) }
+                        if (state.status != RunStatus.RUNNING) {
+                            viewModel.setMode(FocusMode.POMODORO)
+                        }
                     },
                     enabled = state.status != RunStatus.RUNNING,
                     text = { Text("番茄钟") }
                 )
                 Tab(
-                    selected = tab == 1,
+                    selected = pagerState.currentPage == 1,
                     onClick = {
-                        tab = 1
-                        viewModel.setMode(FocusMode.STOPWATCH)
+                        scope.launch { pagerState.animateScrollToPage(1) }
+                        if (state.status != RunStatus.RUNNING) {
+                            viewModel.setMode(FocusMode.STOPWATCH)
+                        }
                     },
                     enabled = state.status != RunStatus.RUNNING,
                     text = { Text("正向计时") }
                 )
                 Tab(
-                    selected = tab == 2,
-                    onClick = { tab = 2 },
+                    selected = pagerState.currentPage == 2,
+                    onClick = {
+                        scope.launch { pagerState.animateScrollToPage(2) }
+                    },
                     text = { Text("统计数据") }
                 )
             }
 
-            when (tab) {
-                0, 1 -> TimerTab(
-                    state = state,
-                    viewModel = viewModel,
-                    elapsedFlow = viewModel.tick
-                )
-                else -> StatsTab(
-                    state = state,
-                    onRangeChange = viewModel::setStatsRange,
-                    onShiftDay = viewModel::shiftSingleDay,
-                    onResetStats = viewModel::resetStats,
-                    onManualEntry = { viewModel.openManualEntry() },
-                    onGeneratePoster = { mode ->
-                        viewModel.generateFocusPoster(mode)
-                    },
-                    posterWorkMonitor = viewModel.posterWorkMonitor,
-                    onPosterFailed = { message -> viewModel.showPosterError(message) },
-                    onImportCsv = {
-                        csvLauncher.launch(
-                            arrayOf(
-                                "text/comma-separated-values",
-                                "text/csv",
-                                "text/plain",
-                                "application/vnd.ms-excel",
-                                "*/*"
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) { page ->
+                when (page) {
+                    0, 1 -> TimerTab(
+                        state = state,
+                        viewModel = viewModel,
+                        elapsedFlow = viewModel.tick
+                    )
+                    else -> StatsTab(
+                        state = state,
+                        onRangeChange = viewModel::setStatsRange,
+                        onShiftDay = viewModel::shiftSingleDay,
+                        onResetStats = viewModel::resetStats,
+                        onManualEntry = { viewModel.openManualEntry() },
+                        onGeneratePoster = { mode ->
+                            viewModel.generateFocusPoster(mode)
+                        },
+                        posterWorkMonitor = viewModel.posterWorkMonitor,
+                        onPosterFailed = { message -> viewModel.showPosterError(message) },
+                        onImportCsv = {
+                            csvLauncher.launch(
+                                arrayOf(
+                                    "text/comma-separated-values",
+                                    "text/csv",
+                                    "text/plain",
+                                    "application/vnd.ms-excel",
+                                    "*/*"
+                                )
                             )
-                        )
-                    }
-                )
+                        }
+                    )
+                }
             }
         }
 

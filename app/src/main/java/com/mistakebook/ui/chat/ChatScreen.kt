@@ -490,7 +490,13 @@ fun ChatScreen(
                         // 早先无条件传回调，自由会话里图标照画、点下去 saveToNote
                         // 第一行 questionId==null 静默退出——用户看到的就是
                         // 「第二个图标点了没反应」。
-                        onSaveToNote = questionId?.let { viewModel::saveToNote }
+                        onSaveToNote = questionId?.let { viewModel::saveToNote },
+                        onToggleThinking = {
+                            scope.launch {
+                                coordinator.resumeFollow()
+                                listState.scrollToItem(0, 0)
+                            }
+                        }
                     )
                 }
 
@@ -596,7 +602,8 @@ private fun MessageList(
     onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：批改结果「存入题目备注」入口；自由会话传 null 不展示。 */
-    onSaveToNote: ((Long) -> Unit)? = null
+    onSaveToNote: ((Long) -> Unit)? = null,
+    onToggleThinking: () -> Unit = {}
 ) {
     // 倒序提供数据配合 reverseLayout：最新消息固定在底边，流式气泡增长无需反复重启滚动动画。
     //
@@ -645,7 +652,8 @@ private fun MessageList(
                 onCopy = onCopy,
                 onRetry = onRetry,
                 onDelete = onDelete,
-                onSaveToNote = onSaveToNote
+                onSaveToNote = onSaveToNote,
+                onToggleThinking = onToggleThinking
             )
         }
         if (state.omittedCount > 0) {
@@ -758,7 +766,8 @@ private fun MessageBubble(
     onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：把助手回复存入题目备注。null = 当前会话不展示该入口（自由会话）。 */
-    onSaveToNote: ((Long) -> Unit)? = null
+    onSaveToNote: ((Long) -> Unit)? = null,
+    onToggleThinking: () -> Unit = {}
 ) {
     val isUser = message.role == ChatRole.USER
     val isInjected = message.injected
@@ -921,7 +930,8 @@ private fun MessageBubble(
                         streaming = isStreaming,
                         mathRenderer = mathRenderer,
                         // 思考块与正文同属一条消息：共用消息 id 隔离防抖
-                        debounceKey = message.id
+                        debounceKey = message.id,
+                        onToggle = { onToggleThinking() }
                     )
                     if (answer.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
@@ -1224,13 +1234,14 @@ private fun ThinkingBlock(
     text: String,
     streaming: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer,
-    debounceKey: Any? = null
+    debounceKey: Any? = null,
+    onToggle: (Boolean) -> Unit = {}
 ) {
     // 初始展开态直接取 streaming：历史消息（streaming=false）首次组合就是
     // 收起态，不会先把整段思考渲染一遍再折叠——那笔开销在滚动到每条
     // 带思考的历史消息时都要付一次，是「新 item 进视口就卡一下」的一员。
     // 流式中为 true；流式结束由下面的 LaunchedEffect 收起。
-    var expanded by remember { mutableStateOf(streaming) }
+    var expanded by remember(debounceKey) { mutableStateOf(streaming) }
     LaunchedEffect(streaming) {
         if (!streaming) {
             expanded = false
@@ -1246,10 +1257,13 @@ private fun ThinkingBlock(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .clickable { expanded = !expanded }
+            .clickable {
+                val next = !expanded
+                expanded = next
+                onToggle(next)
+            }
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

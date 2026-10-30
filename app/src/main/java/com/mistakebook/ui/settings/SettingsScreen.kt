@@ -159,7 +159,7 @@ fun SettingsScreen(
             // 3 选 1 定大类 → 类内再选分组。
             //
             // 分类与分组映射（一项不丢）：
-            //   AI 与识别: 识别方式、MinerU 配置、大模型配置、识图模型、
+            //   AI 与识别: 识别方式、OCR 配置、大模型配置、识图模型、
             //     生图渠道、联网搜索
             //   学习: 学习工具（资料库/成就墙/番茄钟）、复习提醒、打印默认
             //   通用: 主题外观、用量统计、网络与代理（高级）、数据与备份、
@@ -173,7 +173,7 @@ fun SettingsScreen(
                     RecognitionModeSection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "MinerU 配置", nested = true) {
+                CollapsibleSettingsGroup(title = "OCR 配置", nested = true) {
                     MineruKeySection(state = state, viewModel = viewModel)
                     Spacer(Modifier.height(12.dp))
                     MineruParamsSection(state = state, viewModel = viewModel)

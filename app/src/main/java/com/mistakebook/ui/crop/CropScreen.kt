@@ -668,11 +668,7 @@ fun CropScreen(
                 enhancePanelOpen = enhancePanelOpen,
                 onEnhancePanelOpenChange = { enhancePanelOpen = it },
                 onEnhanceStrengthChange = { newStrength -> onEnhanceStrengthChange(newStrength) },
-                onSkipCurrent = if (chatMode && container.captureBatch.hasPending) {
-                    { onBatchSkip() }
-                } else {
-                    null
-                },
+
                 onConfirm = {
                     scope.launch {
                         val committed = strokes
@@ -696,7 +692,7 @@ fun CropScreen(
                         // 聊天附件模式（T12）：不走 RecognitionSubmitter、不查 Key。
                         // 产物复制进暂存目录后经容器标志交回对话页。
                         // 涂鸦遮蔽等全部能力照常可用（遮住草稿对批改很有用）。
-                        if (chatMode) {
+                        if (chatMode || container.cameraPurpose == com.mistakebook.di.AppContainer.CameraPurpose.CHAT) {
                             val saved = withContext(Dispatchers.IO) {
                                 saveCrop(
                                     shown, cropRect, container, cropStrokes,

@@ -1970,43 +1970,50 @@ internal fun ThemeModeSection(
         )
         Spacer(Modifier.height(8.dp))
         val isDarkNow = com.mistakebook.ui.theme.LocalDarkTheme.current
-        Row(
+        val circleShape = androidx.compose.foundation.shape.CircleShape
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            com.mistakebook.data.prefs.AccentTone.entries.forEach { tone ->
-                val selected = state.snapshot.accentTone == tone
-                val circleShape = androidx.compose.foundation.shape.CircleShape
-                Box(
-                    modifier = Modifier
-                        .size(30.dp)
-                        .clip(circleShape)
-                        .background(com.mistakebook.ui.theme.swatchColorFor(tone, isDarkNow))
-                        .then(
-                            if (selected) {
-                                Modifier.border(
-                                    width = 2.dp,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    shape = circleShape
-                                )
-                            } else {
-                                Modifier
-                            }
-                        )
-                        .clickable { viewModel.setAccentTone(tone) },
-                    contentAlignment = Alignment.Center
+            com.mistakebook.data.prefs.AccentTone.entries.chunked(4).forEach { rowTones ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    if (selected) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = tone.label,
-                            tint = if (isDarkNow) {
-                                androidx.compose.ui.graphics.Color(0xFF1F1F1F)
-                            } else {
-                                androidx.compose.ui.graphics.Color.White
-                            },
-                            modifier = Modifier.size(16.dp)
-                        )
+                    rowTones.forEach { tone ->
+                        val selected = state.snapshot.accentTone == tone
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(circleShape)
+                                .background(com.mistakebook.ui.theme.swatchColorFor(tone, isDarkNow))
+                                .then(
+                                    if (selected) {
+                                        Modifier.border(
+                                            width = 2.dp,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            shape = circleShape
+                                        )
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .clickable { viewModel.setAccentTone(tone) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = tone.label,
+                                    tint = if (isDarkNow) {
+                                        androidx.compose.ui.graphics.Color(0xFF1F1F1F)
+                                    } else {
+                                        androidx.compose.ui.graphics.Color.White
+                                    },
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -523,12 +523,9 @@ class ChatRepository(
         // 先把「实际会发出去的图片」算出来，清单据此如实描述。
         // 不能只看 supportsVision：data URL 转换失败时那张图根本发不出去，
         // 清单若还写「图片已随消息发送」，模型会以为自己看漏了。
-        val images = if (supportsVision) {
-            imageAttachments.mapNotNull { attachment ->
-                runCatching { imageDataUrls.dataUrlOf(attachment) }.getOrNull()
-            }
-        } else {
-            emptyList()
+        // v0.0.80：对话附件图片直接传给大模型（多模态 data URL），不拦截不丢弃
+        val images = imageAttachments.mapNotNull { attachment ->
+            runCatching { imageDataUrls.dataUrlOf(attachment) }.getOrNull()
         }
 
         val text = buildString {
