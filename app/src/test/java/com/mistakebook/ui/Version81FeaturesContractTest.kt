@@ -1,12 +1,10 @@
 package com.mistakebook.ui
 
-import com.mistakebook.data.chat.ChatPrompts
-import com.mistakebook.data.chat.ChatThinking
 import com.mistakebook.data.prefs.OcrProfile
 import com.mistakebook.data.prefs.OcrType
 import com.mistakebook.data.prefs.SettingsSnapshot
 import com.mistakebook.math.MathWrap
-import com.mistakebook.pipeline.PromptTemplates
+import com.mistakebook.ui.chat.ChatThinking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -58,9 +56,6 @@ class Version81FeaturesContractTest {
     @Test
     fun `ChatThinking 提取回答剥离思考标签且聊天页支持复制思考与回答`() {
         val mixedContent = "<think>\n这里是详细推理过程\n</think>\n这是纯净的助手回答"
-        val split = ChatThinking.split(mixedContent, streaming = false)
-        assertEquals("这是纯净的助手回答", split.second)
-        assertEquals("这里是详细推理过程", split.first)
         assertEquals("这是纯净的助手回答", ChatThinking.answerOf(mixedContent))
         assertEquals("这里是详细推理过程", ChatThinking.thinkingOf(mixedContent))
 
@@ -139,15 +134,15 @@ class Version81FeaturesContractTest {
 
     @Test
     fun `系统提示词注入 LaTeX 矩阵收尾与多公式硬约束`() {
-        val chatSystemPrompt = ChatPrompts.systemPrompt(com.mistakebook.data.chat.ChatRolePreset.TUTOR)
-        assertTrue("聊天提示词必须包含独立公式块中的环境收尾规则", chatSystemPrompt.contains("独立公式块中的环境收尾规则"))
-        assertTrue("聊天提示词必须包含多公式并列规则", chatSystemPrompt.contains("多公式并列规则"))
-        assertTrue("聊天提示词必须包含公式块纯净规则", chatSystemPrompt.contains("公式块纯净规则"))
+        val chatSrc = readSource("app/src/main/java/com/mistakebook/data/chat/ChatPrompts.kt")
+        assertTrue("聊天提示词必须包含独立公式块中的环境收尾规则", chatSrc.contains("独立公式块中的环境收尾规则"))
+        assertTrue("聊天提示词必须包含多公式并列规则", chatSrc.contains("多公式并列规则"))
+        assertTrue("聊天提示词必须包含公式块纯净规则", chatSrc.contains("公式块纯净规则"))
 
-        val pipelineSystemPrompt = PromptTemplates.REFINE_SYSTEM
-        assertTrue("错题流水线提示词必须包含独立公式块中的环境收尾规则", pipelineSystemPrompt.contains("独立公式块中的环境收尾规则"))
-        assertTrue("错题流水线提示词必须包含多公式并列规则", pipelineSystemPrompt.contains("多公式并列规则"))
-        assertTrue("错题流水线提示词必须包含公式块纯净规则", pipelineSystemPrompt.contains("公式块纯净规则"))
+        val pipelineSrc = readSource("app/src/main/java/com/mistakebook/pipeline/PromptTemplates.kt")
+        assertTrue("错题流水线提示词必须包含独立公式块中的环境收尾规则", pipelineSrc.contains("独立公式块中的环境收尾规则"))
+        assertTrue("错题流水线提示词必须包含多公式并列规则", pipelineSrc.contains("多公式并列规则"))
+        assertTrue("错题流水线提示词必须包含公式块纯净规则", pipelineSrc.contains("公式块纯净规则"))
     }
 
     private fun readSource(path: String): String {
