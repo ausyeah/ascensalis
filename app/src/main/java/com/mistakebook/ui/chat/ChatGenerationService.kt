@@ -185,7 +185,7 @@ class ChatGenerationService : Service() {
             questionId = questionId,
             supportsVision = profile.supportsVision,
             visionToolAvailable = container.settingsStore.snapshotNow().visionConfigured,
-            ocrToolAvailable = container.settingsStore.snapshotNow().mineruConfigured,
+            ocrToolAvailable = container.settingsStore.snapshotNow().ocrConfigured,
             // @资料库 文件原文：读盘在这里（服务跑在 IO 线程），拼进 system。
             // 不落库、不进用户气泡（v0.0.57 修复「发 docx 文字倒进气泡」）。
             extraContext = com.mistakebook.data.library.LibraryStore.buildContextBlock(
@@ -839,7 +839,7 @@ class ChatGenerationService : Service() {
         imageFile: File?,
         stage: (String) -> Unit
     ): String {
-        if (!settings.mineruConfigured) {
+        if (!settings.ocrConfigured) {
             return "OCR 工具不可用：尚未在设置里配置 MinerU Key。"
         }
         if (imageFile == null) {

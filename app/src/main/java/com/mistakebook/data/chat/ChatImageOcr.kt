@@ -43,9 +43,17 @@ import java.util.concurrent.ConcurrentHashMap
  * 通知条上的「重试」会调 [forget] 清掉标记再排队。
  */
 class ChatImageOcr(
-    private val mineruClient: MineruClient,
+    /**
+     * v0.0.78：OCR 供应商可切换（MinerU / DeepSeek OCR）后，
+     * 这里不再直接绑死 MineruClient——统一走 [com.mistakebook.net.ocr.OcrEngine]。
+     */
+    private val ocrDeps: com.mistakebook.net.ocr.OcrEngineDeps,
     private val files: AppFiles
 ) {
+
+    /** 按当前设置挑 OCR 引擎。 */
+    private fun engineFor(settings: SettingsSnapshot): com.mistakebook.net.ocr.OcrEngine =
+        com.mistakebook.net.ocr.OcrEngine.forSettings(settings, ocrDeps)
 
     /** 本次会话内已经认真尝试过的图片（无论成败）。 */
     private val tried = ConcurrentHashMap.newKeySet<String>()
@@ -122,18 +130,9 @@ class ChatImageOcr(
         }
 
         val result = runCatching {
-            mineruClient.recognizeInto(
-                file = imageFile,
-                fileName = imageFile.name,
-                mineruKey = settings.mineruKey,
-                modelVersion = settings.mineruModelVersion,
-                language = settings.ocrLanguage,
-                forceOcr = settings.forceOcr,
-                outDir = files.chatOcrDir(sessionId),
-                // 只要文字，不要图片：对话页用不上，抽出来只是浪费磁盘。
-                imageDir = null,
-                onStage = onStage
-            )
+            // v0.0.78：走 OCR 统一出口——供应商由设置决定
+            // （MinerU / DeepSeek OCR），不再直接绑死 MineruClient。
+            engineFor(settings).recognizeText(imageFile, settings, onStage)
         }.getOrElse { thrown ->
             // 取消必须原样抛出：用户点了「停止」，不能当成一次普通失败记进 tried
             if (thrown is CancellationException) throw thrown
@@ -144,11 +143,11 @@ class ChatImageOcr(
 
         val mapped = when (result) {
             is ApiResult.Success -> {
-                val prepared = ChatOcrText.prepare(result.data.markdown)
+                val prepared = ChatOcrText.prepare(result.data)
                 if (prepared.isNotBlank()) {
                     runCatching {
                         cached.parentFile?.mkdirs()
-                        cached.writeText(result.data.markdown)
+                        cached.writeText(result.data)
                     }
                     completed[key] = prepared
                     tried.add(key)
@@ -159,7 +158,7 @@ class ChatImageOcr(
                     ApiResult.Failure(
                         ApiError(
                             kind = ApiErrorKind.BAD_RESPONSE,
-                            serverMessage = "MinerU 已返回，但这张图里没有识别出文字"
+                            serverMessage = "${settings.ocrProvider.label} 已返回，但这张图里没有识别出文字"
                         )
                     )
                 }

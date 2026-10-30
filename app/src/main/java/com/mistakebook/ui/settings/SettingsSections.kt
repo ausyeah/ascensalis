@@ -926,28 +926,89 @@ internal fun ProfileRow(
     }
 }
 
+/**
+ * OCR 配置（v0.0.78：MinerU 配置 → 通用 OCR 配置）。
+ *
+ * 用户诉求：「把 MinerU 配置改成 OCR 配置吧，需要自己填写相关配置，
+ * 希望能够适配这个 MinerU 和 DeepSeekOCR」。
+ *
+ * 顶部选供应商，下面只显示所选供应商的字段——两套都摊开会让这一屏
+ * 变得不可读，而用户同一时间只会用一个。
+ */
 @Composable
 internal fun MineruKeySection(
     state: SettingsUiState,
     viewModel: SettingsViewModel
 ) {
-    SettingsGroup(title = stringResource(R.string.settings_mineru_key)) {
-        PasswordField(
-            label = stringResource(R.string.settings_mineru_key),
-            value = state.snapshot.mineruKey,
-            onValueChange = viewModel::setMineruKey
+    val snapshot = state.snapshot
+    SettingsGroup(title = "OCR 识别") {
+        // 供应商二选一
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            com.mistakebook.data.prefs.OcrProvider.entries.forEach { provider ->
+                FilterChip(
+                    selected = snapshot.ocrProvider == provider,
+                    onClick = { viewModel.setOcrProvider(provider) },
+                    label = { Text(provider.label) }
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = snapshot.ocrProvider.hint,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.height(8.dp))
-        TestButton(
-            text = stringResource(R.string.settings_test_mineru),
-            loading = state.testingMineru,
-            onClick = viewModel::testMineru,
-            result = state.mineruTestResult,
-            resultOk = state.mineruTestOk
-        )
+        Spacer(Modifier.height(10.dp))
+
+        when (snapshot.ocrProvider) {
+            com.mistakebook.data.prefs.OcrProvider.MINERU -> {
+                PasswordField(
+                    label = stringResource(R.string.settings_mineru_key),
+                    value = snapshot.mineruKey,
+                    onValueChange = viewModel::setMineruKey
+                )
+                Spacer(Modifier.height(8.dp))
+                TestButton(
+                    text = stringResource(R.string.settings_test_mineru),
+                    loading = state.testingMineru,
+                    onClick = viewModel::testMineru,
+                    result = state.mineruTestResult,
+                    resultOk = state.mineruTestOk
+                )
+            }
+
+            com.mistakebook.data.prefs.OcrProvider.DEEPSEEK -> {
+                OutlinedTextField(
+                    value = snapshot.deepseekOcrBaseUrl,
+                    onValueChange = { viewModel.setDeepseekOcrBaseUrl(it) },
+                    label = { Text("Base URL") },
+                    placeholder = { Text("https://api.deepseek.com") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                PasswordField(
+                    label = "API Key",
+                    value = snapshot.deepseekOcrApiKey,
+                    onValueChange = { viewModel.setDeepseekOcrApiKey(it) }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = snapshot.deepseekOcrModel,
+                    onValueChange = { viewModel.setDeepseekOcrModel(it) },
+                    label = { Text("模型名") },
+                    placeholder = { Text("deepseek-ocr") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
     }
 
-    if (!state.snapshot.mineruConfigured) {
+    if (!snapshot.ocrConfigured) {
         FirstRunHint(R.string.settings_hint_mineru_key)
     }
 }

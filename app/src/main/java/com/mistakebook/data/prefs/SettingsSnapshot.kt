@@ -60,6 +60,18 @@ enum class RecognitionMode {
  */
 data class SettingsSnapshot(
     val mineruKey: String = "",
+
+    /** OCR 供应商（v0.0.78）：MinerU 或 DeepSeek OCR，二选一。 */
+    val ocrProvider: OcrProvider = OcrProvider.DEFAULT,
+
+    /** DeepSeek OCR：Base URL（默认官方端点，可填中转站）。 */
+    val deepseekOcrBaseUrl: String = "https://api.deepseek.com",
+
+    /** DeepSeek OCR：API Key（只存加密存储）。 */
+    val deepseekOcrApiKey: String = "",
+
+    /** DeepSeek OCR：模型名（如 deepseek-ocr / deepseek-vl2）。 */
+    val deepseekOcrModel: String = "deepseek-ocr",
     val llmProfiles: List<LlmProfile> = emptyList(),
     val activeProfileId: String? = null,
 
@@ -223,6 +235,19 @@ data class SettingsSnapshot(
             ?: imageProfiles.firstOrNull()
 
     val mineruConfigured: Boolean get() = mineruKey.isNotBlank()
+
+    /**
+     * **OCR 能力是否就绪**（v0.0.78，取代直接看 mineruKey）。
+     *
+     * 用户可以在 MinerU 与 DeepSeek OCR 之间选一个；两种都配时以所选
+     * 供应商为准——门禁问的是「现在这套能不能读图」，不是「装了哪几家」。
+     */
+    val ocrConfigured: Boolean
+        get() = when (ocrProvider) {
+            OcrProvider.MINERU -> mineruConfigured
+            OcrProvider.DEEPSEEK ->
+                deepseekOcrApiKey.isNotBlank() && deepseekOcrModel.isNotBlank()
+        }
 
     val llmConfigured: Boolean get() = activeProfile?.isConfigured() == true
 

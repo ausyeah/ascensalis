@@ -309,6 +309,24 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         store.setAccentTone(tone)
     }
 
+    // ===== OCR 配置（v0.0.78） =====
+
+    fun setOcrProvider(provider: com.mistakebook.data.prefs.OcrProvider) = viewModelScope.launch {
+        store.setOcrProvider(provider)
+    }
+
+    fun setDeepseekOcrBaseUrl(value: String) = viewModelScope.launch {
+        store.setDeepseekOcrBaseUrl(value)
+    }
+
+    fun setDeepseekOcrApiKey(value: String) = viewModelScope.launch {
+        store.setDeepseekOcrApiKey(value)
+    }
+
+    fun setDeepseekOcrModel(value: String) = viewModelScope.launch {
+        store.setDeepseekOcrModel(value)
+    }
+
     /** 设置对话思考强度（下一次请求生效）。 */
     fun setReasoningEffort(effort: ReasoningEffort) = viewModelScope.launch {
         store.setReasoningEffort(effort)

@@ -325,7 +325,14 @@ class AppContainer(context: Context) {
      * 与 [mineruClient] 共用同一个实例，因此用量统计是同一份口径。
      */
     val chatImageOcr: com.mistakebook.data.chat.ChatImageOcr by lazy {
-        com.mistakebook.data.chat.ChatImageOcr(mineruClient, files)
+        com.mistakebook.data.chat.ChatImageOcr(
+            com.mistakebook.net.ocr.OcrEngineDeps(
+                mineru = mineruClient,
+                llmApi = llmApi,
+                httpClient = httpClient
+            ),
+            files
+        )
     }
 
     /**

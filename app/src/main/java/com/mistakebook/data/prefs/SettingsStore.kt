@@ -97,6 +97,12 @@ class SettingsStore(context: Context) {
             mineruKey = readSecure(SECURE_MINERU_KEY).ifBlank {
                 if (BuildConfigKeys.isPlaceholder(BuildConfig.MINERU_API_KEY)) "" else BuildConfig.MINERU_API_KEY
             },
+            // OCR 供应商（v0.0.78）：Key 存加密存储，URL/模型名走 DataStore
+            ocrProvider = OcrProvider.fromKey(prefs[KEY_OCR_PROVIDER]),
+            deepseekOcrBaseUrl = prefs[KEY_DEEPSEEK_OCR_BASE_URL]
+                ?: "https://api.deepseek.com",
+            deepseekOcrApiKey = readSecure(SECURE_DEEPSEEK_OCR_KEY),
+            deepseekOcrModel = prefs[KEY_DEEPSEEK_OCR_MODEL] ?: "deepseek-ocr",
             llmProfiles = profiles,
             activeProfileId = activeId,
             imageProfiles = imageProfiles,
@@ -355,6 +361,22 @@ class SettingsStore(context: Context) {
         secureVersion.value += 1
     }
 
+    // ===== OCR 配置（v0.0.78：MinerU / DeepSeek OCR 二选一） =====
+
+    suspend fun setOcrProvider(provider: OcrProvider) = editString(KEY_OCR_PROVIDER, provider.name)
+
+    suspend fun setDeepseekOcrBaseUrl(value: String) =
+        editString(KEY_DEEPSEEK_OCR_BASE_URL, value.trim())
+
+    suspend fun setDeepseekOcrModel(value: String) =
+        editString(KEY_DEEPSEEK_OCR_MODEL, value.trim())
+
+    suspend fun setDeepseekOcrApiKey(value: String) {
+        securePrefs.edit().putString(SECURE_DEEPSEEK_OCR_KEY, value.trim()).apply()
+        // 与 setMineruKey 同理：加密存储的写入 DataStore 感知不到
+        secureVersion.value += 1
+    }
+
     // ===== MinerU / 识别参数 =====
 
     // setMineruModelVersion / setOcrLanguage / setForceOcr 已随设置项一并移除。
@@ -595,6 +617,9 @@ class SettingsStore(context: Context) {
         const val TAG = "MistakeBookSettings"
         const val SECURE_FILE = "mistakebook_secure_prefs"
         const val SECURE_MINERU_KEY = "mineru_api_key"
+
+        /** DeepSeek OCR 的 Key（v0.0.78，加密存储，与 MinerU 各自独立）。 */
+        const val SECURE_DEEPSEEK_OCR_KEY = "deepseek_ocr_api_key"
         const val SECURE_LLM_PROFILES = "llm_profiles_json"
         const val SECURE_IMAGE_PROFILES = "image_profiles_json"
         const val SECURE_VISION_PROFILES = "vision_profiles_json"
@@ -605,6 +630,11 @@ class SettingsStore(context: Context) {
 
         /** 自选主题色（v0.0.76）：存枚举名，认不出回默认。 */
         val KEY_ACCENT_TONE = stringPreferencesKey("accent_tone")
+
+        // ===== OCR 配置（v0.0.78） =====
+        val KEY_OCR_PROVIDER = stringPreferencesKey("ocr_provider")
+        val KEY_DEEPSEEK_OCR_BASE_URL = stringPreferencesKey("deepseek_ocr_base_url")
+        val KEY_DEEPSEEK_OCR_MODEL = stringPreferencesKey("deepseek_ocr_model")
         val KEY_NETWORK_MODE = stringPreferencesKey("network_mode")
         val KEY_REASONING_EFFORT = stringPreferencesKey("reasoning_effort")
         val KEY_ATTACH_IMAGE = booleanPreferencesKey("attach_original_image")
