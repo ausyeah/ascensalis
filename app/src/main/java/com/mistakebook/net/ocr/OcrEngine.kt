@@ -190,6 +190,7 @@ class DeepSeekOcrEngine(
         val request = ChatRequest(
             model = model,
             messages = listOf(ChatMessage(role = "user", content = contentJson)),
+            responseFormat = null,
             stream = false,
             max_tokens = 8_192
         )

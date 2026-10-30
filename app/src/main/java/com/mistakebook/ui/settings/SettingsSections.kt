@@ -976,8 +976,8 @@ internal fun MineruKeySection(
                 val newProfile = com.mistakebook.data.prefs.OcrProfile(
                     name = "自定义 OCR",
                     type = com.mistakebook.data.prefs.OcrType.OPENAI_VISION,
-                    baseUrl = "https://maas-api.cn-huabei-1.xf-yun.com/v2/chat/completions",
-                    model = "xopdeepseekocr"
+                    baseUrl = "",
+                    model = ""
                 )
                 viewModel.addOcrProfile(newProfile)
                 expandedProfileId = newProfile.id
@@ -1024,12 +1024,12 @@ private fun OcrProfileCard(
     testResult: String?,
     testOk: Boolean
 ) {
-    var draftName by remember(profile) { mutableStateOf(profile.name) }
-    var draftType by remember(profile) { mutableStateOf(profile.type) }
-    var draftBaseUrl by remember(profile) { mutableStateOf(profile.baseUrl) }
-    var draftApiKey by remember(profile) { mutableStateOf(profile.apiKey) }
-    var draftModel by remember(profile) { mutableStateOf(profile.model) }
-    var draftNote by remember(profile) { mutableStateOf(profile.note) }
+    var draftName by remember(profile.id) { mutableStateOf(profile.name) }
+    var draftType by remember(profile.id) { mutableStateOf(profile.type) }
+    var draftBaseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
+    var draftApiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
+    var draftModel by remember(profile.id) { mutableStateOf(profile.model) }
+    var draftNote by remember(profile.id) { mutableStateOf(profile.note) }
 
     val isBuiltin = profile.id == com.mistakebook.data.prefs.OcrProfile.DEFAULT_MINERU_ID ||
         profile.id == com.mistakebook.data.prefs.OcrProfile.DEFAULT_DEEPSEEK_ID
@@ -1058,24 +1058,11 @@ private fun OcrProfileCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = profile.displayName(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        SuggestionChip(
-                            onClick = {},
-                            label = {
-                                Text(
-                                    text = if (profile.type == com.mistakebook.data.prefs.OcrType.MINERU) "MinerU" else "视觉模型",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            },
-                            modifier = Modifier.height(24.dp)
-                        )
-                    }
+                    Text(
+                        text = profile.displayName(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                    )
                     if (profile.note.isNotBlank()) {
                         Text(
                             text = profile.note,
@@ -1097,65 +1084,71 @@ private fun OcrProfileCard(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Spacer(Modifier.height(10.dp))
 
-                OutlinedTextField(
-                    value = draftName,
-                    onValueChange = { draftName = it },
-                    label = { Text("渠道名称") },
-                    placeholder = { Text("例如：讯飞星辰 DeepSeek OCR") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-
-                Text("服务类型", style = MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    com.mistakebook.data.prefs.OcrType.entries.forEach { type ->
-                        FilterChip(
-                            selected = draftType == type,
-                            onClick = { draftType = type },
-                            label = { Text(type.label) }
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-
-                if (draftType == com.mistakebook.data.prefs.OcrType.OPENAI_VISION) {
+                if (draftType == com.mistakebook.data.prefs.OcrType.MINERU) {
+                    OutlinedTextField(
+                        value = draftName,
+                        onValueChange = { draftName = it },
+                        label = { Text("渠道名称") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    PasswordField(
+                        label = "MinerU API Key",
+                        value = draftApiKey,
+                        onValueChange = { draftApiKey = it }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = draftNote,
+                        onValueChange = { draftNote = it },
+                        label = { Text("备注说明（可选）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = draftName,
+                        onValueChange = { draftName = it },
+                        label = { Text("渠道名称") },
+                        placeholder = { Text("例如：讯飞星辰 DeepSeek OCR") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = draftBaseUrl,
                         onValueChange = { draftBaseUrl = it },
-                        label = { Text("Base URL / 完整端点") },
-                        placeholder = { Text("https://maas-api.cn-huabei-1.xf-yun.com/v2/chat/completions") },
+                        label = { Text("Base URL") },
+                        placeholder = { Text("https://api.openai.com/v1") },
                         singleLine = true,
-                        supportingText = { Text("支持填写根路径或完整 endpoint（如 /v2/chat/completions 或 /v1/responses）") },
+                        supportingText = { Text("默认标准 /v1，支持填写端点如 /v2/chat/completions 或 /v1/responses") },
                         modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    PasswordField(
+                        label = "API Key",
+                        value = draftApiKey,
+                        onValueChange = { draftApiKey = it }
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = draftModel,
                         onValueChange = { draftModel = it },
                         label = { Text("模型名称") },
-                        placeholder = { Text("xopdeepseekocr 或 deepseek-chat") },
+                        placeholder = { Text("例如：xopdeepseekocr 或 deepseek-chat") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = draftNote,
+                        onValueChange = { draftNote = it },
+                        label = { Text("备注说明（可选）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
-
-                PasswordField(
-                    label = if (draftType == com.mistakebook.data.prefs.OcrType.MINERU) "MinerU API Key" else "API Key",
-                    value = draftApiKey,
-                    onValueChange = { draftApiKey = it }
-                )
-                Spacer(Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = draftNote,
-                    onValueChange = { draftNote = it },
-                    label = { Text("备注说明（可选）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
                 Spacer(Modifier.height(12.dp))
 
                 val currentDraft = profile.copy(
@@ -1987,22 +1980,6 @@ internal fun LlmUsageSection(container: com.mistakebook.di.AppContainer) {
                 label = stringResource(R.string.settings_usage_total),
                 value = formatCount(snap.llmPromptTokens + snap.llmCompletionTokens)
             )
-            UsageRow(
-                label = stringResource(R.string.settings_usage_cached),
-                value = formatCount(snap.llmCachedTokens)
-            )
-            // v0.0.58：缓存命中这一行的口径要说清。
-            // 用户反馈「缓存命中肯定有问题，从来没变过」——真实情况是
-            // 只有服务端在 usage 里上报 `prompt_cache_hit_tokens` 时才统计得到，
-            // 多数中转站/模型不给这个字段，于是这一行会长期不动。
-            // 不说清楚的话，用户只会以为是我们算错了。
-            Text(
-                text = "缓存命中仅统计服务端上报了缓存命中 token 的调用；" +
-                    "当前模型若不上报该字段，这一行会保持不变。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp)
-            )
             Text(
                 text = stringResource(R.string.settings_usage_hint),
                 style = MaterialTheme.typography.bodySmall,
@@ -2165,16 +2142,19 @@ internal fun ThemeModeSection(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            com.mistakebook.data.prefs.AccentTone.entries.chunked(4).forEach { rowTones ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    rowTones.forEach { tone ->
-                        val selected = state.snapshot.accentTone == tone
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                com.mistakebook.data.prefs.AccentTone.entries.forEach { tone ->
+                    val selected = state.snapshot.accentTone == tone
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(30.dp)
                                 .clip(circleShape)
                                 .background(com.mistakebook.ui.theme.swatchColorFor(tone, isDarkNow))
                                 .then(

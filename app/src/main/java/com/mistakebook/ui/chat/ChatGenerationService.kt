@@ -867,7 +867,7 @@ class ChatGenerationService : Service() {
                 }
 
             is com.mistakebook.net.ApiResult.Failure ->
-                "OCR 失败：${result.error.serverMessage.ifBlank { "请检查 MinerU 配置" }}"
+                "OCR 失败：${result.error.serverMessage.ifBlank { "请检查 OCR 供应商或网络配置" }}"
         }
     }
 

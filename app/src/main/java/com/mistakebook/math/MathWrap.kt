@@ -35,14 +35,14 @@ object MathWrap {
      */
     const val MIN_SPLIT_CHARS = 30
 
-    /** 整段就是一个 `\begin{env}…\end{env}`（前后允许空白）。 */
-    private val WHOLE_ENV = Regex("""^\s*\\begin\{([a-zA-Z*]+)\}([\s\S]*)\\end\{([a-zA-Z*]+)\}\s*$""")
+    /** 整段或带前导表达式的单环境：如 `\begin{vmatrix}…\end{vmatrix}` 或 `f(x) = \begin{cases}…\end{cases}`。 */
+    private val WHOLE_ENV = Regex("""^\s*(.*?)\s*\\begin\{([a-zA-Z*]+)\}([\s\S]*)\\end\{([a-zA-Z*]+)\}\s*$""")
 
     /**
-     * 会按 `\\` 拆行的多行环境。
-     *
-     * 白名单制：不在这里的环境（如 `matrix` 的嵌套、`tabular`）一律按普通公式走，
-     * 宁可让 [MathLayout.fit] 收缩，也不冒拆坏结构的风险。
+     * 会按 `\\` 拆行的多行对齐推导环境。
+     */
+    /**
+     * 会按 `\\` 拆行的多行对齐推导环境与无前缀分段函数。
      */
     private val MULTILINE_ENVS = setOf(
         "aligned", "align", "alignat", "flalign", "eqnarray", "split", "gather", "gathered",
@@ -53,6 +53,8 @@ object MathWrap {
     private val MATRIX_ENVS = setOf(
         "matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "array"
     )
+
+    private val SIZED_DELIMS = setOf("Bigg", "bigg", "Big", "big", "left", "right")
 
     private fun isMatrixEnvAt(latex: String, i: Int): Pair<Boolean, Int>? {
         val isBegin = latex.startsWith("\\begin{", i)
@@ -86,7 +88,7 @@ object MathWrap {
         "neq", "ne", "leq", "le", "geq", "ge", "equiv", "approx", "simeq", "cong",
         "sim", "propto", "doteq", "ll", "gg", "prec", "succ", "preceq", "succeq",
         "subset", "supset", "subseteq", "supseteq", "in", "ni", "notin", "cup", "cap",
-        "to", "gets", "implies", "iff", "land", "lor", "cdot", "times", "div", "pm", "mp"
+        "to", "gets", "implies", "iff", "land", "lor", "cdot", "times", "div", "pm", "mp", "qquad", "quad"
     )
 
     /** 断点 token 匹配后允许的**最大**回吐（命令名长度 + 反斜杠），防止切点跑出窗口太远。 */
@@ -107,21 +109,31 @@ object MathWrap {
 
         val envMatch = WHOLE_ENV.find(trimmed)
         if (envMatch != null) {
-            val begin = envMatch.groupValues[1]
-            val end = envMatch.groupValues[3]
-            if (begin == end && begin in MULTILINE_ENVS) {
-                val rows = splitEnvRows(envMatch.groupValues[2])
-                if (rows.size > 1) {
-                    val out = mutableListOf<String>()
-                    rows.forEach { row ->
-                        val body = row.trim()
-                        if (body.isEmpty()) return@forEach
-                        // 行内仍超长也不按 `&` 拆——对齐点是矩阵/联立方程
-                        // 的列语义，拆开每列单独渲染等于把表拆散。
-                        // 由 MathLayout.fit 对这一行收缩，保结构优先于保字号。
-                        out += wrapEnv(begin, body)
+            val prefix = envMatch.groupValues[1].trim()
+            val begin = envMatch.groupValues[2]
+            val body = envMatch.groupValues[3]
+            val end = envMatch.groupValues[4]
+            if (begin == end) {
+                if (begin in MATRIX_ENVS) {
+                    // 矩阵具有不可拆分的二维表格原子语义，绝不能按行拆散
+                    return listOf(trimmed)
+                }
+                if (prefix.isNotEmpty() && begin in setOf("cases", "dcases", "rcases")) {
+                    // 带等号/前缀的分段函数（如 f(x) = \begin{cases}），整体作为原子环境交由 MathLayout.fit 等比缩放
+                    return listOf(trimmed)
+                }
+                if (begin in MULTILINE_ENVS) {
+                    val rows = splitEnvRows(body)
+                    if (rows.size > 1) {
+                        val out = mutableListOf<String>()
+                        rows.forEachIndexed { idx, row ->
+                            val bodyText = row.trim()
+                            if (bodyText.isEmpty()) return@forEachIndexed
+                            val content = if (idx == 0 && prefix.isNotEmpty()) "$prefix $bodyText" else bodyText
+                            out += wrapEnv(begin, content)
+                        }
+                        if (out.isNotEmpty()) return out.map { balanceDelimiters(it) }
                     }
-                    if (out.isNotEmpty()) return out.map { balanceDelimiters(it) }
                 }
             }
         }
@@ -258,11 +270,29 @@ object MathWrap {
                     if (depth == 0) {
                         rows += body.substring(lineStart, i)
                         i += 2
+                        // 吃掉可选的行高参数，如 \\[6pt] 或 \\[1em]
+                        while (i < body.length && body[i].isWhitespace()) i++
+                        if (i < body.length && body[i] == '[') {
+                            val closeBracket = body.indexOf(']', i)
+                            if (closeBracket > 0) {
+                                i = closeBracket + 1
+                            }
+                        }
                         lineStart = i
                         continue
                     }
                     i += 2
                     continue
+                }
+                // 兼容部分模型输出或转义损失后的单斜杠行距：如 \[6pt]
+                if (body[i + 1] == '[' && depth == 0) {
+                    val closeBracket = body.indexOf(']', i + 1)
+                    if (closeBracket > 0 && body.substring(i + 2, closeBracket).matches(Regex("""\s*\d+(\.\d+)?(pt|em|ex|cm|mm|in)\s*"""))) {
+                        rows += body.substring(lineStart, i)
+                        i = closeBracket + 1
+                        lineStart = i
+                        continue
+                    }
                 }
                 // `\begin{…}` / `\end{…}` 调整环境深度
                 if (body.startsWith("\\begin{", i)) depth++
@@ -291,7 +321,12 @@ object MathWrap {
             val windowEnd = start + maxChars
             val cut = findBreak(latex, start, windowEnd)
                 ?: findSoftBreak(latex, start, windowEnd)
-                ?: windowEnd
+                ?: findSafeFallbackBreak(latex, start, windowEnd)
+
+            if (cut == null || cut <= start) {
+                // 窗口内及后续无安全切点（如不可拆分的大表达式）：保持该部分完整，交由 MathLayout.fit 等比自适应缩放
+                break
+            }
             val line = latex.substring(start, cut).trim()
             if (line.isNotEmpty()) out += line
             start = cut
@@ -303,6 +338,18 @@ object MathWrap {
         if (out.isEmpty()) return listOf(latex.trim())
         // 每段都要 `\left` / `\right` 自洽，否则 KaTeX 直接报错、整条公式退化成源码。
         return out.map { balanceDelimiters(it) }
+    }
+
+    private fun findSafeFallbackBreak(latex: String, start: Int, windowEnd: Int): Int? {
+        val extendedEnd = (windowEnd + 30).coerceAtMost(latex.length)
+        val lookahead = findBreak(latex, start, extendedEnd) ?: findSoftBreak(latex, start, extendedEnd)
+        if (lookahead != null && lookahead > start + 4) return lookahead
+
+        val sub = latex.substring(start, windowEnd)
+        if (!sub.contains('\\') && !sub.contains('{') && !sub.contains('}')) {
+            return windowEnd
+        }
+        return null
     }
 
     /**
@@ -341,20 +388,39 @@ object MathWrap {
                     continue
                 }
                 val cmd = latex.substring(i + 1, j)
-                when (cmd) {
-                    "left" -> delimDepth++
-                    "right" -> delimDepth = (delimDepth - 1).coerceAtLeast(0)
-                }
-                var guard = 0
-                while (guard < 2) {
+                if (cmd in SIZED_DELIMS) {
                     var k = j
                     while (k < latex.length && latex[k].isWhitespace()) k++
-                    if (k < latex.length && latex[k] == '{') {
-                        val close = findMatchingBraceAt(latex, k)
-                        if (close < 0) { j = latex.length; break }
-                        j = close + 1
-                        guard++
-                    } else break
+                    var delimChar = ""
+                    if (k < latex.length) {
+                        if (latex[k] == '\\') {
+                            var m = k + 1
+                            while (m < latex.length && latex[m].isLetter()) m++
+                            if (m == k + 1) m = k + 2
+                            delimChar = latex.substring(k, m)
+                            j = m
+                        } else {
+                            delimChar = latex[k].toString()
+                            j = k + 1
+                        }
+                    }
+                    if (cmd == "left" || delimChar == "(" || delimChar == "[" || delimChar == "\\{" || delimChar == "<") {
+                        delimDepth++
+                    } else if (cmd == "right" || delimChar == ")" || delimChar == "]" || delimChar == "\\}" || delimChar == ">") {
+                        delimDepth = (delimDepth - 1).coerceAtLeast(0)
+                    }
+                } else {
+                    var guard = 0
+                    while (guard < 2) {
+                        var k = j
+                        while (k < latex.length && latex[k].isWhitespace()) k++
+                        if (k < latex.length && latex[k] == '{') {
+                            val close = findMatchingBraceAt(latex, k)
+                            if (close < 0) { j = latex.length; break }
+                            j = close + 1
+                            guard++
+                        } else break
+                    }
                 }
                 if (matrixDepth == 0 && j <= searchEnd && j > from + 4) {
                     best = j
@@ -423,9 +489,29 @@ object MathWrap {
                 }
                 val cmdEnd = matchCommand(latex, i)
                 val cmd = commandName(latex, i)
-                when (cmd) {
-                    "left" -> delimDepth++
-                    "right" -> delimDepth = (delimDepth - 1).coerceAtLeast(0)
+                if (cmd in SIZED_DELIMS) {
+                    var k = i + 1 + cmd.length
+                    while (k < latex.length && latex[k].isWhitespace()) k++
+                    var delimChar = ""
+                    if (k < latex.length) {
+                        if (latex[k] == '\\') {
+                            var m = k + 1
+                            while (m < latex.length && latex[m].isLetter()) m++
+                            if (m == k + 1) m = k + 2
+                            delimChar = latex.substring(k, m)
+                            k = m
+                        } else {
+                            delimChar = latex[k].toString()
+                            k = k + 1
+                        }
+                    }
+                    if (cmd == "left" || delimChar == "(" || delimChar == "[" || delimChar == "\\{" || delimChar == "<") {
+                        delimDepth++
+                    } else if (cmd == "right" || delimChar == ")" || delimChar == "]" || delimChar == "\\}" || delimChar == ">") {
+                        delimDepth = (delimDepth - 1).coerceAtLeast(0)
+                    }
+                    i = k
+                    continue
                 }
                 if (depth == 0 && matrixDepth == 0 && i < windowEnd && cmdEnd != null) {
                     best = cmdEnd
@@ -446,7 +532,7 @@ object MathWrap {
         }
         val chosen = (listOfNotNull(bestTop, best).firstOrNull { it <= windowEnd + MAX_OVERSHOOT })
             ?: return null
-        if (chosen <= from + 4) return null
+        if (chosen <= from + 1) return null
         return chosen
     }
 

@@ -158,7 +158,7 @@ class ChatImageOcr(
                     ApiResult.Failure(
                         ApiError(
                             kind = ApiErrorKind.BAD_RESPONSE,
-                            serverMessage = "${settings.ocrProvider.label} 已返回，但这张图里没有识别出文字"
+                            serverMessage = "${settings.activeOcrProfile?.displayName() ?: "OCR 服务"} 已返回，但这张图里没有识别出文字"
                         )
                     )
                 }

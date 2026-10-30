@@ -502,10 +502,8 @@ fun ChatScreen(
                         // 「第二个图标点了没反应」。
                         onSaveToNote = questionId?.let { viewModel::saveToNote },
                         onToggleThinking = {
-                            scope.launch {
-                                coordinator.resume()
-                                listState.scrollToItem(0, 0)
-                            }
+                            // 思考折叠/展开为卡片就地展开，绝不强制 scrollToItem(0, 0)
+                            // 避免用户阅读历史消息时列表发生恶性跳转和抽搐抖动
                         }
                     )
                 }

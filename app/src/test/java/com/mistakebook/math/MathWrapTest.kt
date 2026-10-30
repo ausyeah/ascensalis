@@ -205,4 +205,56 @@ class MathWrapTest {
         assertEquals(1, out.split("\\right").size - 1)
         assertEquals(1, out.split("\\left").size - 1)
     }
+
+    // ── v0.0.82：真机典型 4 大「公式无法渲染」场景保护 ──
+
+    @Test
+    fun determinantMatrixNeverSplit() {
+        // 用例 1：行列式二维结构原子保护，绝不硬切或拆断
+        val latex = "\\begin{vmatrix}\na & b & c \\\\\nd & e & f \\\\\ng & h & i\n\\end{vmatrix}"
+        val rows = MathWrap.splitForDisplay(latex, 35)
+        assertEquals(1, rows.size)
+        assertEquals(latex.trim(), rows[0])
+    }
+
+    @Test
+    fun alignedMultiLineDerivationWithIntegral() {
+        // 用例 2：多行对齐推导（含绝对值与积分行），分行包裹且不破坏内部符号
+        val latex = "\\begin{aligned}\n(a+b)^{2} &= a^{2}+2ab+b^{2} \\\\\n\\sqrt{x^{2}} &= \\lvert x \\rvert \\\\\n\\int x^{2}\\,dx &= \\dfrac{x^{3}}{3}+C\n\\end{aligned}"
+        val rows = MathWrap.splitForDisplay(latex, 35)
+        assertEquals(3, rows.size)
+        assertTrue(rows.all { it.startsWith("\\begin{aligned}") && it.endsWith("\\end{aligned}") })
+        assertTrue(rows[1].contains("\\lvert x \\rvert"))
+        assertTrue(rows[2].contains("\\int"))
+    }
+
+    @Test
+    fun piecewiseFunctionWithPrefixAndSpacingParamIntact() {
+        // 用例 3A：带前导表达式的分段函数（如 f(x) = \begin{cases}），整体原子保护
+        val latex = """f(x)=\begin{cases}x^{2}, & x \geq 0 \\[6pt] -x, & x < 0\end{cases}"""
+        val rows = MathWrap.splitForDisplay(latex, 35)
+        assertEquals(1, rows.size)
+        assertEquals(latex, rows[0])
+    }
+
+    @Test
+    fun piecewiseFunctionWithoutPrefixConsumesSpacingParam() {
+        // 用例 3B：无前缀分段函数拆行时，\\ 吃掉可选行高参数 \\[6pt]，不遗漏给下一行
+        val latex = """\begin{cases}x^{2}, & x \geq 0 \\[6pt] -x, & x < 0\end{cases}"""
+        val rows = MathWrap.splitForDisplay(latex, 35)
+        assertEquals(2, rows.size)
+        assertFalse("第二行不应残留 [6pt] 导致语法报错", rows[1].contains("[6pt]"))
+        assertTrue(rows[1].contains("-x"))
+    }
+
+    @Test
+    fun spacedDelimitersAndBiggSplitSafely() {
+        // 用例 4：带 \quad 空格与 \Bigg 定界符的长公式，按 \quad 安全断行且 \Bigg 组不被拆裂
+        val latex = "\\left( \\dfrac{a}{b} \\right)^{n} \\quad \\left[ \\dfrac{1}{n} \\right] \\quad \\left\\{ \\dfrac{p}{q} \\right\\} \\quad \\Bigg( \\sum_{k=1}^{\\infty} \\dfrac{1}{k^{2}} \\Bigg)"
+        val rows = MathWrap.splitForDisplay(latex, 40)
+        assertEquals(4, rows.size)
+        assertTrue("Bigg括号必须保持完整不可切断", rows.last().contains("\\Bigg("))
+        assertTrue(rows.last().contains("\\Bigg)"))
+        assertFalse(rows.last().endsWith("\\Bigg"))
+    }
 }

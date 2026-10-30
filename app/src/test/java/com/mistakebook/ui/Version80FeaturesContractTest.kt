@@ -44,9 +44,9 @@ class Version80FeaturesContractTest {
     }
 
     @Test
-    fun `主题色排版采用 chunked 4 双行排布防止第八个圆球挤压`() {
+    fun `主题色排版一排 8 个等宽居中排布防止第八个圆球挤压`() {
         val src = readSource("app/src/main/java/com/mistakebook/ui/settings/SettingsSections.kt")
-        assertTrue("AccentTone 必须拆为每行 4 个排布", src.contains("AccentTone.entries.chunked(4)"))
+        assertTrue("AccentTone 采用单排 8 列自适应排布", src.contains("AccentTone.entries.forEach") && src.contains("weight(1f)"))
     }
 
     @Test

@@ -36,7 +36,25 @@ object NetworkRouter {
     val DIRECT_HOSTS: Set<String> = setOf(
         "mineru.net",
         "mineru.openxlab.org.cn",
-        "cdn-mineru.openxlab.org.cn"
+        "cdn-mineru.openxlab.org.cn",
+        "openxlab.org.cn",
+        "xf-yun.com",
+        "iflytek.com",
+        "deepseek.com",
+        "aliyun.com",
+        "aliyuncs.com",
+        "baichuan-ai.com",
+        "zhipuai.cn",
+        "bigmodel.cn",
+        "moonshot.cn",
+        "volces.com",
+        "volcengine.com",
+        "baidu.com",
+        "baidubce.com",
+        "tencent.com",
+        "tencentcloudapi.com",
+        "localhost",
+        "127.0.0.1"
     )
 
     /** 装到 OkHttpClient 上的选择器。 */
@@ -52,8 +70,13 @@ object NetworkRouter {
             if (direct) return listOf(java.net.Proxy.NO_PROXY)
             val system = runCatching { ProxySelector.getDefault() }.getOrNull()
                 ?: return listOf(java.net.Proxy.NO_PROXY)
-            return runCatching { system.select(uri) }.getOrNull()
-                ?: listOf(java.net.Proxy.NO_PROXY)
+            val proxies = runCatching { system.select(uri) }.getOrNull().orEmpty()
+            return if (proxies.isEmpty()) {
+                listOf(java.net.Proxy.NO_PROXY)
+            } else {
+                // 确保包含直连兜底：若系统代理未启动或拒绝连接，OkHttp 自动按列表顺序回退直连
+                (proxies + java.net.Proxy.NO_PROXY).distinct()
+            }
         }
 
         override fun connectFailed(uri: URI?, sa: SocketAddress?, ioe: IOException?) {
@@ -61,8 +84,12 @@ object NetworkRouter {
         }
     }
 
-    private fun isDirectHost(host: String): Boolean =
-        DIRECT_HOSTS.any { host == it || host.endsWith(".$it") }
+    private fun isDirectHost(host: String): Boolean {
+        if (host.isEmpty()) return true
+        if (host == "localhost" || host == "127.0.0.1" || host.startsWith("192.168.") || host.startsWith("10.")) return true
+        if (host.endsWith(".cn")) return true
+        return DIRECT_HOSTS.any { host == it || host.endsWith(".$it") }
+    }
 
     /**
      * 当前模式的**人话描述**，拼进网络类错误里展示。
