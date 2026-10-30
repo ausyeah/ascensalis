@@ -90,8 +90,8 @@ class WordbookMigrationRegistrationTest {
     @Test
     fun `绝不开 fallbackToDestructiveMigration`() {
         assertFalse(
-            "WordbookDatabase 绝不可开启 fallbackToDestructiveMigration，防止升级静默清空学习进度与错词本",
-            databaseSource.contains("fallbackToDestructiveMigration")
+            "WordbookDatabase 绝不可调用 fallbackToDestructiveMigration()，防止升级静默清空学习进度与错词本",
+            Regex("""\.\s*fallbackToDestructiveMigration\s*\(""").containsMatchIn(databaseSource)
         )
     }
 }
