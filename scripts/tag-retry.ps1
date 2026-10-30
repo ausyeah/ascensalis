@@ -14,7 +14,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 $env:GIT_TERMINAL_PROMPT = '0'
 
-git tag -d $Tag 2>$null | Out-Null
+if (git tag -l $Tag) { git tag -d $Tag | Out-Null }
 git tag -a $Tag -m $Tag
 if ($LASTEXITCODE -ne 0) { throw "Failed to create tag: $Tag" }
 
