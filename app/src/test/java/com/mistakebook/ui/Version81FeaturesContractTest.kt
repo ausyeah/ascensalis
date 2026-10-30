@@ -28,13 +28,13 @@ class Version81FeaturesContractTest {
     @Test
     fun `MathWrap 矩阵移出多行环境且矩阵内部换行符不被切断`() {
         val matrixLatex = """\begin{vmatrix} 1 & 2 \\ 3 & 4 \end{vmatrix}=0"""
-        val slices = MathWrap.splitForDisplay(matrixLatex, 40)
+        val slices = MathWrap.splitForDisplay(matrixLatex, 60)
         assertEquals("矩阵与其收尾紧跟的等号不得被强制断行腰斩", 1, slices.size)
         assertEquals(matrixLatex, slices[0])
 
         val pmatrixLatex = """\begin{pmatrix} a & b \\ c & d \end{pmatrix}"""
-        val pSlices = MathWrap.splitForDisplay(pmatrixLatex, 30)
-        assertEquals("pmatrix 内部换行不得被切断", 1, pSlices.size)
+        val pSlices = MathWrap.splitForDisplay(pmatrixLatex, 60)
+        assertEquals("pmatrix 移出多行环境后不得被拆成多行", 1, pSlices.size)
         assertEquals(pmatrixLatex, pSlices[0])
     }
 

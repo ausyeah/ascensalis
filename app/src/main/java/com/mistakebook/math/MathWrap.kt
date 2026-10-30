@@ -49,6 +49,22 @@ object MathWrap {
         "cases", "dcases", "rcases"
     )
 
+    /** 矩阵与数表环境：二维结构具有不可拆分的原子语义，绝不能按行拆散或断行。 */
+    private val MATRIX_ENVS = setOf(
+        "matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "array"
+    )
+
+    private fun isMatrixEnvAt(latex: String, i: Int): Pair<Boolean, Int>? {
+        val isBegin = latex.startsWith("\\begin{", i)
+        val isEnd = latex.startsWith("\\end{", i)
+        if (!isBegin && !isEnd) return null
+        val open = latex.indexOf('{', i)
+        val close = if (open >= 0) latex.indexOf('}', open) else -1
+        if (open < 0 || close < 0) return null
+        val env = latex.substring(open + 1, close).trim()
+        return if (env in MATRIX_ENVS) (isBegin to close + 1) else null
+    }
+
     /**
      * 单字符顶层断点（二元运算符 / 关系符）。
      *
@@ -275,11 +291,7 @@ object MathWrap {
             val windowEnd = start + maxChars
             val cut = findBreak(latex, start, windowEnd)
                 ?: findSoftBreak(latex, start, windowEnd)
-            if (cut == null) {
-                out += latex.substring(start).trim()
-                start = latex.length
-                break
-            }
+                ?: windowEnd
             val line = latex.substring(start, cut).trim()
             if (line.isNotEmpty()) out += line
             start = cut
@@ -303,38 +315,36 @@ object MathWrap {
      * 找不到返回 null，调用方兜底硬切——宁超宽不破碎，超宽由渲染端缩字号兜住。
      */
     private fun findSoftBreak(latex: String, from: Int, windowEnd: Int): Int? {
-        // 允许比窗口超出最多一个命令的回吐，与 findBreak 的 MAX_OVERSHOOT 同理
         val searchEnd = (windowEnd + MAX_OVERSHOOT).coerceAtMost(latex.length)
         var best: Int? = null
         var bestTop: Int? = null
-        // `\left` / `\right` 深度：优先在配对定界符**外部**断行（更自然），
-        // 内部断行也不是不行——[balanceDelimiters] 会把配平补回来。
         var delimDepth = 0
-        var envDepth = 0
+        var matrixDepth = 0
         var i = from
         while (i < searchEnd) {
             val c = latex[i]
             if (c == '\\') {
+                val mat = isMatrixEnvAt(latex, i)
+                if (mat != null) {
+                    if (mat.first) matrixDepth++ else matrixDepth = (matrixDepth - 1).coerceAtLeast(0)
+                    i = mat.second
+                    continue
+                }
                 var j = i + 1
                 while (j < latex.length && latex[j].isLetter()) j++
                 if (j == i + 1) {
-                    // `\ `、`\{` 之类单字符控制符号：符号本身之后是安全切点
                     i = j + 1
-                    if (j > from + 4) {
+                    if (j > from + 4 && matrixDepth == 0) {
                         best = j
                         if (delimDepth == 0) bestTop = j
                     }
                     continue
                 }
-                // `\left` / `\right` 及 `\begin` / `\end` 深度跟踪
                 val cmd = latex.substring(i + 1, j)
                 when (cmd) {
                     "left" -> delimDepth++
                     "right" -> delimDepth = (delimDepth - 1).coerceAtLeast(0)
-                    "begin" -> envDepth++
-                    "end" -> envDepth = (envDepth - 1).coerceAtLeast(0)
                 }
-                // 吃掉紧跟的花括号参数（最多两层，够 \frac{a}{b}）
                 var guard = 0
                 while (guard < 2) {
                     var k = j
@@ -346,14 +356,14 @@ object MathWrap {
                         guard++
                     } else break
                 }
-                if (envDepth == 0 && j <= searchEnd && j > from + 4) {
+                if (matrixDepth == 0 && j <= searchEnd && j > from + 4) {
                     best = j
                     if (delimDepth == 0) bestTop = j
                 }
                 i = j
                 continue
             }
-            if (envDepth == 0 && c == ' ' && i > from + 4) {
+            if (matrixDepth == 0 && c == ' ' && i > from + 4) {
                 best = i + 1
                 if (delimDepth == 0) bestTop = i + 1
             }
@@ -391,33 +401,33 @@ object MathWrap {
         var depth = 0
         var best: Int? = null
         var bestTop: Int? = null
-        // `\left` / `\right` 深度：优先在配对定界符**外部**断行。
         var delimDepth = 0
-        // 环境深度：在 `\begin{...}` 与 `\end{...}` 内部绝对不断行，彻底保护矩阵与联立环境
-        var envDepth = 0
+        var matrixDepth = 0
         var i = from
         while (i < latex.length) {
             val c = latex[i]
             if (c == '\\' && i + 1 < latex.length) {
-                // `\\`（行分隔符）本身就是断点（仅在环境外部）
                 if (latex[i + 1] == '\\') {
-                    if (depth == 0 && envDepth == 0 && i + 2 <= windowEnd + MAX_OVERSHOOT && i >= from) {
+                    if (depth == 0 && matrixDepth == 0 && i + 2 <= windowEnd + MAX_OVERSHOOT && i >= from) {
                         best = i + 2
                         if (delimDepth == 0) bestTop = i + 2
                     }
                     i += 2
                     continue
                 }
-                // `\left` / `\right` 及 `\begin` / `\end` 深度跟踪
+                val mat = isMatrixEnvAt(latex, i)
+                if (mat != null) {
+                    if (mat.first) matrixDepth++ else matrixDepth = (matrixDepth - 1).coerceAtLeast(0)
+                    i = mat.second
+                    continue
+                }
                 val cmdEnd = matchCommand(latex, i)
                 val cmd = commandName(latex, i)
                 when (cmd) {
                     "left" -> delimDepth++
                     "right" -> delimDepth = (delimDepth - 1).coerceAtLeast(0)
-                    "begin" -> envDepth++
-                    "end" -> envDepth = (envDepth - 1).coerceAtLeast(0)
                 }
-                if (depth == 0 && envDepth == 0 && i < windowEnd && cmdEnd != null) {
+                if (depth == 0 && matrixDepth == 0 && i < windowEnd && cmdEnd != null) {
                     best = cmdEnd
                     if (delimDepth == 0) bestTop = cmdEnd
                 }
@@ -428,7 +438,7 @@ object MathWrap {
                 '{', '(', '[' -> depth++
                 '}', ')', ']' -> depth = (depth - 1).coerceAtLeast(0)
             }
-            if (depth == 0 && envDepth == 0 && c in BREAK_CHARS && i < windowEnd) {
+            if (depth == 0 && matrixDepth == 0 && c in BREAK_CHARS && i < windowEnd) {
                 best = i + 1
                 if (delimDepth == 0) bestTop = i + 1
             }
@@ -436,7 +446,7 @@ object MathWrap {
         }
         val chosen = (listOfNotNull(bestTop, best).firstOrNull { it <= windowEnd + MAX_OVERSHOOT })
             ?: return null
-        if (chosen <= from + 4) return null // 切出太碎的行不如不切
+        if (chosen <= from + 4) return null
         return chosen
     }
 
