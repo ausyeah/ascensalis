@@ -110,20 +110,7 @@ class CaptureBatch {
         return files
     }
 
-    /**
-     * 取走**未裁原图**并清空队列，**不删文件**（v0.0.58：对话拍照用）。
-     *
-     * 对话里的相机只借错题相机的前端：拍完的图不裁、不识别，
-     * 原样当图片附件交给会话，由模型自己决定调 OCR / 识图工具。
-     * 所以这里要的是原图而不是 [cropped] 里的裁切成果。
-     */
-    fun drainRaw(): List<File> {
-        val files = paths.map(::File)
-        paths = emptyList()
-        cropped = emptyList()
-        sourceIsGallery = false
-        return files
-    }
+    // drainRaw 已删（v0.0.75）：对话拍照恢复走裁切接力，「原图直发」路径废弃。
 
     companion object {
         /**

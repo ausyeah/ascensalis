@@ -59,6 +59,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -80,6 +81,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -113,6 +115,9 @@ internal fun flashStateDescriptionRes(flashMode: Int): Int = when (flashMode) {
 }
 
 private const val GALLERY_MAX_ITEMS = 20
+
+/** 连拍「完成」按钮的底色（v0.0.75）：灰底表示「收尾」而非主动作。 */
+private val BatchDoneGray = Color(0xFFBDBDBD)
 
 /**
  * 拍照页（CameraX，PRD 7.2）：全屏预览 + 3×3 网格 + 闪光灯/前后摄切换，
@@ -442,39 +447,47 @@ fun CaptureScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (batchActive) {
-                Box(
+                // 右下角一排：左侧「本批 N 张」计数（半透明黑底，不抢眼），
+                // 右侧**灰色**完成按钮（v0.0.75 用户反馈：原来 primary 色大卡
+                // 太像主操作，且与快门行视觉打架；灰色表示「收尾」而非「主动作」）。
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.CenterEnd
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    Column(
+                    Text(
+                        text = stringResource(
+                            if (isChatPurpose) R.string.capture_chat_batch_count
+                            else R.string.capture_batch_count,
+                            batchSize
+                        ),
+                        color = Color.White.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.92f))
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .background(
+                                color = Color.Black.copy(alpha = 0.42f),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        color = BatchDoneGray,
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Text(
-                            text = stringResource(
-                                if (isChatPurpose) R.string.capture_chat_batch_count
-                                else R.string.capture_batch_count,
-                                batchSize
-                            ),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            style = MaterialTheme.typography.labelMedium
-                        )
                         TextButton(
                             onClick = onStartBatchCrop,
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                contentColor = Color(0xFF1F1F1F)
                             )
                         ) {
                             Text(
                                 stringResource(
                                     if (isChatPurpose) R.string.capture_chat_batch_done
                                     else R.string.capture_batch_done
-                                )
+                                ),
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }

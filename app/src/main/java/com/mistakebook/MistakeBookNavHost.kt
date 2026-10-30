@@ -147,21 +147,10 @@ fun MistakeBookNavHost(
     }
 
     /**
-     * v0.0.58：对话拍照的直接交接（不裁剪、不识别）。
-     *
-     * 相机页「完成」→ 取走本批**原图** → 交给
-     * [AppContainer.pendingChatAttachmentPaths] → ChatScreen 的 LaunchedEffect
-     * 逐张转成待发附件（走既有的附件准备管线：压缩 / data URL / OCR 文字）。
-     *
-     * 为什么不再走裁切接力：对话里的图是要**原样发给模型**的，
-     * 裁切是错题识别为了提准才做的加工，裁掉的内容模型反而看不到了。
+     * v0.0.75：submitChatBatchRaw 已删除——对话拍照恢复走裁切接力
+     * （与错题识别同一套裁切/涂鸦/增强，用户反馈原图直发丢功能）。
+     * 原图直发路径的收尾逻辑并入 onStartBatchCrop 的 CHAT 分支。
      */
-    fun submitChatBatchRaw() {
-        val files = container.captureBatch.drainRaw()
-        if (files.isNotEmpty()) {
-            container.pendingChatAttachmentPaths = files.map { it.absolutePath }
-        }
-    }
     androidx.compose.runtime.LaunchedEffect(filterDueRequest) {
         if (filterDueRequest > 0) {
             navController.navigate(Routes.HOME) {
@@ -276,12 +265,24 @@ fun MistakeBookNavHost(
                 onStartBatchCrop = {
                     // F6/T2：点「完成」。
                     // - QUESTION：从第一张未裁的原图开始逐张接力裁切，裁完提交识别；
-                    // - CHAT（v0.0.58）：**不裁、不识别**，把原图整体交回会话当图片附件，
-                    //   由模型自己决定调 OCR / 识图工具。前端相机是复用的，后端在这里分叉。
+                    // - CHAT（v0.0.75 恢复）：**同样进裁切接力**——对话里拍题
+                    //   一样要裁掉多余背景、涂掉隐私、增强清晰度，裁完再回会话
+                    //   当图片附件。v0.0.58 曾改成「原图直发」，用户反馈丢功能，
+                    //   改回裁切链路（CropScreen 的 chatMode 本来就在，含涂鸦遮蔽）。
                     // （参数 lambda 里不能写 return，用 if/else 分叉。）
                     if (container.cameraPurpose == AppContainer.CameraPurpose.CHAT) {
-                        submitChatBatchRaw()
-                        navController.popBackStack()
+                        val batch = container.captureBatch
+                        if (batch.paths.isNotEmpty()) {
+                            // 裁切页走 chatMode：成果入 chatBatchCropped，全部裁完
+                            // 由 onBatchCompleted 交接回对话页
+                            container.chatCropping = true
+                            navController.navigate(Routes.crop(batch.paths.first())) {
+                                popUpTo(Routes.CAPTURE) { inclusive = true }
+                            }
+                        } else {
+                            // 一张没拍就点完成：直接返回，别空跑裁切页
+                            navController.popBackStack()
+                        }
                     } else {
                         val batch = container.captureBatch
                         if (batch.paths.isNotEmpty()) {
