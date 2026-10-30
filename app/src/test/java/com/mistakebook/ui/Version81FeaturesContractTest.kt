@@ -58,12 +58,14 @@ class Version81FeaturesContractTest {
     @Test
     fun `ChatThinking 提取回答剥离思考标签且聊天页支持复制思考与回答`() {
         val mixedContent = "<think>\n这里是详细推理过程\n</think>\n这是纯净的助手回答"
-        val split = ChatThinking.split(mixedContent, isStreaming = false)
-        assertEquals("这是纯净的助手回答", split.answer)
-        assertEquals("这里是详细推理过程", split.thinking)
+        val split = ChatThinking.split(mixedContent, streaming = false)
+        assertEquals("这是纯净的助手回答", split.second)
+        assertEquals("这里是详细推理过程", split.first)
+        assertEquals("这是纯净的助手回答", ChatThinking.answerOf(mixedContent))
+        assertEquals("这里是详细推理过程", ChatThinking.thinkingOf(mixedContent))
 
         val chatSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
-        assertTrue("复制助手消息时必须剥离 think 标签", chatSrc.contains("ChatThinking.split(it.content, false).answer"))
+        assertTrue("复制助手消息时必须剥离 think 标签", chatSrc.contains("ChatThinking.answerOf(message.content)"))
         assertTrue("ThinkingBlock 必须提供独立的复制思考按钮", chatSrc.contains("Icon(Icons.Default.ContentCopy") && chatSrc.contains("Text(\"复制思考\""))
     }
 

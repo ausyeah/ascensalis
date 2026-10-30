@@ -56,7 +56,7 @@ class AppContainer(context: Context) {
     /** 大模型 / MinerU 用量累计（SharedPreferences 计数器）。 */
     val usageStatsStore: UsageStatsStore by lazy { UsageStatsStore(appContext) }
 
-    private val httpClient = HttpFactory.createClient()
+    val httpClient = HttpFactory.createClient()
 
     private val json = Json {
         ignoreUnknownKeys = true

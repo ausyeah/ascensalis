@@ -256,7 +256,7 @@ fun QuestionThumb(
 @Composable
 fun FullScreenImageDialog(
     imagePath: String,
-    contentDescription: String?,
+    contentDescription: String? = null,
     onDismiss: () -> Unit
 ) {
     androidx.compose.ui.window.Dialog(

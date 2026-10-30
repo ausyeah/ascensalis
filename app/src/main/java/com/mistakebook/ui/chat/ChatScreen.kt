@@ -237,6 +237,7 @@ fun ChatScreen(
     previewImagePath?.let { path ->
         com.mistakebook.ui.common.FullScreenImageDialog(
             imagePath = path,
+            contentDescription = "图片预览",
             onDismiss = { previewImagePath = null }
         )
     }
@@ -1180,7 +1181,7 @@ private fun StatusRow(
             message.status == MessageStatus.DONE && !isUser -> {
                 IconButton(
                     onClick = {
-                        val textToCopy = ChatThinking.split(message.content, false).answer.trim().ifEmpty { message.content }
+                        val textToCopy = ChatThinking.answerOf(message.content).trim().ifEmpty { message.content }
                         onCopy(textToCopy)
                     },
                     modifier = Modifier.size(28.dp)

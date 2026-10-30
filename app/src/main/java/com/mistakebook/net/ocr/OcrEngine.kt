@@ -20,6 +20,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.Base64
 import java.util.concurrent.TimeUnit
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * 统一的 OCR 识别接口。
@@ -256,15 +258,15 @@ class DeepSeekOcrEngine(
                     .url(url)
                     .header("Authorization", "Bearer $key")
                     .header("Content-Type", "application/json")
-                    .post(okhttp3.RequestBody.create(okhttp3.MediaType.parse("application/json"), bodyJson))
+                    .post(bodyJson.toRequestBody("application/json".toMediaType()))
                     .build()
 
                 val resp = client.newCall(req).execute()
                 val elapsed = System.currentTimeMillis() - start
-                val respBody = resp.body()?.string().orEmpty()
+                val respBody = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
-                    val err = HttpFactory.httpError(resp.code(), respBody)
-                    throw IllegalStateException("HTTP ${resp.code()}: ${err.detail}")
+                    val err = HttpFactory.httpError(resp.code, respBody)
+                    throw IllegalStateException("HTTP ${resp.code}: ${err.detail}")
                 }
                 "连接成功（耗时 ${elapsed}ms）"
             }
