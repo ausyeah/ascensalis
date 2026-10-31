@@ -1,5 +1,6 @@
 package com.mistakebook.ui.badge
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -7,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,19 +16,26 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -35,7 +44,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,12 +56,13 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mistakebook.R
-import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.Badge
 import com.mistakebook.domain.BadgeCategory
 import com.mistakebook.domain.BadgeEngine
@@ -61,19 +70,18 @@ import com.mistakebook.domain.BadgeStats
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.ceil
-
-/** 每页徽章数：3 列 × 3 行，与参考样式的呼吸感一致。 */
-private const val PAGE_SIZE = 6
-private const val GRID_COLUMNS = 2
 
 /**
- * 成就墙（v0.0.54 重设计）。
+ * 成就墙（v0.0.54 首版，v0.0.86 重排版）。
  *
- * 参考主流打卡 App 的徽章墙样式：顶部聚光灯 + 柔和渐变背景 +
- * 分页徽章网格；徽章用专属手绘风格素材（drawable-nodpi/badge_*.png），
- * 未解锁置灰压暗并挂锁角标。点任意徽章弹出详情（达成条件 / 进度 /
- * 解锁日期）。判定逻辑不变，仍由 [BadgeEngine] 纯函数计算。
+ * 旧版是「2 列 × 3 行 + 8 页翻页」：48 枚徽章一页只露 6 枚，
+ * 绝大多数时间是灰的，用户翻两页就累了，整面墙看着空空荡荡。
+ *
+ * 现在改成一面**一整幅能滚动的墙**：顶部战绩卡（已解锁数 + 完成度进度条），
+ * 下面自适应网格一屏铺开 6~9 枚，按「已解锁在前、未解锁在后，两组都按难度
+ * 越难越靠后」排（排序规则见 [BadgeEngine.sortForWall]，纯函数可测）。
+ * 每枚章下面带名字，未解锁的进度型徽章还带「3 / 10」——灰墙上有进度
+ * 才看得出在往前走。判定逻辑不变，仍由 [BadgeEngine] 纯函数计算。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,7 +107,6 @@ fun BadgeWallScreen(onBack: () -> Unit) {
         value = runCatching { container.badgeStatsProvider.currentStats() }.getOrNull()
     }
 
-    var page by rememberSaveable { mutableStateOf(0) }
     var selected by remember { mutableStateOf<Badge?>(null) }
 
     val progressList = stats?.let { s ->
@@ -107,7 +114,7 @@ fun BadgeWallScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
-        containerColor = Color(0xFFE9F1FC),
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.badge_title)) },
@@ -135,11 +142,14 @@ fun BadgeWallScreen(onBack: () -> Unit) {
             return@Scaffold
         }
 
-        val pageCount = ceil(progressList.size.toDouble() / PAGE_SIZE).toInt().coerceAtLeast(1)
-        val safePage = page.coerceIn(0, pageCount - 1)
-        val pageItems = progressList.drop(safePage * PAGE_SIZE).take(PAGE_SIZE)
-        val rows = pageItems.chunked(GRID_COLUMNS)
+        // 墙上「有没有这枚章」只认库里的解锁记录，引擎算出的应解锁集合
+        // 只用来取进度数字——两者差一瞬间（算完还没落库）时，按库排才
+        // 不会出现「排序说已解锁、章却是灰的」这种自相矛盾。
         val unlockedCount = progressList.count { unlockedMap.containsKey(it.badge.key) }
+        val currentByKey = progressList.associate { it.badge.key to it.current }
+        val ordered = BadgeEngine.sortForWall(progressList.map { it.badge }, unlockedMap.keys)
+        val unlockedBadges = ordered.filter { unlockedMap.containsKey(it.key) }
+        val lockedBadges = ordered.filterNot { unlockedMap.containsKey(it.key) }
 
         Column(
             modifier = Modifier
@@ -147,71 +157,75 @@ fun BadgeWallScreen(onBack: () -> Unit) {
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color(0xFFE9F1FC), Color(0xFFF6FAFF), Color(0xFFFFFFFF))
+                        listOf(
+                            MaterialTheme.colorScheme.surface,
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            MaterialTheme.colorScheme.surface
+                        )
                     )
                 )
         ) {
             Spotlights(Modifier.fillMaxWidth().height(120.dp))
-            Text(
-                text = stringResource(R.string.badge_unlocked_count, unlockedCount, progressList.size),
-                style = MaterialTheme.typography.labelMedium,
-                color = Color(0xFF5B7DA8),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                textAlign = TextAlign.Center
+            WallSummaryCard(
+                unlockedCount = unlockedCount,
+                total = progressList.size,
+                modifier = Modifier.padding(horizontal = 20.dp)
             )
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.TopCenter
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(96.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    start = 20.dp,
+                    end = 20.dp,
+                    top = 4.dp,
+                    bottom = 24.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(22.dp)
-                ) {
-                    rows.forEach { rowBadges ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(26.dp)) {
-                            rowBadges.forEach { progress ->
-                                BadgeGridItem(
-                                    badge = progress.badge,
-                                    unlocked = unlockedMap.containsKey(progress.badge.key),
-                                    onClick = { selected = progress.badge }
-                                )
-                            }
-                        }
+                if (unlockedBadges.isNotEmpty()) {
+                    item(
+                        span = { GridItemSpan(maxLineSpan) },
+                        key = "header_unlocked"
+                    ) {
+                        WallSectionHeader(
+                            title = stringResource(R.string.badge_wall_section_unlocked),
+                            count = unlockedBadges.size
+                        )
+                    }
+                    items(
+                        items = unlockedBadges,
+                        key = { "unlocked_${it.key}" }
+                    ) { badge ->
+                        BadgeCell(
+                            badge = badge,
+                            unlocked = true,
+                            current = currentByKey[badge.key] ?: 0,
+                            onClick = { selected = badge }
+                        )
                     }
                 }
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 18.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(
-                    onClick = { if (safePage > 0) page = safePage - 1 },
-                    enabled = safePage > 0
-                ) {
-                    Text(stringResource(R.string.badge_prev_page))
-                }
-                Text(
-                    text = stringResource(R.string.badge_page_indicator, safePage + 1, pageCount),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color(0xFF5B7DA8),
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                TextButton(
-                    onClick = { if (safePage < pageCount - 1) page = safePage + 1 },
-                    enabled = safePage < pageCount - 1
-                ) {
-                    Text(stringResource(R.string.badge_next_page))
+                if (lockedBadges.isNotEmpty()) {
+                    item(
+                        span = { GridItemSpan(maxLineSpan) },
+                        key = "header_locked"
+                    ) {
+                        WallSectionHeader(
+                            title = stringResource(R.string.badge_wall_section_locked),
+                            count = lockedBadges.size
+                        )
+                    }
+                    items(
+                        items = lockedBadges,
+                        key = { "locked_${it.key}" }
+                    ) { badge ->
+                        BadgeCell(
+                            badge = badge,
+                            unlocked = false,
+                            current = currentByKey[badge.key] ?: 0,
+                            onClick = { selected = badge }
+                        )
+                    }
                 }
             }
         }
@@ -219,6 +233,8 @@ fun BadgeWallScreen(onBack: () -> Unit) {
 
     selected?.let { badge ->
         val record = unlockedMap[badge.key]
+        // 只有墙渲染出来（stats 已就位）才可能点中徽章，但编译器不知道，
+        // 这里仍按可空取——真取不到就当成 0 进度，弹窗照常能开。
         val progress = progressList?.firstOrNull { it.badge.key == badge.key }
         BadgeDetailDialog(
             badge = badge,
@@ -256,30 +272,155 @@ private fun Spotlights(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * 战绩卡：已解锁数 / 总数 + 完成度进度条。
+ *
+ * 旧版只有一行「已解锁 3 / 48」小字，数字之外读不出任何信息。
+ * 进度条是这面墙上唯一「在往前走」的东西：哪怕今天只多解锁一枚，
+ * 那条线也会动，比一句静态数字更能留住人。
+ */
 @Composable
-private fun BadgeGridItem(
-    badge: Badge,
-    unlocked: Boolean,
-    onClick: () -> Unit
+private fun WallSummaryCard(
+    unlockedCount: Int,
+    total: Int,
+    modifier: Modifier = Modifier
 ) {
-    Box(modifier = Modifier.clickable(onClick = onClick)) {
-        BadgeImage(badge = badge, unlocked = unlocked, size = 84.dp)
-        if (!unlocked) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF6B4A2F).copy(alpha = 0.85f)),
-                contentAlignment = Alignment.Center
-            ) {
+    val percent = if (total <= 0) 0 else unlockedCount * 100 / total
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    Icons.Default.Lock,
+                    imageVector = Icons.Default.EmojiEvents,
                     contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(12.dp)
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.badge_unlocked_count, unlockedCount, total),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = stringResource(R.string.badge_wall_percent, percent),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                progress = { unlockedCount.toFloat() / total.coerceAtLeast(1) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(CircleShape),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+/** 分区标题：「已解锁 · 3 枚」/「未解锁 · 45 枚」，右侧一条渐隐的分隔线。 */
+@Composable
+private fun WallSectionHeader(title: String, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 14.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = stringResource(R.string.badge_wall_section_count, title, count),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.width(10.dp))
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        )
+    }
+}
+
+/**
+ * 单枚徽章格：章 + 名字 +（未解锁且进度型时）进度。
+ *
+ * 名字必须露出来：48 枚章的图是有，但用户记不住哪张图对应哪件事，
+ * 点开弹窗才知道太慢。进度「3 / 10」只给未解锁的——已解锁的章
+ * 彩色+投影已经足够抢眼，再挂数字反而吵。
+ */
+@Composable
+private fun BadgeCell(
+    badge: Badge,
+    unlocked: Boolean,
+    current: Int,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box {
+            BadgeImage(badge = badge, unlocked = unlocked, size = 74.dp)
+            if (!unlocked) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF6B4A2F).copy(alpha = 0.85f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(11.dp)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = badge.title,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (unlocked) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (!unlocked && badge.target > 0) {
+            Text(
+                text = stringResource(R.string.badge_progress, current, badge.target),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                textAlign = TextAlign.Center,
+                maxLines = 1
+            )
         }
     }
 }
@@ -393,6 +534,14 @@ private fun BadgeDetailDialog(
             ) {
                 BadgeImage(badge = badge, unlocked = unlocked, size = 132.dp)
                 Spacer(Modifier.height(12.dp))
+                // 分类标注：墙面已不按类分区，这里补一句「这枚章属于哪一类」，
+                // 用户对着 48 枚章才知道该往哪个方向攒。
+                Text(
+                    text = stringResource(R.string.badge_category_label, badge.category.label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
                 Text(
                     text = badge.conditionText,
                     style = MaterialTheme.typography.bodyMedium,

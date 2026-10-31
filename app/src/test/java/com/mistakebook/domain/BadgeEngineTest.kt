@@ -178,4 +178,53 @@ class BadgeEngineTest {
         )
         assertEquals(Badge.entries.size, unlockedKeys(stats).size)
     }
+
+    // ---- 成就墙排序（v0.0.86 重排版）----
+
+    @Test
+    fun `achievement type badges rank as easiest`() {
+        // target = 0 的「第一次」类徽章排最前，比 target = 1 的首次毕业还容易。
+        assertEquals(0, Badge.FIRST_QUESTION.difficulty)
+        assertEquals(0, Badge.KNOWLEDGE_CLEARED.difficulty)
+        assertEquals(0, Badge.FIRST_WORD.difficulty)
+        assertEquals(1, Badge.M1.difficulty)
+        assertEquals(5000, Badge.R5000.difficulty)
+    }
+
+    @Test
+    fun `wall sort puts unlocked first then by difficulty`() {
+        val unlocked = setOf(Badge.R5000.key, Badge.FIRST_QUESTION.key)
+        val sorted = BadgeEngine.sortForWall(Badge.entries, unlocked)
+
+        // 已解锁的两枚必须占据最前面，哪怕其中一枚是全场最难的五千次复习
+        val head = sorted.take(2).map { it.key }.toSet()
+        assertEquals(unlocked, head)
+        // 已解锁内部也按难度：入门（0）先于五千次复习（5000）
+        assertEquals(Badge.FIRST_QUESTION.key, sorted.first().key)
+        // 未解锁段必须严格难度不减
+        val locked = sorted.drop(2)
+        assertEquals(locked.sortedBy { it.difficulty }, locked)
+        assertEquals(Badge.entries.size, sorted.size)
+    }
+
+    @Test
+    fun `wall sort is stable for equal difficulty`() {
+        // 三日之约与单日三连同为难度 3：顺序按枚举声明序兜底，不随输入顺序抖动
+        val a = listOf(Badge.D3, Badge.S3, Badge.FIRST_QUESTION)
+        val b = listOf(Badge.FIRST_QUESTION, Badge.S3, Badge.D3)
+        val sortedA = BadgeEngine.sortForWall(a, emptySet())
+        assertEquals(sortedA, BadgeEngine.sortForWall(b, emptySet()))
+        assertEquals(
+            listOf(Badge.FIRST_QUESTION.key, Badge.S3.key, Badge.D3.key),
+            sortedA.map { it.key }
+        )
+    }
+
+    @Test
+    fun `wall sort with nothing unlocked is pure difficulty order`() {
+        val sorted = BadgeEngine.sortForWall(Badge.entries, emptySet())
+        assertEquals(sorted.sortedBy { it.difficulty }, sorted)
+        // 最难的一枚压轴：五千次复习
+        assertEquals(Badge.R5000.key, sorted.last().key)
+    }
 }

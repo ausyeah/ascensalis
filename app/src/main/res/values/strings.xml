@@ -748,9 +748,11 @@
     <string name="badge_locked">未达成</string>
     <string name="settings_badge_entry">成就墙</string>
     <string name="badge_new_toast">解锁新成就：%1$s</string>
-    <string name="badge_prev_page">上一页</string>
-    <string name="badge_next_page">下一页</string>
-    <string name="badge_page_indicator">%1$d / %2$d</string>
+    <string name="badge_wall_section_unlocked">已解锁</string>
+    <string name="badge_wall_section_locked">未解锁</string>
+    <string name="badge_wall_section_count">%1$s · %2$d 枚</string>
+    <string name="badge_wall_percent">完成度 %1$d%%</string>
+    <string name="badge_category_label">分类 · %1$s</string>
     <string name="badge_unlocked_count">已解锁 %1$d / %2$d</string>
     <string name="pomodoro_tab_focus">番茄钟</string>
     <string name="pomodoro_tab_stopwatch">正向计时</string>

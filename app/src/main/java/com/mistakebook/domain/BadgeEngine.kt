@@ -112,9 +112,21 @@ enum class Badge(
             KNOWLEDGE_CLEARED, K3, K5, K10 -> BadgeCategory.KNOWLEDGE
             FIRST_WORD, W50, HUNDRED_WORDS, W200, W500 -> BadgeCategory.WORDS
         }
+
+    /**
+     * 难度排序键：成就墙上「越难的越靠后」按它比大小。
+     *
+     * target = 0 的达成型徽章（入门 / 知识点清零 / 初识词汇这类「第一次」）
+     * 算最易，排最前；其余按目标量升序——要凑的量越大越难拿到。
+     * 跨类比的是原始目标量（复习 5000 次难于录入 1000 道），粗糙但可预期，
+     * 而且同一枚徽章只有一个档位，不需要更精细的模型。
+     */
+    val difficulty: Int
+        get() = if (target == 0) 0 else target
 }
 
-/** 徽章分类（仅用于墙上的分组标题与配色）。 */
+/** 徽章分类：v0.0.86 起墙面不再按类分区（改成「已解锁 → 未解锁」按难度排），
+ * 分类只用于缺美术素材时的程序化徽章配色，以及详情弹窗里标注这枚章属于哪一类。 */
 enum class BadgeCategory(val label: String) {
     QUESTIONS("录入"),
     MASTERY("掌握"),
@@ -214,6 +226,25 @@ object BadgeEngine {
             }
             BadgeProgress(badge, current, unlocked)
         }
+
+    /**
+     * 成就墙的展示排序：**已解锁的在前，未解锁的在后**；两组内部都按
+     * 难度升序（越难越靠后），同难度按枚举声明序兜底，保证顺序稳定可测。
+     *
+     * 排序规则必须放在 UI 之外：墙上有 48 枚，顺序错了用户只会看到
+     * 「一面乱的墙」，而顺序本身是纯数据变换，抽成纯函数才能被单测钉住。
+     *
+     * @param unlockedKeys 库里已记录的解锁徽章 key（不是引擎算出的应解锁集合）
+     *   ——墙上「有没有这枚章」只认库，引擎算出来但还没落库的那一瞬间不该插队。
+     */
+    fun sortForWall(badges: List<Badge>, unlockedKeys: Set<String>): List<Badge> =
+        badges.sortedWith(
+            compareBy(
+                { badge: Badge -> if (badge.key in unlockedKeys) 0 else 1 },
+                { badge: Badge -> badge.difficulty },
+                { badge: Badge -> badge.ordinal }
+            )
+        )
 
     /**
      * 连续学习天数：从 [today] 往前数，[studyDays] 里连续不断的天数。
