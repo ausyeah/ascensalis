@@ -211,6 +211,38 @@ class LibraryStoreTest {
         return text.toByteArray(Charsets.ISO_8859_1)
     }
 
+    // v0.0.85：DOCTYPE / 实体展开防护与超限放弃分支。
+    @Test
+    fun `docx with doctype entity expansion is rejected safely`() {
+        val root = root()
+        val f = LibraryStore.resolveLibraryPath(root, "投毒.docx")!!
+        // 最小 docx，document.xml 带 DOCTYPE 内部实体与引用
+        val xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+            "<!DOCTYPE w:document [<!ENTITY x \"boom\">]>" +
+            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
+            "<w:body><w:p><w:r><w:t>a&x;b</w:t></w:r></w:p></w:body></w:document>"
+        val out = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { zip ->
+            zip.putNextEntry(java.util.zip.ZipEntry("word/document.xml"))
+            zip.write(xml.toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
+        }
+        f.writeBytes(out.toByteArray())
+        // 不抛（外层 runCatching 兜底），且实体未被展开、解析被直接拒绝
+        val text = DocumentTextExtractor.extract(f)
+        assertFalse(text.contains("boom"))
+        assertEquals("", text)
+    }
+
+    @Test
+    fun `oversized docx abandons extraction`() {
+        val root = root()
+        val f = LibraryStore.resolveLibraryPath(root, "超大.docx")!!
+        // 超过 MAX_INPUT_BYTES 一个字节即触发放弃分支（内容无所谓，先查长度）
+        f.writeBytes(ByteArray(DocumentTextExtractor.MAX_INPUT_BYTES.toInt() + 1))
+        assertEquals("", DocumentTextExtractor.extract(f))
+    }
+
     @Test
     fun `docx paragraphs are extracted`() {
         val root = root()

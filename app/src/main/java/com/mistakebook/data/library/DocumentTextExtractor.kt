@@ -22,8 +22,13 @@ import org.w3c.dom.NodeList
  */
 object DocumentTextExtractor {
 
-    /** 超过该大小的文档直接放弃提取（手机内存友好）。 */
-    private const val MAX_INPUT_BYTES = 64L * 1024 * 1024
+    /**
+     * 超过该大小的文档直接放弃提取。v0.0.85 从 64MB 降到 16MB：
+     * readBytes() 整文件进内存，手机上 64MB 峰值太可观，而提取本就是
+     * 尽力而为——超限返回空串，由调用方给出「无法提取」提示。
+     * internal 供单测对齐同一阈值，避免测试里再写一份魔法数。
+     */
+    internal const val MAX_INPUT_BYTES = 16L * 1024 * 1024
 
     /** 单次提取的输出上限（字符），避免超大文档拖垮调用线程。 */
     private const val MAX_OUTPUT_CHARS = 512 * 1024
@@ -69,7 +74,14 @@ object DocumentTextExtractor {
      * 找不到（个别生成器不带标准命名空间）再退回限定名匹配。
      */
     private fun docxTextFromXml(bytes: ByteArray): String = runCatching {
-        val nsFactory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
+        // 禁 DOCTYPE 与实体展开（XXE / 实体炸弹）：docx 可能是别人发来的文件，
+        // 不能信任。解析被拒会抛异常，由外层 runCatching 兜底返回空串——
+        // 提取本就是尽力而为，行为安全。
+        val nsFactory = DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            setExpandEntityReferences(false)
+        }
         val doc = nsFactory.newDocumentBuilder().parse(ByteArrayInputStream(bytes))
         val wns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         var paragraphs = doc.getElementsByTagNameNS(wns, "p")
@@ -80,7 +92,12 @@ object DocumentTextExtractor {
         // 退回分支（非命名空间解析）才该用限定名 "w:t"。
         var runsOf: (Element) -> NodeList = { p -> p.getElementsByTagNameNS(wns, "t") }
         if (paragraphs.length == 0) {
-            val plainFactory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = false }
+            // 退回分支同样禁 DOCTYPE/实体：攻击面不因解析路径切换而变化。
+            val plainFactory = DocumentBuilderFactory.newInstance().apply {
+                isNamespaceAware = false
+                setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+                setExpandEntityReferences(false)
+            }
             val doc2 = plainFactory.newDocumentBuilder().parse(ByteArrayInputStream(bytes))
             paragraphs = doc2.getElementsByTagName("w:p")
             runsOf = { p -> p.getElementsByTagName("w:t") }
