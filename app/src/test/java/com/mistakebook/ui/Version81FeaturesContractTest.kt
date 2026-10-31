@@ -131,7 +131,7 @@ class Version81FeaturesContractTest {
 
         val ocrEngineSrc = readSource("app/src/main/java/com/mistakebook/net/ocr/OcrEngine.kt")
         assertTrue("OcrEngine 必须设置 callTimeout 严格超时", ocrEngineSrc.contains(".callTimeout("))
-        assertTrue("OcrEngine 必须设置 40 秒协程超时熔断", ocrEngineSrc.contains("withTimeoutOrNull(40_000L)"))
+        assertTrue("OcrEngine 必须设置 180 秒协程超时熔断", ocrEngineSrc.contains("withTimeoutOrNull(180_000L)"))
     }
 
     @Test
