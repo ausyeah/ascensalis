@@ -10,8 +10,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -20,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.mistakebook.markdown.HtmlDocument
+import kotlinx.coroutines.delay
 
 private class HtmlBridge(private val onHeightReported: (Int) -> Unit) {
     @JavascriptInterface
@@ -67,18 +71,43 @@ fun HtmlBlock(
     // 只能退出页面重建才恢复。不 keyed，与 AndroidView 生命周期一致；
     // html 变更时在 update 里显式归零重测。
     var heightDp by remember { mutableIntStateOf(60) }
+    // 当前 WebView 的引用：四拍延时重测改在组合侧调度（v0.0.85）。
+    // 早先用 view.postDelayed，四发 Runnable 没有任何取消路径——用户滑走、
+    // 返回后 WebView 已被释放，Runnable 仍会触发 evaluateJavascript，
+    // 最多多持有 2 秒。LaunchedEffect 随组合销毁自动取消，html 变更时
+    // 自动重启给新内容重新排四拍，两个语义都对。
+    var webView by remember { mutableStateOf<WebView?>(null) }
+
+    // 局部函数声明在使用点之前（Kotlin 无前向引用）。
+    fun measure(view: WebView) {
+        view.evaluateJavascript(
+            "Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0, document.body ? document.body.offsetHeight : 0)"
+        ) { value ->
+            val dp = value?.trim('"')?.toFloatOrNull()?.let { Math.ceil(it.toDouble()).toInt() } ?: 0
+            if (dp > heightDp) heightDp = dp
+        }
+    }
+
+    // 组合销毁时清掉引用，避免已释放的 WebView 被本组件多留两秒。
+    DisposableEffect(Unit) {
+        onDispose { webView = null }
+    }
+    LaunchedEffect(html, webView) {
+        val view = webView ?: return@LaunchedEffect
+        // KaTeX 渲染、字体就位都会让内容变高，onPageFinished 那一刻未必是
+        // 最终高度。四拍重测与注入 JS 里的 ResizeObserver/setTimeout 兜底
+        // 互为备份（任一侧失灵，另一侧仍能把真实高度补报上来）。
+        var last = 0L
+        for (beat in listOf(150L, 400L, 1000L, 2000L)) {
+            delay(beat - last)
+            last = beat
+            measure(view)
+        }
+    }
 
     AndroidView(
         factory = { ctx ->
             var lastLayoutWidth = -1
-            fun measure(view: WebView) {
-                view.evaluateJavascript(
-                    "Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0, document.body ? document.body.offsetHeight : 0)"
-                ) { value ->
-                    val dp = value?.trim('"')?.toFloatOrNull()?.let { Math.ceil(it.toDouble()).toInt() } ?: 0
-                    if (dp > heightDp) heightDp = dp
-                }
-            }
             WebView(ctx).apply {
                 settings.javaScriptEnabled = true
                 settings.blockNetworkLoads = true
@@ -101,15 +130,8 @@ fun HtmlBlock(
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
-                        view ?: return
-                        // 首测之外再补几拍：KaTeX 渲染、字体就位都会让内容变高，
-                        // onPageFinished 那一刻未必是最终高度。与注入 JS 里的
-                        // ResizeObserver/setTimeout 兜底互为备份（任一侧失灵，
-                        // 另一侧仍能把真实高度补报上来）。
-                        view.post { measure(view) }
-                        listOf(150L, 400L, 1000L, 2000L).forEach { delayMs ->
-                            view.postDelayed({ measure(view) }, delayMs)
-                        }
+                        // 首测照旧在页面完成时立即执行；后续四拍在组合侧排。
+                        view?.post { measure(view) }
                     }
 
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -134,16 +156,17 @@ fun HtmlBlock(
                 }
                 tag = html
                 loadDataWithBaseURL("file:///android_asset/katex/", html, "text/html", "utf-8", null)
+                webView = this
             }
         },
-        update = { webView ->
-            if (webView.tag != html) {
-                webView.tag = html
+        update = { view ->
+            if (view.tag != html) {
+                view.tag = html
                 // 内容变了高度必须归零重测：只增不减的桥接是给同一份内容
                 // 的多次上报用的，跨内容沿用旧高度会把新内容撑出一截空白。
                 heightDp = 60
-                webView.setBackgroundColor(backgroundColor)
-                webView.loadDataWithBaseURL("file:///android_asset/katex/", html, "text/html", "utf-8", null)
+                view.setBackgroundColor(backgroundColor)
+                view.loadDataWithBaseURL("file:///android_asset/katex/", html, "text/html", "utf-8", null)
             }
         },
         modifier = modifier
