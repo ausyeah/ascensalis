@@ -1860,6 +1860,9 @@ internal fun StatsTab(
             val generating = posterWork?.value is com.mistakebook.poster.PosterWorkState.Running
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // stringResource 只能在组合期取：先拿好文案再进协程。
+                val posterStatsHeader = stringResource(R.string.poster_stats_header)
+                val posterFooterBrand = stringResource(R.string.poster_footer_brand)
                 OutlinedButton(
                     onClick = {
                         if (generating) return@OutlinedButton
@@ -1868,8 +1871,8 @@ internal fun StatsTab(
                                 com.mistakebook.poster.PosterRenderer.render(
                                     buildPomodoroPosterContent(
                                         state,
-                                        statsHeader = stringResource(R.string.poster_stats_header),
-                                        footerText = stringResource(R.string.poster_footer_brand)
+                                        statsHeader = posterStatsHeader,
+                                        footerText = posterFooterBrand
                                     )
                                 )
                             }

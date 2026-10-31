@@ -613,8 +613,8 @@ class PomodoroViewModel(
         val state = _ui.value
         val content = buildPomodoroPosterContent(
             state,
-            statsHeader = app.getString(R.string.poster_stats_header),
-            footerText = app.getString(R.string.poster_footer_brand)
+            statsHeader = getApplication<android.app.Application>().getString(R.string.poster_stats_header),
+            footerText = getApplication<android.app.Application>().getString(R.string.poster_footer_brand)
         )
         com.mistakebook.poster.PosterScheduler.enqueue(
             context = getApplication<android.app.Application>(),
