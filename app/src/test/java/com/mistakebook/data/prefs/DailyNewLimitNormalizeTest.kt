@@ -36,8 +36,10 @@ class DailyNewLimitNormalizeTest {
     }
 
     @Test
-    fun `越界值收敛到区间端点`() {
-        assertEquals(MIN_DAILY_NEW_LIMIT, normalizeDailyNewLimit(-5))
+    fun `越界值收敛：低于下限回落默认档而不是钳成 1，高于上限收到上限`() {
+        // 低于下限（含旧版 0 与脏负数）绝不能钳成 1：那等于把用户掐到
+        // 「一天一个新词」，比显示错更严重。
+        assertEquals(DEFAULT_DAILY_NEW_LIMIT, normalizeDailyNewLimit(-5))
         assertEquals(MAX_DAILY_NEW_LIMIT, normalizeDailyNewLimit(5000))
     }
 

@@ -313,6 +313,14 @@ internal const val DEFAULT_DAILY_NEW_LIMIT = 20
  * **没有任何一项能表达不限**。于是一个从旧版升上来的用户在设置页会看到
  * 「自定义（0）」：四个 chip 一个都不选中，实际行为是不限、界面却显示 0，
  * 怎么看都对不上。收敛之后永远有一个档位被选中，显示与行为一致。
+ *
+ * 低于下限的值（旧版 0、以及任何脏负数）回落**默认档**而不是钳到 1：
+ * 钳成「一天 1 个新词」等于把老用户的学习节奏直接掐死，那比显示错
+ * 更严重。高于上限则收到上限，保留「能背多少背多少」的意图。
  */
-internal fun normalizeDailyNewLimit(stored: Int?): Int =
-    stored?.coerceIn(MIN_DAILY_NEW_LIMIT, MAX_DAILY_NEW_LIMIT) ?: DEFAULT_DAILY_NEW_LIMIT
+internal fun normalizeDailyNewLimit(stored: Int?): Int = when {
+    stored == null -> DEFAULT_DAILY_NEW_LIMIT
+    stored < MIN_DAILY_NEW_LIMIT -> DEFAULT_DAILY_NEW_LIMIT
+    stored > MAX_DAILY_NEW_LIMIT -> MAX_DAILY_NEW_LIMIT
+    else -> stored
+}
