@@ -126,7 +126,12 @@ class MathRenderer(context: Context) {
             latex,
             mathOnly = false
         )
+        // 黑名单降级（v0.0.83，用户约束 11–13 的渲染端兜底）：cases/array/
+        // vmatrix/matrix 环境与 \left\right 全系在光栅化路径上不可靠——
+        // 转成实测稳定的形式（aligned/matrix→pmatrix/普通定界符），
+        // 宁可视觉近似也不渲染失败。挂在 sanitizer 之后、进 KaTeX 之前。
         val trimmed = com.mistakebook.pipeline.LatexSanitizer.clean(repaired)
+            .let { LatexCompat.downgrade(it) }
         if (trimmed.isEmpty()) return null
         val rawKey = (if (displayMode) "d" else "i") + ":" + trimmed
         val color = fgCss

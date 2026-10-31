@@ -53,9 +53,8 @@ object ChatPrompts {
            a. 行内公式用 ${'$'}...${'$'} 包裹，且美元符号与公式内容在同一行；
               独立公式块用 ${'$'}${'$'}...${'$'}${'$'} 包裹，块内可以换行。
               也接受 LaTeX 标准定界符 ${'$'}\(...\${'$'} 与 ${'$'}\[...\]${'$'}。
-           b. 对齐符 & 与换行符 \\ **只允许出现在 \begin{aligned}、\begin{cases}、
-              \begin{gathered} 或矩阵环境（pmatrix/bmatrix/vmatrix）内部**；
-              写在任何环境外面都会直接渲染失败。
+           b. 对齐符 & 与换行符 \\ **只允许出现在 \begin{aligned} 或矩阵环境
+              （pmatrix/bmatrix）内部**；写在任何环境外面都会直接渲染失败。
               多步推导请写成 $$\begin{aligned} x &= 1 \\ y &= 2 \end{aligned}$$ 的形式。
               **不要用 align / align* / split / alignat**：这些环境行内模式下无法渲染，
               一律用 aligned 代替。
@@ -64,23 +63,31 @@ object ChatPrompts {
               希腊字母（\alpha \beta \gamma \pi \sigma \omega 及大写）、
               \vec \hat \bar \tilde \overline \overrightarrow \angle \triangle \circ \degree
               \because \therefore \pmod、\text{…} \boxed{…} \mathbb{R}。
-           c2. 这些也**全部可以放心用**（渲染器实测支持，不要回避）：
-              \Big| \Big| 之类的定界符、\, \; \! 空格命令、
+           c2. 这些也**可以放心用**（渲染器实测支持）：\, \; \! 空格命令、
               \dfrac \tfrac、\text{…} 里的中文、\overset \underset \xrightarrow \boldsymbol、
               \lVert \rVert \lvert \rvert、\coloneqq、\iff \implies、
-              \begin{cases}、\begin{aligned}、\begin{pmatrix}/bmatrix/vmatrix 矩阵、
+              \begin{aligned}、\begin{pmatrix} / bmatrix 矩阵、
               f'(x)、90^\circ、\mid、\mathbb{R}。
               **不要为了「怕渲染失败」而主动简化公式**——写成基础语法不会更安全，
-              反而会因为 \left{ \Big 之类的细节漏写反斜杠而整条失败。
-           d. **禁止**以下渲染器不支持的写法：\ce（化学方程式）、\label、\tag、
-              以及 \begin{multline}、\begin{eqnarray}、\begin{flalign}、\begin{tabular}
-              环境（多行用 aligned，分类讨论用 cases，矩阵用 pmatrix/bmatrix 代替）。
+              反而会因为漏写反斜杠而整条失败。
+           d. **禁止**以下渲染器不支持的写法（v0.0.83 黑名单，违反即渲染失败）：
+              \ce（化学方程式）、\label、\tag；
+              **cases / dcases / rcases / array / vmatrix / Vmatrix / 裸 matrix 环境**
+              ——一律用 aligned 或 pmatrix/bmatrix 代替；
+              **\left 与 \right 全系定界符**（\left( \right) \left[ \right] \left\{ \right\}
+              \left| \right| \left. \right. 以及 \Big \bigg \Bigg 全系大小命令）
+              ——**一律用普通 () [] 与 \{ \} 代替**，需要大小的场合交给 KaTeX 自适应；
+              \begin{multline}、\begin{eqnarray}、\begin{flalign}、\begin{tabular}。
+           d2. **分段函数 / 左大括号效果**：禁止用 cases 或任何环境实现——
+              拆成多个**独立公式块**（每个条件一个 $$...$$ 块），
+              条件用中文说明写在公式块之间的正文里。
+              例：分段函数 f(x) 写成三段——
+              「当 x ≥ 0 时，$$f(x) = x^{2}$$；当 x < 0 时，$$f(x) = -x$$。」
            e. 公式内禁止出现裸中文和 Unicode 数学符号（≤ ≥ ≠ × ÷ √ ∞ π 等），
               一律写对应命令；需要中文标注就写进 \text{…} 里。
            f. 上下标必须有内容，多字符上下标用花括号：x^{2}、a_{n}，不要写 F_ 或 a_{}；
-              花括号必须成对；\left 与 \right 必须成对，拿不准就直接用普通 () []。
-              **花括号定界符必须写成 \left\{ … \right\}**（要有反斜杠），
-              写成 \left{ … \right} 会让整条公式渲染失败。
+              花括号必须成对。**花括号定界符用 \{ … \}**（带反斜杠的普通花括号），
+              **不要用 \left\{ … \right\}**（\left/\right 全系已列入黑名单）。
            g. **公式块里不要混正文**。一个数学块只能是数学；
               「由 ${'$'}V_y = 10 V_x${'$'} 求 ${'$'}a${'$'}」这类「正文夹公式」请写成普通段落，
               行内公式各自用 ${'$'}...${'$'} 单独包裹，不要塞进同一个 $${'$'}${'$'}…${'$'}${'$'} 里。

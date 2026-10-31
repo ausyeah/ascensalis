@@ -172,6 +172,15 @@ object PromptTemplates {
         16. 禁止纯文本近似：a/b、sqrt(x)、x^2 写成 x2、log_2 用纯文本下划线。
         17. 禁止在公式里出现中文说明文字。要标注就用 \text{中文}，且 \text{} 内不要有 $。
 
+        【五点五、环境黑名单（v0.0.83 追加，违反即渲染失败）】
+        17a. 禁止使用 cases / dcases / rcases / array / vmatrix / Vmatrix / 裸 matrix 环境。
+            分段函数：不用 cases，拆成多个独立公式块，每个条件一个 $$...$$ 块，
+            条件用中文写在相邻正文里（如「当 x ≥ 0 时」）。
+            矩阵：一律用 pmatrix 或 bmatrix。
+        17b. 禁止使用 \left 与 \right 全系定界符（\left( \right) \left[ \right] \left\{ \right\} \left| \right| \left. \right.），以及 \Bigg \bigg \Big \big 大小命令。
+            定界符一律写普通形式：( ) [ ] \{ \} |，让渲染器自适应大小。
+        17c. 上下标与环境参数之外，\{ 和 \} 是唯一合法的花括号定界符写法。
+
         【六、输出前自检】
         18. 每写完一条公式，检查：$ 是否成对？{} 是否成对？\left 是否有 \right？
             下标后面有没有内容？有没有混进 Unicode 符号？任一项不满足就改掉再输出。

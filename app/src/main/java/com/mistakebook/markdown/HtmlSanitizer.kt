@@ -176,9 +176,69 @@ object HtmlDocument {
             code{font-family:ui-monospace,Menlo,monospace;}
             a{color:#2f7bd8;text-decoration:underline;}
             </style>
+            <!-- KaTeX 公式渲染（v0.0.83）：HTML 围栏里的 $...$ / $$...$$ 也要渲染。
+                 相对路径依赖 WebView 的 baseURL 指向 assets/katex/（见 HtmlBlock）。 -->
+            <link rel="stylesheet" href="katex.min.css">
+            <script src="katex.min.js"></script>
             </head>
             <body>
             $fragment
+            <script>
+            // LaTeX 公式渲染（v0.0.83）：扫描文本节点里的 $...$ / $$...$$，
+            // 用 KaTeX 原地替换。跳过 script/style/textarea/code/pre，
+            // 避免破坏代码块与用户脚本。
+            (function() {
+                if (typeof katex === 'undefined') return;
+                var SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, CODE: 1, PRE: 1, NOSCRIPT: 1 };
+                function renderIn(root) {
+                    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+                    var nodes = [];
+                    while (walker.nextNode()) {
+                        var p = walker.currentNode.parentNode;
+                        if (!p || SKIP[p.nodeName]) continue;
+                        if (walker.currentNode.nodeValue.indexOf('$') >= 0) nodes.push(walker.currentNode);
+                    }
+                    nodes.forEach(function(node) {
+                        var text = node.nodeValue;
+                        var re = /\$\$([\s\S]+?)\$\$|\$([^\$\n]+?)\$/g;
+                        var parts = [], last = 0, m, found = false;
+                        while ((m = re.exec(text)) !== null) {
+                            if (m.index > last) parts.push({ text: text.slice(last, m.index) });
+                            var display = m[1] !== undefined;
+                            parts.push({ latex: display ? m[1] : m[2], display: display });
+                            last = m.index + m[0].length;
+                            found = true;
+                        }
+                        if (!found) return;
+                        if (last < text.length) parts.push({ text: text.slice(last) });
+                        var frag = document.createDocumentFragment();
+                        parts.forEach(function(part) {
+                            if (part.text !== undefined) {
+                                frag.appendChild(document.createTextNode(part.text));
+                                return;
+                            }
+                            var span = document.createElement('span');
+                            try {
+                                katex.render(part.latex, span, {
+                                    displayMode: part.display, throwOnError: false, strict: false
+                                });
+                            } catch (e) {
+                                span.textContent = (part.display ? '$$' : '$') + part.latex + (part.display ? '$$' : '$');
+                            }
+                            frag.appendChild(span);
+                        });
+                        node.parentNode.replaceChild(frag, node);
+                    });
+                }
+                function run() { renderIn(document.body); }
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', run);
+                } else {
+                    run();
+                }
+                window.addEventListener('load', run);
+            })();
+            </script>
             <script>
             (function() {
                 function report() {

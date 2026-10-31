@@ -119,14 +119,14 @@ fun HtmlBlock(
                     }
                 }
                 tag = html
-                loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+                loadDataWithBaseURL("file:///android_asset/katex/", html, "text/html", "utf-8", null)
             }
         },
         update = { webView ->
             if (webView.tag != html) {
                 webView.tag = html
                 webView.setBackgroundColor(backgroundColor)
-                webView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+                webView.loadDataWithBaseURL("file:///android_asset/katex/", html, "text/html", "utf-8", null)
             }
         },
         modifier = modifier

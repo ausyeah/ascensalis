@@ -123,7 +123,7 @@ class MineruOcrEngine(
  * 图片以 image_url(data URL) 送入，让视觉模型把内容转写为 Markdown。
  *
  * 自动适配各家端点（讯飞星辰 MaaS、DeepSeek 官方、Qwen-VL、中转站）。
- * 严格带超时控制（35 秒网络超时 + 40 秒协程熔断），防转圈卡死。
+ * 严格带超时控制（35 秒网络超时 + 180 秒协程熔断），防转圈卡死。
  */
 class DeepSeekOcrEngine(
     private val llmApi: LlmApi,
@@ -195,7 +195,11 @@ class DeepSeekOcrEngine(
             max_tokens = 8_192
         )
 
-        val outcome = withTimeoutOrNull(40_000L) {
+        // OCR 推理是长任务：视觉模型转写整页手写内容通常 20–90 秒，
+        // 40 秒熔断会让「测试连接成功」的端点在实际识别时必然超时失败
+        // （用户反馈「测试成功异常」的根因之一）。放宽到 3 分钟，
+        // 与 MinerU 长轮询路径（TOTAL_TIMEOUT_MS=360s）同量级。
+        val outcome = withTimeoutOrNull(180_000L) {
             try {
                 val response = llmApi.chatCompletions(url, "Bearer $key", request)
                 if (!response.isSuccessful) {
@@ -217,7 +221,7 @@ class DeepSeekOcrEngine(
         }
 
         return outcome ?: ApiResult.Failure(
-            ApiError(ApiErrorKind.TIMEOUT, serverMessage = "OCR 请求超时（40 秒），请检查网络或端点地址")
+            ApiError(ApiErrorKind.TIMEOUT, serverMessage = "OCR 请求超时（180 秒），请检查网络或端点地址")
         )
     }
 
