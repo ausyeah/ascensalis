@@ -267,8 +267,10 @@ fun RichText(
                 )
 
                 // ```html 围栏（v0.0.57）：WebView 渲染，不再当源码文本。
+                // streaming 透传给高度口径（流式只增不减，见 HtmlBlock）。
                 is MarkdownParser.Block.Html -> HtmlBlock(
                     source = block.source,
+                    streaming = streaming,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
 

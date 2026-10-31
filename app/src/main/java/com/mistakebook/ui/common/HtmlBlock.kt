@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ private class HtmlBridge(private val onHeightReported: (Int) -> Unit) {
 @Composable
 fun HtmlBlock(
     source: String,
+    streaming: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     if (source.isBlank()) return
@@ -77,6 +79,23 @@ fun HtmlBlock(
     // 最多多持有 2 秒。LaunchedEffect 随组合销毁自动取消，html 变更时
     // 自动重启给新内容重新排四拍，两个语义都对。
     var webView by remember { mutableStateOf<WebView?>(null) }
+    // streaming 经 State 中转进闭包：factory 只跑一次，直接捕获参数拿到的
+    // 是首帧值（v0.0.84 的 heightDp 同款教训）。SideEffect 每次重组后同步。
+    var streamingNow by remember { mutableStateOf(false) }
+    SideEffect { streamingNow = streaming }
+
+    // 高度回写的统一口径。流式中只增不减：KaTeX 分段渲染会让高度短暂回缩
+    //（未闭合公式先隐藏→整段渲染滑入），允许收缩的话气泡高度来回抖、
+    // reverseLayout 列表跟着跳。生成结束后允许收缩：宽度变化重排（旋转/
+    // 分栏）时旧高度可能偏大，收不回来就留一大截空白（v0.0.85）。
+    fun applyHeight(dp: Int) {
+        if (dp <= 0) return
+        if (streamingNow) {
+            if (dp > heightDp) heightDp = dp
+        } else {
+            heightDp = dp
+        }
+    }
 
     // 局部函数声明在使用点之前（Kotlin 无前向引用）。
     fun measure(view: WebView) {
@@ -84,7 +103,7 @@ fun HtmlBlock(
             "Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0, document.body ? document.body.offsetHeight : 0)"
         ) { value ->
             val dp = value?.trim('"')?.toFloatOrNull()?.let { Math.ceil(it.toDouble()).toInt() } ?: 0
-            if (dp > heightDp) heightDp = dp
+            applyHeight(dp)
         }
     }
 
@@ -121,11 +140,7 @@ fun HtmlBlock(
                 overScrollMode = WebView.OVER_SCROLL_NEVER
 
                 addJavascriptInterface(HtmlBridge { dp ->
-                    post {
-                        if (dp > heightDp) {
-                            heightDp = dp
-                        }
-                    }
+                    post { applyHeight(dp) }
                 }, "HtmlBridge")
 
                 webViewClient = object : WebViewClient() {
