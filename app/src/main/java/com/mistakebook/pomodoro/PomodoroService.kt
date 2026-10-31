@@ -172,8 +172,8 @@ class PomodoroService : Service() {
             // 不停在「休息结束」的常驻态等用户来点结束——那会把到点无提醒、
             // 通知空转的老问题原样复制到休息上。也不自动开始下一个番茄。
             postDoneNotification(
-                title = "☕ 休息结束，回来继续吧",
-                text = "休息了 ${FocusMode.BREAK.defaultMinutes} 分钟，想继续就回 App 开一轮新的专注"
+                title = getString(R.string.pomodoro_notify_break_over_title),
+                text = getString(R.string.pomodoro_notify_break_over_text, FocusMode.BREAK.defaultMinutes)
             )
             PomodoroRecorder.stopAndRecord(timer, container.pomodoroDao)
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -182,7 +182,10 @@ class PomodoroService : Service() {
         }
 
         // 番茄到点：响铃 + 震动提醒
-        postDoneNotification(title = "🍅 番茄完成！", text = "本次专注已达到目标时长")
+        postDoneNotification(
+                title = getString(R.string.pomodoro_notify_pomodoro_done_title),
+                text = getString(R.string.pomodoro_notify_pomodoro_done_text)
+            )
 
         val settings = container.settingsStore.snapshotNow()
         if (settings.pomodoroAutoRecord) {
@@ -280,17 +283,17 @@ class PomodoroService : Service() {
 
         when {
             // 到点未确认（自动记录关闭时）：单键等用户来收
-            finished -> builder.setContentText("已完成 · 点结束记录")
+            finished -> builder.setContentText(getString(R.string.pomodoro_notify_state_finished))
 
             // 休息倒计时（T2 休息循环）
-            isBreak && running -> builder.setContentText("☕ 休息中 剩余 ${formatClock(remaining)}")
-            isBreak -> builder.setContentText("☕ 休息已暂停 · 剩余 ${formatClock(remaining)}")
+            isBreak && running -> builder.setContentText(getString(R.string.pomodoro_notify_state_break_running, formatClock(remaining)))
+            isBreak -> builder.setContentText(getString(R.string.pomodoro_notify_state_break_paused, formatClock(remaining)))
 
             // 运行中：每秒重刷的静态文字。见类文档——系统 chronometer 的
             // countdown 在部分系统上失效会一直显示 0，不能再用。
             // 暂停时时间冻结，tick 循环停掉，不会"暂停了还在走秒"。
-            running && state.targetMs > 0L -> builder.setContentText("剩余 ${formatClock(remaining)}")
-            running -> builder.setContentText("已专注 ${formatClock(elapsed)}")
+            running && state.targetMs > 0L -> builder.setContentText(getString(R.string.pomodoro_notify_state_remaining, formatClock(remaining)))
+            running -> builder.setContentText(getString(R.string.pomodoro_notify_state_elapsed, formatClock(elapsed)))
             else -> builder.setContentText(
                 if (state.targetMs > 0L) "已暂停 · 剩余 ${formatClock(remaining)}"
                 else "已暂停 · 已专注 ${formatClock(elapsed)}"
@@ -336,8 +339,8 @@ class PomodoroService : Service() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "番茄钟", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "专注计时进行中的常驻提示"
+            NotificationChannel(CHANNEL_ID, getString(R.string.pomodoro_channel_timer), NotificationManager.IMPORTANCE_LOW).apply {
+                description = getString(R.string.pomodoro_channel_timer_desc)
                 setShowBadge(false)
             }
         )
@@ -352,8 +355,8 @@ class PomodoroService : Service() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (manager.getNotificationChannel(DONE_CHANNEL_ID) != null) return
         manager.createNotificationChannel(
-            NotificationChannel(DONE_CHANNEL_ID, "番茄钟提醒", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "番茄或休息到点时的提醒"
+            NotificationChannel(DONE_CHANNEL_ID, getString(R.string.pomodoro_channel_done), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = getString(R.string.pomodoro_channel_done_desc)
                 setShowBadge(true)
                 enableVibration(true)
                 vibrationPattern = VIBRATION_PATTERN

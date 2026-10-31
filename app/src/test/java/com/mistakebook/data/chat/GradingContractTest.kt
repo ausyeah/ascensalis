@@ -75,8 +75,8 @@ class GradingContractTest {
             src.contains("手写过程未能 OCR 为文字")
         )
         assertTrue(
-            "输入为空时默认问法必须存在",
-            src.contains("请批改我的解题过程，指出从哪一步开始错")
+            "输入为空时默认问法必须存在（文案已外移到 strings.xml）",
+            src.contains("R.string.chat_grading_default_message")
         )
         assertTrue(
             "runOnce 必须把批改指令带进 buildContext",

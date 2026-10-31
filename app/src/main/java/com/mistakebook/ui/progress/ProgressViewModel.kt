@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.mistakebook.R
 
 data class ProgressUiState(
     val task: CaptureTask? = null,
@@ -61,7 +62,7 @@ class ProgressViewModel(
                     status = TaskStatus.PENDING,
                     errorMessage = null,
                     errorKind = null,
-                    stageText = "排队中…",
+                    stageText = container.appContext.getString(R.string.task_stage_queued),
                     updatedAt = System.currentTimeMillis()
                 )
             )

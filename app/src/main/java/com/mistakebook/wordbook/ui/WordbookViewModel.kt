@@ -28,6 +28,7 @@ import kotlinx.coroutines.withContext
 import java.util.Calendar
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
+import com.mistakebook.R
 
 // debounce 是 FlowPreview 的预览 API，稳定版已在多渠道验证（见下方错词本监听注释）。
 @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -1649,7 +1650,11 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
      * 广播，界面订阅它即可。
      */    fun generateCheckInPoster(mode: com.mistakebook.poster.PosterImageMode) {
         val state = _uiState.value
-        val content = buildPosterContent(state)
+        val content = buildPosterContent(
+            state,
+            statsHeader = container.appContext.getString(R.string.poster_stats_header),
+            footerText = container.appContext.getString(R.string.poster_footer_brand)
+        )
         com.mistakebook.poster.PosterScheduler.enqueue(
             context = container.appContext,
             source = com.mistakebook.di.SOURCE_WORDBOOK,

@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
+import com.mistakebook.R
 
 data class PomodoroUiState(
     val tasks: List<PomodoroTask> = emptyList(),
@@ -610,7 +611,11 @@ class PomodoroViewModel(
      */
     fun generateFocusPoster(mode: com.mistakebook.poster.PosterImageMode) {
         val state = _ui.value
-        val content = buildPomodoroPosterContent(state)
+        val content = buildPomodoroPosterContent(
+            state,
+            statsHeader = app.getString(R.string.poster_stats_header),
+            footerText = app.getString(R.string.poster_footer_brand)
+        )
         com.mistakebook.poster.PosterScheduler.enqueue(
             context = getApplication<android.app.Application>(),
             source = com.mistakebook.di.SOURCE_POMODORO,

@@ -62,7 +62,10 @@ class Version81FeaturesContractTest {
 
         val chatSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
         assertTrue("复制助手消息时必须剥离 think 标签", chatSrc.contains("ChatThinking.answerOf(message.content)"))
-        assertTrue("ThinkingBlock 必须提供独立的复制思考按钮", chatSrc.contains("Icons.Default.ContentCopy") && chatSrc.contains("contentDescription = \"复制思考\""))
+        assertTrue(
+            "ThinkingBlock 必须提供独立的复制思考按钮（文案已外移到 strings.xml）",
+            chatSrc.contains("Icons.Default.ContentCopy") && chatSrc.contains("R.string.chat_cd_copy_thinking")
+        )
     }
 
     @Test

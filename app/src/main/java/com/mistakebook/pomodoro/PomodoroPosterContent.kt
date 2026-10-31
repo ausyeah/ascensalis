@@ -21,7 +21,10 @@ import java.util.Locale
  */
 fun buildPomodoroPosterContent(
     state: PomodoroUiState,
-    now: Long = System.currentTimeMillis()
+    now: Long = System.currentTimeMillis(),
+    // 画布渲染没有 Composable 作用域：小标题与品牌行由调用方从资源解析后传入。
+    statsHeader: String,
+    footerText: String
 ): PosterContent {
     val todaySec = state.todaySec
     val hours = todaySec / 3600
@@ -39,6 +42,7 @@ fun buildPomodoroPosterContent(
             PosterStat("完成番茄", "${state.todayPomodoros}", "个"),
             PosterStat("专注次数", "${state.sessionCount}", "次")
         ),
-        footerText = "登临 · 错题本"
+        statsHeader = statsHeader,
+        footerText = footerText
     )
 }

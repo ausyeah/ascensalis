@@ -119,6 +119,8 @@ import com.mistakebook.ui.theme.PaperPrimaryTint
 import com.mistakebook.wordbook.data.Word
 import com.mistakebook.wordbook.data.WordProgress
 import com.mistakebook.wordbook.algo.WordbookRules
+import androidx.compose.ui.res.stringResource
+import com.mistakebook.R
 
 /**
  * 单词书主界面（纯本地化纸质书卷质感设计）。
@@ -269,14 +271,14 @@ private fun WordbookHeaderSummary(
             verticalAlignment = Alignment.CenterVertically
         ) {
             SummaryStatBadge(
-                label = "今日已学",
+                label = stringResource(R.string.wordbook_stat_learned),
                 value = "$studiedToday",
                 accentColor = okColor,
                 bgColor = okColor.copy(alpha = if (isDark) 0.16f else 0.10f),
                 modifier = Modifier.weight(1f)
             )
             SummaryStatBadge(
-                label = "待复习错词",
+                label = stringResource(R.string.wordbook_stat_due_wrong),
                 value = "$wrongCount",
                 accentColor = if (wrongCount > 0) errorColor else MaterialTheme.colorScheme.onSurfaceVariant,
                 bgColor = if (wrongCount > 0) errorColor.copy(alpha = if (isDark) 0.16f else 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
@@ -285,7 +287,7 @@ private fun WordbookHeaderSummary(
             // 今日到期（v0.0.64 SRS 接入）：间隔复习到点的词数。
             // 与「待复习错词」口径不同——那是错词本库存，这是排期到期。
             SummaryStatBadge(
-                label = "今日到期",
+                label = stringResource(R.string.wordbook_stat_due_today),
                 value = "$dueToday",
                 accentColor = if (dueToday > 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                 bgColor = if (dueToday > 0) {
@@ -296,7 +298,7 @@ private fun WordbookHeaderSummary(
                 modifier = Modifier.weight(1f)
             )
             SummaryStatBadge(
-                label = "已掌握",
+                label = stringResource(R.string.wordbook_stat_mastered),
                 value = "$masteredCount",
                 accentColor = primaryColor,
                 bgColor = primaryColor.copy(alpha = if (isDark) 0.16f else 0.10f),
@@ -424,7 +426,7 @@ private fun WordSceneImage(
                 strokeWidth = 2.dp
             )
             Spacer(Modifier.width(8.dp))
-            Text("生成中…")
+            Text(stringResource(R.string.wordbook_scene_generating))
         }
         return
     }
@@ -437,7 +439,7 @@ private fun WordSceneImage(
             Column {
                 AsyncImage(
                     model = path,
-                    contentDescription = "场景图",
+                    contentDescription = stringResource(R.string.wordbook_cd_scene),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -471,7 +473,7 @@ private fun WordSceneImage(
             modifier = Modifier.size(18.dp)
         )
         Spacer(Modifier.width(8.dp))
-        Text("场景图")
+        Text(stringResource(R.string.wordbook_scene_chip))
     }
 }
 
@@ -490,19 +492,19 @@ internal fun StudyView(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "🎉 太棒了，当前词库学习已告一段落！",
+                    text = stringResource(R.string.wordbook_all_done_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "错词本与待复习列表已清空，可去词库检索更多生词",
+                    text = stringResource(R.string.wordbook_all_done_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = viewModel::prepareNextQuestion) {
-                    Text("抽取练习题")
+                    Text(stringResource(R.string.wordbook_extract_practice))
                 }
             }
         }
@@ -553,7 +555,7 @@ internal fun StudyView(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Undo,
-                        contentDescription = "上一题",
+                        contentDescription = stringResource(R.string.wordbook_cd_prev_question),
                         tint = if (hasPrev) MaterialTheme.colorScheme.onSurfaceVariant
                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
                         modifier = Modifier.size(18.dp)
@@ -646,7 +648,7 @@ internal fun StudyView(
                                     )
                                     Spacer(Modifier.width(4.dp))
                                     Text(
-                                        text = "义项辨析 · 熟词僻义自测",
+                                        text = stringResource(R.string.wordbook_sense_quiz_title),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (isDark) Color(0xFF91A7FF) else PaperPrimary,
                                         fontWeight = FontWeight.Bold
@@ -665,7 +667,7 @@ internal fun StudyView(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "请在下方选出与上述义项匹配的英文单词：",
+                                text = stringResource(R.string.wordbook_sense_quiz_prompt),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -725,7 +727,7 @@ internal fun StudyView(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                                contentDescription = "朗读单词",
+                                                contentDescription = stringResource(R.string.wordbook_cd_speak),
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(18.dp)
                                             )
@@ -773,7 +775,7 @@ internal fun StudyView(
                                     )
                                     Spacer(Modifier.width(4.dp))
                                     Text(
-                                        text = "拼写模式 · 看释义写单词",
+                                        text = stringResource(R.string.wordbook_spell_mode_title),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (isDark) Color(0xFF91A7FF) else PaperPrimary,
                                         fontWeight = FontWeight.Bold
@@ -792,7 +794,7 @@ internal fun StudyView(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "根据上面的释义，拼写出对应的英文单词：",
+                                text = stringResource(R.string.wordbook_spell_prompt),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -826,7 +828,7 @@ internal fun StudyView(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                                contentDescription = "朗读单词",
+                                                contentDescription = stringResource(R.string.wordbook_cd_speak),
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(18.dp)
                                             )
@@ -931,7 +933,7 @@ internal fun StudyView(
                             ) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                    contentDescription = "朗读单词",
+                                    contentDescription = stringResource(R.string.wordbook_cd_speak),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(17.dp)
                                 )
@@ -1015,7 +1017,7 @@ internal fun StudyView(
                                 Spacer(Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        text = "答错了（已加入错题本待复习）",
+                                        text = stringResource(R.string.wordbook_quiz_wrong_added),
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isDark) Color(0xFFFFA8A8) else Color(0xFFC92A2A)
@@ -1039,7 +1041,7 @@ internal fun StudyView(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("下一题", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+                            Text(stringResource(R.string.wordbook_next_question), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                             Spacer(Modifier.width(6.dp))
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
                         }
@@ -1101,7 +1103,7 @@ internal fun StudyView(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("点击揭晓完整释义", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+                            Text(stringResource(R.string.wordbook_reveal_meaning), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                         }
                     } else {
                         // 四档掌握度打分按钮
@@ -1201,7 +1203,7 @@ private fun SpellAnswerArea(
             value = state.spellInput,
             onValueChange = viewModel::setSpellInput,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("在这里拼写单词…") },
+            placeholder = { Text(stringResource(R.string.wordbook_spell_hint)) },
             singleLine = true,
             enabled = !state.spellSubmitted,
             isError = state.spellSubmitted && !state.spellCorrect,
@@ -1218,7 +1220,7 @@ private fun SpellAnswerArea(
                         onClick = viewModel::submitSpell,
                         enabled = state.spellInput.isNotBlank()
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "提交答案")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.wordbook_cd_submit))
                     }
                 }
             },
@@ -1265,7 +1267,7 @@ private fun SpellAnswerArea(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "拼写正确！",
+                        text = stringResource(R.string.wordbook_spell_correct),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = okColor
@@ -1299,14 +1301,14 @@ private fun SpellAnswerArea(
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "拼写不对（已加入错词本待复习）",
+                                text = stringResource(R.string.wordbook_spell_wrong_added),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isDark) Color(0xFFFFA8A8) else Color(0xFFC92A2A)
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = "正确拼写：${state.currentWord?.word ?: ""}",
+                                text = stringResource(R.string.wordbook_spell_answer, state.currentWord?.word ?: ""),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (isDark) Color(0xFFFFE8E8) else Color(0xFF821818)
                             )
@@ -1323,7 +1325,7 @@ private fun SpellAnswerArea(
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("下一题", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+                    Text(stringResource(R.string.wordbook_next_question), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                     Spacer(Modifier.width(6.dp))
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
                 }
@@ -1356,7 +1358,7 @@ private fun DailyGoalBar(studiedToday: Int, goal: Int) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "今日目标",
+                    text = stringResource(R.string.wordbook_daily_goal_title),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1637,25 +1639,25 @@ private fun WrongBookView(
                 selected = state.wrongSubTab == WrongSubTab.WRONG_BOOK,
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.WRONG_BOOK) },
                 modifier = Modifier.weight(1f),
-                label = { Text("错词本", maxLines = 1) }
+                label = { Text(stringResource(R.string.wordbook_quiz_tab_wrong), maxLines = 1) }
             )
             FilterChip(
                 selected = state.wrongSubTab == WrongSubTab.EVER_WRONG,
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.EVER_WRONG) },
                 modifier = Modifier.weight(1f),
-                label = { Text("曾错本", maxLines = 1) }
+                label = { Text(stringResource(R.string.wordbook_quiz_tab_ever), maxLines = 1) }
             )
             FilterChip(
                 selected = state.wrongSubTab == WrongSubTab.MASTERED,
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.MASTERED) },
                 modifier = Modifier.weight(1f),
-                label = { Text("熟词本", maxLines = 1) }
+                label = { Text(stringResource(R.string.wordbook_quiz_tab_familiar), maxLines = 1) }
             )
             FilterChip(
                 selected = state.wrongSubTab == WrongSubTab.FAVORITE,
                 onClick = { viewModel.setWrongSubTab(WrongSubTab.FAVORITE) },
                 modifier = Modifier.weight(1f),
-                label = { Text("生词本", maxLines = 1) }
+                label = { Text(stringResource(R.string.wordbook_quiz_tab_new), maxLines = 1) }
             )
         }
 
@@ -1714,7 +1716,7 @@ private fun LibraryView(
             value = state.libraryKeyword,
             onValueChange = viewModel::setLibraryKeyword,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("搜索 4356 个考研单词或中文释义…") },
+            placeholder = { Text(stringResource(R.string.wordbook_library_search_hint)) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
@@ -1790,7 +1792,7 @@ internal fun StatsView(
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
-                        text = "词库总览与进度",
+                        text = stringResource(R.string.wordbook_library_overview),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -1808,7 +1810,7 @@ internal fun StatsView(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "已掌握 ${state.masteredCount} / ${state.totalVocabCount} 词 · ${(progressRatio * 100).toInt()}%",
+                        text = stringResource(R.string.wordbook_library_progress, state.masteredCount, state.totalVocabCount, (progressRatio * 100).toInt()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1841,14 +1843,14 @@ internal fun StatsView(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 StatCard(
-                    title = "今日已学",
+                    title = stringResource(R.string.wordbook_stat_learned),
                     value = "${state.studiedTodayCount}",
                     unit = "词",
                     color = okColor,
                     modifier = Modifier.weight(1f)
                 )
                 StatCard(
-                    title = "待复习错词",
+                    title = stringResource(R.string.wordbook_stat_due_wrong),
                     value = "${state.wrongBookCount}",
                     unit = "词",
                     color = if (state.wrongBookCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1926,7 +1928,13 @@ internal fun StatsView(
                         if (generating) return@OutlinedButton
                         scope.launch {
                             val bitmap = withContext(Dispatchers.Default) {
-                                com.mistakebook.poster.PosterRenderer.render(buildPosterContent(state))
+                                com.mistakebook.poster.PosterRenderer.render(
+                                    buildPosterContent(
+                                        state,
+                                        statsHeader = stringResource(R.string.poster_stats_header),
+                                        footerText = stringResource(R.string.poster_footer_brand)
+                                    )
+                                )
                             }
                             saveAndShare(bitmap)
                         }
@@ -1943,7 +1951,7 @@ internal fun StatsView(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("生成打卡海报")
+                    Text(stringResource(R.string.poster_generate_btn))
                 }
 
                 // ---- 生图入口 1：只生成背景，文字本地叠 ----
@@ -1966,7 +1974,7 @@ internal fun StatsView(
                             strokeWidth = 2.dp
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("生图背景中…")
+                        Text(stringResource(R.string.poster_bg_generating))
                     } else {
                         Icon(
                             Icons.Default.AutoAwesome,
@@ -1974,7 +1982,7 @@ internal fun StatsView(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("用背景图生成打卡")
+                        Text(stringResource(R.string.poster_checkin_with_bg))
                     }
                 }
 
@@ -1998,7 +2006,7 @@ internal fun StatsView(
                             strokeWidth = 2.dp
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("生图中…")
+                        Text(stringResource(R.string.poster_generating))
                     } else {
                         Icon(
                             Icons.Default.AutoAwesome,
@@ -2006,13 +2014,13 @@ internal fun StatsView(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("生图打卡")
+                        Text(stringResource(R.string.poster_checkin_btn))
                     }
                 }
 
                 if (generating) {
                     Text(
-                        text = "生图在后台继续运行，离开这个页面也不会中断。",
+                        text = stringResource(R.string.poster_bg_notice),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2050,7 +2058,7 @@ private fun StreakAndGoalCard(
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
-                text = "连续打卡",
+                text = stringResource(R.string.wordbook_streak_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -2064,7 +2072,7 @@ private fun StreakAndGoalCard(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = "天连续学习",
+                    text = stringResource(R.string.wordbook_streak_suffix),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 6.dp)
@@ -2072,7 +2080,7 @@ private fun StreakAndGoalCard(
             }
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "今天已学 $studiedToday 词（今天还没学不算断签）",
+                text = stringResource(R.string.wordbook_streak_today, studiedToday),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -2084,12 +2092,12 @@ private fun StreakAndGoalCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "每日学习目标",
+                        text = stringResource(R.string.wordbook_goal_title),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "每日新学去重词数目标",
+                        text = stringResource(R.string.wordbook_goal_desc),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2098,7 +2106,7 @@ private fun StreakAndGoalCard(
                     onClick = { onGoalChange(dailyGoal - goalStepFor(dailyGoal)) },
                     enabled = dailyGoal > SettingsStore.MIN_WORDBOOK_DAILY_GOAL
                 ) {
-                    Icon(Icons.Default.Remove, contentDescription = "减少目标")
+                    Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.wordbook_cd_goal_minus))
                 }
                 Text(
                     text = "$dailyGoal",
@@ -2108,7 +2116,7 @@ private fun StreakAndGoalCard(
                     modifier = Modifier.widthIn(min = 40.dp)
                 )
                 IconButton(onClick = { onGoalChange(dailyGoal + goalStepFor(dailyGoal)) }) {
-                    Icon(Icons.Default.Add, contentDescription = "增加目标")
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.wordbook_cd_goal_plus))
                 }
             }
 
@@ -2117,12 +2125,12 @@ private fun StreakAndGoalCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "每日目标提醒",
+                        text = stringResource(R.string.wordbook_goal_reminder),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "到点还没达标时通知我（与错题复习提醒同一时刻）",
+                        text = stringResource(R.string.wordbook_goal_reminder_desc),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2172,13 +2180,13 @@ private fun MonthlyHeatmapCard(days: List<DayStat>) {
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
-                text = "本月打卡热力图",
+                text = stringResource(R.string.wordbook_heatmap_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "每格一天，颜色越深当天学得越多",
+                text = stringResource(R.string.wordbook_heatmap_desc),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -2186,7 +2194,7 @@ private fun MonthlyHeatmapCard(days: List<DayStat>) {
 
             if (days.isEmpty()) {
                 Text(
-                    text = "本月还没有学习记录",
+                    text = stringResource(R.string.wordbook_heatmap_empty),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2241,7 +2249,7 @@ private fun MonthlyHeatmapCard(days: List<DayStat>) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "少",
+                    text = stringResource(R.string.wordbook_heatmap_less),
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2258,7 +2266,7 @@ private fun MonthlyHeatmapCard(days: List<DayStat>) {
                     Spacer(Modifier.width(3.dp))
                 }
                 Text(
-                    text = "多",
+                    text = stringResource(R.string.wordbook_heatmap_more),
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2281,13 +2289,13 @@ private fun WeeklyStudyChart(stats: List<DayStat>) {
     }
     Column(modifier = Modifier.padding(20.dp)) {
         Text(
-            text = "近 7 天学习量",
+            text = stringResource(R.string.wordbook_last7_volume),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "柱高为当天去重学习词数，空档日期表示当天没有学习",
+            text = stringResource(R.string.wordbook_last7_desc),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -2346,14 +2354,14 @@ private fun WeeklyAccuracyCard(stats: List<DayStat>) {
     val rate = if (total > 0) correct.toFloat() / total else null
     Column(modifier = Modifier.padding(20.dp)) {
         Text(
-            text = "近 7 天正确率",
+            text = stringResource(R.string.wordbook_last7_accuracy),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
         Spacer(Modifier.height(12.dp))
         if (rate == null) {
             Text(
-                text = "近 7 天还没有作答记录，学几个单词再来看看吧",
+                text = stringResource(R.string.wordbook_last7_empty),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -2369,7 +2377,7 @@ private fun WeeklyAccuracyCard(stats: List<DayStat>) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "${(rate * 100).toInt()}% · 答对 $correct / 共 $total 次",
+                text = stringResource(R.string.wordbook_last7_accuracy_value, (rate * 100).toInt(), correct, total),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -2471,7 +2479,7 @@ private fun WordItemCard(
                             // 毕业线抽成了 WordbookRules.GRADUATION_REPS：
                             // UI 文案与打分逻辑共用同一个常量，不会出现
                             // 「显示 x/2 实际要对 3 次」的割裂。
-                            text = "连对 ${progress.reps}/${WordbookRules.GRADUATION_REPS}",
+                            text = stringResource(R.string.wordbook_streak_reps, progress.reps, WordbookRules.GRADUATION_REPS),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error
                         )
@@ -2491,7 +2499,7 @@ private fun WordItemCard(
             if (scenePath != null) {
                 AsyncImage(
                     model = scenePath,
-                    contentDescription = "场景图",
+                    contentDescription = stringResource(R.string.wordbook_cd_scene),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(40.dp)
@@ -2505,7 +2513,7 @@ private fun WordItemCard(
             IconButton(onClick = onSpeak, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                    contentDescription = "朗读单词",
+                    contentDescription = stringResource(R.string.wordbook_cd_speak),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
@@ -2521,7 +2529,7 @@ private fun WordItemCard(
 
             if (showRemove) {
                 TextButton(onClick = onRemove) {
-                    Text("移出", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                    Text(stringResource(R.string.wordbook_remove), color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
                 }
             }
         }

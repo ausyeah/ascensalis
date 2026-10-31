@@ -31,6 +31,7 @@ import com.mistakebook.review.ReviewScheduler
 import com.mistakebook.ui.common.RichText
 import com.mistakebook.ui.theme.MistakeBookTheme
 import kotlinx.coroutines.launch
+import com.mistakebook.R
 
 /** 公式渲染探针页：只显示一段带公式的正文，用于真机肉眼确认渲染效果。 */
 @androidx.compose.runtime.Composable
@@ -44,8 +45,7 @@ private fun ProbeRichTextScreen(mathRenderer: com.mistakebook.math.MathRenderer)
         Text(stringResource(R.string.probe_math_title), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(16.dp))
         RichText(
-            text = "设 \$I_R = \\oint_L \\frac{y\\,dx - x\\,dy}{(x^2 + y^2)^2}\$，其中 \$L\$ 为 " +
-                "\$x^2 + y^2 = \\frac{1}{R^2}\$，方向为逆时针方向，则 \$R \\to 0^+\$ 时，",
+            text = stringResource(R.string.probe_math_inline_sample),
             mathRenderer = mathRenderer,
             style = MaterialTheme.typography.bodyLarge
         )

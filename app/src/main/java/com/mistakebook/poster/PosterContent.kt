@@ -21,10 +21,12 @@ data class PosterContent(
     val dateText: String,
     /** 顶部大字主标题，如「背单词 Day 12」。 */
     val headline: String,
+    /** 统计区上方的小标题，如「今日学习」。序列化默认空串：老版本入队的 WorkData 无此字段。 */
+    val statsHeader: String = "",
     /** 三行统计。 */
     val stats: List<PosterStat>,
-    /** 底部品牌行。 */
-    val footerText: String = "登临 · 错题本"
+    /** 底部品牌行。序列化默认空串：老版本入队的 WorkData 无此字段。 */
+    val footerText: String = ""
 )
 
 /**

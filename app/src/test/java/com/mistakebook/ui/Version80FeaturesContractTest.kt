@@ -52,7 +52,10 @@ class Version80FeaturesContractTest {
     @Test
     fun `设置页已更名为 OCR 配置`() {
         val settingsSrc = readSource("app/src/main/java/com/mistakebook/ui/settings/SettingsScreen.kt")
-        assertTrue("设置分组标题必须更名为 OCR 配置", settingsSrc.contains("title = \"OCR 配置\""))
+        assertTrue(
+            "设置分组标题必须更名为 OCR 配置（文案已外移到 strings.xml）",
+            settingsSrc.contains("R.string.settings_group_ocr")
+        )
         assertFalse("设置分组标题不得保留 MinerU 配置", settingsSrc.contains("title = \"MinerU 配置\""))
 
         val stringsSrc = readSource("app/src/main/res/values/strings.xml")

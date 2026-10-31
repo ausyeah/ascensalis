@@ -354,6 +354,7 @@ class AppContainer(context: Context) {
             llmClient = llmClient,
             settingsStore = settingsStore,
             files = files,
+            appContext = appContext,
             ocrEngineDeps = ocrEngineDeps
         )
     }
@@ -376,7 +377,7 @@ class AppContainer(context: Context) {
     val imageImporter: ImageImporter by lazy { ImageImporter(appContext, files) }
 
     val recognitionSubmitter: RecognitionSubmitter by lazy {
-        RecognitionSubmitter(captureTaskRepository, recognitionEngine)
+        RecognitionSubmitter(captureTaskRepository, recognitionEngine, appContext)
     }
 
     val backupManager: BackupManager by lazy {

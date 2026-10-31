@@ -81,7 +81,7 @@ object PosterRenderer {
         // ---- 中间：统计行（大字号 + 分隔线）----
         val midTop = 380f
         canvas.drawTextCentered(
-            text = "今日学习",
+            text = content.statsHeader,
             cx = WIDTH / 2f,
             y = midTop,
             paint = textPaint(34f, MUTED_COLOR, sans)

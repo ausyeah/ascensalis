@@ -18,7 +18,11 @@ enum class VocabTemplate {
     VOCAB_CHEAT_SHEET
 }
 
-class VocabPrintExporter {
+// 画布层没有 Context：空数据提示与页脚模板由调用方从 strings.xml 解析后注入。
+class VocabPrintExporter(
+    private val emptyHint: String,
+    private val pageFooterTemplate: String
+) {
 
     companion object {
         const val PAGE_WIDTH = 595
@@ -52,7 +56,7 @@ class VocabPrintExporter {
                 color = Color.BLACK
                 textSize = 20f
             }
-            page.canvas.drawText("暂无单词数据", 50f, 50f, paint)
+            page.canvas.drawText(emptyHint, 50f, 50f, paint)
             document.finishPage(page)
             FileOutputStream(outputFile).use { document.writeTo(it) }
             document.close()
@@ -209,7 +213,7 @@ class VocabPrintExporter {
         val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         canvas.drawText("$subtitle  $dateStr", 40f, 60f, paint)
 
-        val footerText = "第 $currentPage 页 / 共 $totalPages 页"
+        val footerText = pageFooterTemplate.format(currentPage, totalPages)
         paint.textSize = 12f
         val textWidth = paint.measureText(footerText)
         canvas.drawText(footerText, (PAGE_WIDTH - textWidth) / 2f, PAGE_HEIGHT - 20f, paint)

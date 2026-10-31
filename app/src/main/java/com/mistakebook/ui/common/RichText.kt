@@ -418,7 +418,7 @@ private fun ImageBlock(path: String, alt: String) {
     }
     if (!usable) {
         Text(
-            text = "图片不可用",
+            text = stringResource(R.string.richtext_image_unavailable),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
@@ -711,7 +711,7 @@ private fun MathImage(
     } else if (!pending) {
         // 渲染失败且调用方不希望看到源码：给一句可见提示，别留空气。
         Text(
-            text = "公式无法渲染",
+            text = stringResource(R.string.richtext_math_failed),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -929,7 +929,7 @@ private fun InlineRow(
                                         )
                                     } else if (!pending) {
                                         Text(
-                                            text = "公式",
+                                            text = stringResource(R.string.richtext_math_label),
                                             style = MaterialTheme.typography.labelSmall,
                                             maxLines = 1
                                         )
@@ -1411,12 +1411,12 @@ private fun CodeBlock(
                 ) {
                     Icon(
                         imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "复制",
+                        contentDescription = stringResource(R.string.action_copy),
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
-                        text = "复制",
+                        text = stringResource(R.string.action_copy),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )

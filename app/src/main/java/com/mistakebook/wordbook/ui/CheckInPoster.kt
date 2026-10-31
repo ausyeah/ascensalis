@@ -45,7 +45,12 @@ import java.util.Locale
  * 本地渲染、生图背景、整图生图三种模式共用同一套版式代码，
  * 免得「词库打卡」和「番茄打卡」两套画法越走越偏。
  */
-fun renderCheckInPoster(data: CheckInPosterData): Bitmap =
+fun renderCheckInPoster(
+    data: CheckInPosterData,
+    // 画布渲染没有 Composable 作用域：小标题与品牌行由调用方从资源解析后传入。
+    statsHeader: String,
+    footerText: String
+): Bitmap =
     com.mistakebook.poster.PosterRenderer.render(
         com.mistakebook.poster.PosterContent(
             dateText = data.dateText,
@@ -55,7 +60,8 @@ fun renderCheckInPoster(data: CheckInPosterData): Bitmap =
                 com.mistakebook.poster.PosterStat("正确率", data.accuracyText(), emphasis = true),
                 com.mistakebook.poster.PosterStat("目标", "${data.dailyGoal}", "词")
             ),
-            footerText = "登临 · 错题本"
+            statsHeader = statsHeader,
+            footerText = footerText
         )
     )
 

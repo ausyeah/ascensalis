@@ -237,7 +237,7 @@ fun ChatScreen(
     previewImagePath?.let { path ->
         com.mistakebook.ui.common.FullScreenImageDialog(
             imagePath = path,
-            contentDescription = "图片预览",
+            contentDescription = stringResource(R.string.chat_cd_image_preview),
             onDismiss = { previewImagePath = null }
         )
     }
@@ -1336,7 +1336,7 @@ private fun ThinkingBlock(
                 ) {
                     Icon(
                         Icons.Default.ContentCopy,
-                        contentDescription = "复制思考",
+                        contentDescription = stringResource(R.string.chat_cd_copy_thinking),
                         modifier = Modifier.size(13.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1674,7 +1674,7 @@ private fun ModelPickerSheet(
                 if (page == 1) {
                     // 设置页左上角是「返回模型列表」
                     IconButton(onClick = { page = 0 }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回模型列表")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_cd_back_models))
                     }
                 }
                 Text(
@@ -1686,11 +1686,11 @@ private fun ModelPickerSheet(
                 )
                 if (page == 0) {
                     IconButton(onClick = { page = 1 }, enabled = enabled) {
-                        Icon(Icons.Default.Settings, contentDescription = "思考强度设置")
+                        Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.chat_cd_reasoning_settings))
                     }
                 }
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.action_close))
                 }
             }
 
@@ -1704,7 +1704,7 @@ private fun ModelPickerSheet(
                 // 新供应商的；编辑配置仍然回设置页。
                 if (providers.isNotEmpty()) {
                     Text(
-                        text = "供应商",
+                        text = stringResource(R.string.chat_provider_label),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1775,7 +1775,7 @@ private fun ModelPickerSheet(
                         if (isSelected) {
                             Icon(
                                 Icons.Default.Check,
-                                contentDescription = "已选择",
+                                contentDescription = stringResource(R.string.chat_cd_selected),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -1825,7 +1825,7 @@ private fun ModelPickerSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("联网搜索", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.chat_websearch_label), style = MaterialTheme.typography.bodyMedium)
                     Text(
                         "需要时由模型自主检索最新网页（DeepSeek / Tavily）",
                         style = MaterialTheme.typography.labelSmall,

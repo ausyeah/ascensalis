@@ -7,16 +7,13 @@ import kotlinx.serialization.Serializable
  * - [MINERU]：MinerU 官方云端文档解析（文档/排版级识别、公式提取、长轮询）
  * - [OPENAI_VISION]：OpenAI 兼容的多模态视觉大模型或第三方 OCR 服务（DeepSeek-VL、讯飞星辰 MaaS、Qwen-VL、自建 OCR 端点等）
  */
+// 序列化只落枚举名，label/hint 两个展示字段从未被任何 UI 消费（纯死重），
+// 按硬规则「中文文案进 strings.xml」删除；接入方式等 UI 真要展示时再在
+// 显示层按 OcrType 映射 stringResource。
 @Serializable
-enum class OcrType(val label: String, val hint: String) {
-    MINERU(
-        label = "MinerU 官方文档解析",
-        hint = "官方文档级识别与公式提取，按页计费，适合试卷与整页排版"
-    ),
-    OPENAI_VISION(
-        label = "视觉大模型 / OpenAI 兼容端点",
-        hint = "多模态视觉模型直接转写提取文字与 LaTeX 公式，适配 DeepSeek、讯飞星辰、Qwen-VL、中转站或自建端点"
-    )
+enum class OcrType {
+    MINERU,
+    OPENAI_VISION
 }
 
 /**

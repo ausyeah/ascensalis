@@ -21,6 +21,8 @@ import coil.compose.AsyncImagePainter
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
 import com.mistakebook.markdown.svgAspectRatio
+import androidx.compose.ui.res.stringResource
+import com.mistakebook.R
 
 /**
  * 渲染一段 SVG 源码（精确图示：几何图、函数图像、受力分析）。
@@ -60,7 +62,7 @@ fun SvgBlock(
     var failed by remember(source) { mutableStateOf(false) }
     if (failed) {
         Text(
-            text = "示意图无法显示",
+            text = stringResource(R.string.svg_unavailable),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = modifier
@@ -72,7 +74,7 @@ fun SvgBlock(
     }
     AsyncImage(
         model = request,
-        contentDescription = "示意图",
+        contentDescription = stringResource(R.string.svg_cd),
         contentScale = ContentScale.Fit,
         onState = { state ->
             // 只认 Error；Loading / Success 不动，避免成功后又翻成失败态。

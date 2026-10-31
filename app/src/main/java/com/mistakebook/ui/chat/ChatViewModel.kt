@@ -53,6 +53,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
+import com.mistakebook.R
 
 /**
  * 还没发送的附件。
@@ -841,7 +842,7 @@ class ChatViewModel(
                 }
                 if (messageText.isBlank()) {
                     // 输入框为空时给个默认问法（用户可改）
-                    messageText = "请批改我的解题过程，指出从哪一步开始错"
+                    messageText = appContext.getString(R.string.chat_grading_default_message)
                 }
                 // OCR 总是执行——**不依赖模型是否支持图片**：纯文本模型靠
                 // 拼进消息的 OCR 文本也能批；多模态模型图+文双保险，且公式

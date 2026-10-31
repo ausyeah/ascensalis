@@ -55,7 +55,10 @@ fun buildPosterData(
  */
 fun buildPosterContent(
     state: WordbookUiState,
-    now: Long = System.currentTimeMillis()
+    now: Long = System.currentTimeMillis(),
+    // 画布渲染没有 Composable 作用域：小标题与品牌行由调用方从资源解析后传入。
+    statsHeader: String,
+    footerText: String
 ): com.mistakebook.poster.PosterContent {
     val data = buildPosterData(state, now)
     return com.mistakebook.poster.PosterContent(
@@ -66,6 +69,7 @@ fun buildPosterContent(
             com.mistakebook.poster.PosterStat("正确率", data.accuracyText(), emphasis = true),
             com.mistakebook.poster.PosterStat("目标", "${data.dailyGoal}", "词")
         ),
-        footerText = "登临 · 错题本"
+        statsHeader = statsHeader,
+        footerText = footerText
     )
 }

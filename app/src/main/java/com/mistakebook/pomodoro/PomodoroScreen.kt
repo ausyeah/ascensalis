@@ -117,6 +117,8 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import androidx.compose.ui.res.stringResource
+import com.mistakebook.R
 
 /**
  * 番茄钟页面。
@@ -221,7 +223,7 @@ fun PomodoroScreen(container: AppContainer) {
                         }
                     },
                     enabled = state.status != RunStatus.RUNNING,
-                    text = { Text("番茄钟") }
+                    text = { Text(stringResource(R.string.pomodoro_tab_focus)) }
                 )
                 Tab(
                     selected = pagerState.currentPage == 1,
@@ -232,14 +234,14 @@ fun PomodoroScreen(container: AppContainer) {
                         }
                     },
                     enabled = state.status != RunStatus.RUNNING,
-                    text = { Text("正向计时") }
+                    text = { Text(stringResource(R.string.pomodoro_tab_stopwatch)) }
                 )
                 Tab(
                     selected = pagerState.currentPage == 2,
                     onClick = {
                         scope.launch { pagerState.animateScrollToPage(2) }
                     },
-                    text = { Text("统计数据") }
+                    text = { Text(stringResource(R.string.pomodoro_tab_stats)) }
                 )
             }
 
@@ -321,7 +323,7 @@ private fun ManualEntryDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("补记一次专注") },
+        title = { Text(stringResource(R.string.pomodoro_backfill_title)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -330,7 +332,7 @@ private fun ManualEntryDialog(
                 // 任务：从已有任务里选。补记不该顺手新建任务——
                 // 新建任务带出学科选择，那是另一件事（CSV 导入已经在做）。
                 Text(
-                    text = "任务",
+                    text = stringResource(R.string.pomodoro_backfill_task_label),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -362,7 +364,7 @@ private fun ManualEntryDialog(
                 OutlinedTextField(
                     value = state.manualDay,
                     onValueChange = onDay,
-                    label = { Text("日期（2026-03-08）") },
+                    label = { Text(stringResource(R.string.pomodoro_backfill_date_hint)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -373,35 +375,35 @@ private fun ManualEntryDialog(
                     OutlinedTextField(
                         value = state.manualHour.toString(),
                         onValueChange = { onTime(it.toIntOrNull() ?: state.manualHour, state.manualMinute) },
-                        label = { Text("开始时") },
+                        label = { Text(stringResource(R.string.pomodoro_backfill_start_hour)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
                         value = state.manualMinute.toString(),
                         onValueChange = { onTime(state.manualHour, it.toIntOrNull() ?: state.manualMinute) },
-                        label = { Text("开始分") },
+                        label = { Text(stringResource(R.string.pomodoro_backfill_start_minute)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
                         value = state.manualMinutes,
                         onValueChange = onMinutes,
-                        label = { Text("时长（分钟）") },
+                        label = { Text(stringResource(R.string.pomodoro_backfill_duration)) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
                         modifier = Modifier.weight(1.4f)
                     )
                 }
                 Text(
-                    text = "补记只计入专注时长，不计番茄数。",
+                    text = stringResource(R.string.pomodoro_backfill_note),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("补记") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.pomodoro_backfill_confirm)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } }
     )
 }
 
@@ -444,7 +446,7 @@ internal fun TimerTab(
         // 误触扔掉的是一次专注，不是一点滑动。
         if (state.status != RunStatus.IDLE) {
             TextButton(onClick = { viewModel.stop(save = false) }) {
-                Text("放弃本次计时", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.pomodoro_give_up), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -647,7 +649,7 @@ private fun TimerDial(
                     ) {
                         Icon(
                             Icons.Filled.PlayArrow,
-                            contentDescription = "开始",
+                            contentDescription = stringResource(R.string.pomodoro_cd_start),
                             modifier = Modifier.size(30.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -683,7 +685,7 @@ private fun TimerDial(
                         ) {
                             Icon(
                                 Icons.Filled.Stop,
-                                contentDescription = "结束并记录",
+                                contentDescription = stringResource(R.string.pomodoro_cd_stop_record),
                                 modifier = Modifier.size(24.dp),
                                 tint = MaterialTheme.colorScheme.onErrorContainer
                             )
@@ -747,7 +749,7 @@ private fun DurationWheelDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("设置时长") },
+        title = { Text(stringResource(R.string.pomodoro_pick_duration_title)) },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -774,7 +776,7 @@ private fun DurationWheelDialog(
                     WheelColumn(
                         values = hours,
                         state = hourState,
-                        label = "小时",
+                        label = stringResource(R.string.pomodoro_wheel_hour),
                         modifier = Modifier.weight(1f)
                     )
                     Text(
@@ -786,13 +788,13 @@ private fun DurationWheelDialog(
                     WheelColumn(
                         values = minutes,
                         state = minuteState,
-                        label = "分钟",
+                        label = stringResource(R.string.pomodoro_wheel_minute),
                         modifier = Modifier.weight(1f)
                     )
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "上下滑动，循环选择",
+                    text = stringResource(R.string.pomodoro_wheel_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -805,11 +807,11 @@ private fun DurationWheelDialog(
                 // 比让用户点完才弹一个「时长不能为 0」好。
                 enabled = totalMinutes >= 1
             ) {
-                Text("确定")
+                Text(stringResource(R.string.action_confirm))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         }
     )
 }
@@ -1030,7 +1032,7 @@ private fun SubjectTaskBoard(
                 Column(modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 8.dp)) {
                     if (subjectTasks.isEmpty()) {
                         Text(
-                            text = "这个学科下还没有任务",
+                            text = stringResource(R.string.pomodoro_no_tasks_in_subject),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 8.dp)
@@ -1051,7 +1053,7 @@ private fun SubjectTaskBoard(
                     TextButton(onClick = { onNewTask(subjectId) }) {
                         Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("新建任务")
+                        Text(stringResource(R.string.pomodoro_new_task))
                     }
                     // 新建任务表单：就地长在这个学科的任务列表下面。
                     // 早期它被甩到整个页面最底部——「点数学的新建任务，
@@ -1086,7 +1088,7 @@ private fun SubjectTaskBoard(
             TextButton(onClick = onNewSubject) {
                 Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("新建学科")
+                Text(stringResource(R.string.pomodoro_new_subject))
             }
         }
     }
@@ -1124,7 +1126,7 @@ private fun InlineSubjectEditor(
             OutlinedTextField(
                 value = name,
                 onValueChange = onName,
-                label = { Text("新学科名") },
+                label = { Text(stringResource(R.string.pomodoro_new_subject_name_hint)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onConfirm() }),
@@ -1133,8 +1135,8 @@ private fun InlineSubjectEditor(
                     .focusRequester(focusRequester)
             )
             Spacer(Modifier.width(8.dp))
-            TextButton(onClick = onCancel) { Text("取消") }
-            Button(onClick = onConfirm, enabled = name.isNotBlank()) { Text("创建") }
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
+            Button(onClick = onConfirm, enabled = name.isNotBlank()) { Text(stringResource(R.string.action_create)) }
         }
     }
 }
@@ -1168,7 +1170,7 @@ private fun InlineTaskEditor(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                text = "新建到「$subjectName」",
+                text = stringResource(R.string.pomodoro_new_task_into_subject, subjectName),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1176,7 +1178,7 @@ private fun InlineTaskEditor(
             OutlinedTextField(
                 value = name,
                 onValueChange = onName,
-                label = { Text("任务名") },
+                label = { Text(stringResource(R.string.pomodoro_task_name_label)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onConfirm() }),
@@ -1189,9 +1191,9 @@ private fun InlineTaskEditor(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                TextButton(onClick = onCancel) { Text("取消") }
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = onConfirm, enabled = name.isNotBlank()) { Text("创建") }
+                Button(onClick = onConfirm, enabled = name.isNotBlank()) { Text(stringResource(R.string.action_create)) }
             }
         }
     }
@@ -1225,7 +1227,7 @@ private fun SubjectBar(
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = "$taskCount 个任务",
+                text = stringResource(R.string.pomodoro_task_count_badge, taskCount),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1292,11 +1294,11 @@ private fun TaskRow(
             ) {
                 Icon(
                     Icons.Outlined.PlayArrow,
-                    contentDescription = "开始",
+                    contentDescription = stringResource(R.string.pomodoro_cd_start),
                     modifier = Modifier.size(15.dp)
                 )
                 Spacer(Modifier.width(3.dp))
-                Text("开始", fontSize = 13.sp)
+                Text(stringResource(R.string.pomodoro_cd_start), fontSize = 13.sp)
             }
         }
     }
@@ -1324,19 +1326,19 @@ private fun EditTaskDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("编辑任务") },
+        title = { Text(stringResource(R.string.pomodoro_edit_task_title)) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = task.name,
                     onValueChange = onName,
-                    label = { Text("任务名") },
+                    label = { Text(stringResource(R.string.pomodoro_task_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "所属学科",
+                    text = stringResource(R.string.pomodoro_task_subject_label),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1359,18 +1361,18 @@ private fun EditTaskDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onSave) { Text("保存") }
+            TextButton(onClick = onSave) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
             Row {
                 TextButton(onClick = onArchive) {
-                    Text("归档", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.pomodoro_archive), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(
                     onClick = { confirmDelete = true },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("删除")
+                    Text(stringResource(R.string.action_delete))
                 }
             }
         }
@@ -1379,13 +1381,13 @@ private fun EditTaskDialog(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("删除任务") },
-            text = { Text("「${task.name}」及其全部专注记录将一并删除，且无法恢复。确认删除？") },
+            title = { Text(stringResource(R.string.pomodoro_delete_task_title)) },
+            text = { Text(stringResource(R.string.pomodoro_delete_task_confirm, task.name)) },
             confirmButton = {
                 // 两步确认：任务及其专注记录不可恢复，确认键再点一次才执行
                 com.mistakebook.ui.common.TwoStepConfirmTextButton(
-                    text = "删除",
-                    confirmText = "确认删除",
+                    text = stringResource(R.string.action_delete),
+                    confirmText = stringResource(R.string.action_confirm_delete),
                     onConfirm = {
                         confirmDelete = false
                         onDelete()
@@ -1393,7 +1395,7 @@ private fun EditTaskDialog(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
+                TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -1418,26 +1420,26 @@ private fun EditSubjectDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("编辑学科") },
+        title = { Text(stringResource(R.string.pomodoro_edit_subject_title)) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = subject.name,
                     onValueChange = onName,
-                    label = { Text("学科名") },
+                    label = { Text(stringResource(R.string.pomodoro_subject_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "学科与错题本共用一套：改名后录题页同步生效",
+                    text = stringResource(R.string.pomodoro_edit_subject_note),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onSave) { Text("保存") }
+            TextButton(onClick = onSave) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
             TextButton(
@@ -1446,7 +1448,7 @@ private fun EditSubjectDialog(
             ) {
                 Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("删除")
+                Text(stringResource(R.string.action_delete))
             }
         }
     )
@@ -1454,13 +1456,13 @@ private fun EditSubjectDialog(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("删除学科") },
-            text = { Text("「${subject.name}」将被删除，其下的任务移至「未分类」，专注记录保留。确认删除？") },
+            title = { Text(stringResource(R.string.pomodoro_delete_subject_title)) },
+            text = { Text(stringResource(R.string.pomodoro_delete_subject_confirm, subject.name)) },
             confirmButton = {
                 // 两步确认：学科删除不可恢复，确认键再点一次才执行
                 com.mistakebook.ui.common.TwoStepConfirmTextButton(
-                    text = "删除",
-                    confirmText = "确认删除",
+                    text = stringResource(R.string.action_delete),
+                    confirmText = stringResource(R.string.action_confirm_delete),
                     onConfirm = {
                         confirmDelete = false
                         onDelete()
@@ -1468,7 +1470,7 @@ private fun EditSubjectDialog(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
+                TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -1606,7 +1608,7 @@ internal fun StatsTab(
 
         // ---- 完成率 ----
         item {
-            StatsCard(title = "目标达成（${state.statsRange.label}）") {
+            StatsCard(title = stringResource(R.string.pomodoro_stats_goal_reached, state.statsRange.label)) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         text = "${(state.completionRate * 100).roundToInt()}%",
@@ -1616,7 +1618,7 @@ internal fun StatsTab(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "共 ${state.sessionCount} 次专注，完成 ${state.totalCompleted} 次",
+                        text = stringResource(R.string.pomodoro_stats_total_summary, state.sessionCount, state.totalCompleted),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 4.dp)
@@ -1642,18 +1644,18 @@ internal fun StatsTab(
 
         // ---- 近 7 天（离今天最近的动态窗口，排在月/季之前）----
         item {
-            StatsCard(title = "近 7 天") {
+            StatsCard(title = stringResource(R.string.pomodoro_stats_last7)) {
                 Last7Bars(values = state.last7)
             }
         }
 
         // ---- 近 30 天趋势线 ----
         item {
-            StatsCard(title = "近 30 天趋势") {
+            StatsCard(title = stringResource(R.string.pomodoro_stats_last30_trend)) {
                 DailyTrendLine(values = state.last30)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "30 天累计 ${formatDuration(state.last30.sum())}",
+                    text = stringResource(R.string.pomodoro_stats_last30_total, formatDuration(state.last30.sum())),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1663,11 +1665,11 @@ internal fun StatsTab(
         // ---- 本月按周柱状图 ----
         if (state.monthWeeks.any { it > 0L }) {
             item {
-                StatsCard(title = "本月每周专注") {
+                StatsCard(title = stringResource(R.string.pomodoro_stats_month_weekly)) {
                     WeekBars(values = state.monthWeeks)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "本月累计 ${formatDuration(state.monthWeeks.sum())}",
+                        text = stringResource(R.string.pomodoro_stats_month_total, formatDuration(state.monthWeeks.sum())),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1677,11 +1679,11 @@ internal fun StatsTab(
 
         // ---- 月度趋势（近 12 个月折线）----
         item {
-            StatsCard(title = "月度趋势（近 12 个月）") {
+            StatsCard(title = stringResource(R.string.pomodoro_stats_monthly_trend)) {
                 MonthTrendLine(values = state.months12)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "合计 ${formatDuration(state.months12.sum())}",
+                    text = stringResource(R.string.pomodoro_stats_grand_total, formatDuration(state.months12.sum())),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1691,11 +1693,11 @@ internal fun StatsTab(
         // ---- 季度趋势（近 12 个月按季并）----
         item {
             val quarters = remember(state.months12) { PomodoroStats.quartersOf(state.months12) }
-            StatsCard(title = "季度趋势") {
+            StatsCard(title = stringResource(R.string.pomodoro_stats_quarter_trend)) {
                 QuarterTrendLine(values = quarters)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "最近一个季度 ${formatDuration(quarters.lastOrNull() ?: 0L)}",
+                    text = stringResource(R.string.pomodoro_stats_quarter_total, formatDuration(quarters.lastOrNull() ?: 0L)),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1711,7 +1713,7 @@ internal fun StatsTab(
                 val subjectRows = remember(state.subjectTotals) {
                     state.subjectTotals.filter { it.sec > 0 }
                 }
-                StatsCard(title = "学科分布（${state.statsRange.label}）") {
+                StatsCard(title = stringResource(R.string.pomodoro_stats_subject_dist, state.statsRange.label)) {
                     val named = remember(subjectRows, state.subjects) {
                         subjectRows.map { row ->
                             val name = state.subjects.firstOrNull { it.id == row.subjectId }?.name
@@ -1739,7 +1741,7 @@ internal fun StatsTab(
         // ---- 任务排行 ----
         if (state.taskTotals.any { it.sec > 0 }) {
             item {
-                StatsCard(title = "任务累计（${state.statsRange.label}）") {
+                StatsCard(title = stringResource(R.string.pomodoro_stats_task_total, state.statsRange.label)) {
                     val top5 = remember(state.taskTotals) {
                         state.taskTotals.filter { it.sec > 0 }.take(5)
                     }
@@ -1759,7 +1761,7 @@ internal fun StatsTab(
         // 20 条记录能把统计页拉成无限长列表，翻到底全是它。
         if (state.recent.isNotEmpty()) {
             item {
-                StatsCard(title = "最近专注（${state.statsRange.label}）") {
+                StatsCard(title = stringResource(R.string.pomodoro_stats_recent, state.statsRange.label)) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1780,10 +1782,9 @@ internal fun StatsTab(
 
         // ---- 手动补记 + 外部数据导入 ----
         item {
-            StatsCard(title = "补记与导入") {
+            StatsCard(title = stringResource(R.string.pomodoro_stats_import_section)) {
                 Text(
-                    text = "手动补记：用别的方式学过的时长补进来（比如纸质笔记、上机自习）。" +
-                        "补记只加时长，不计番茄数。",
+                    text = stringResource(R.string.pomodoro_stats_manual_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1791,12 +1792,11 @@ internal fun StatsTab(
                 OutlinedButton(onClick = onManualEntry, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("手动补记一次专注")
+                    Text(stringResource(R.string.pomodoro_manual_entry_btn))
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    text = "从其他计时软件导出的表格导入（CSV / .xls）：识别「任务分类 / 任务名 / 时长」列，" +
-                        "日期列认不出就归到今天。学科与任务不存在会自动创建。",
+                    text = stringResource(R.string.pomodoro_stats_csv_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1804,7 +1804,7 @@ internal fun StatsTab(
                 OutlinedButton(onClick = onImportCsv, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("选择 CSV / XLS 文件导入")
+                    Text(stringResource(R.string.pomodoro_import_csv_btn))
                 }
             }
         }
@@ -1815,7 +1815,7 @@ internal fun StatsTab(
         // 往下丢」。累计是跨全部时间的口径，与任何「最近」都无关，
         // 放最底部——但它仍不受上方时间范围 chips 影响。
         item {
-            StatsCard(title = "累计数据") {
+            StatsCard(title = stringResource(R.string.pomodoro_stats_cumulative)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StatCell("累计专注", formatDuration(state.totalAllSec), Modifier.weight(1f))
                     StatCell("累计番茄", "${state.totalAllCompleted} 个", Modifier.weight(1f))
@@ -1866,7 +1866,11 @@ internal fun StatsTab(
                         scope.launch {
                             val bitmap = withContext(Dispatchers.Default) {
                                 com.mistakebook.poster.PosterRenderer.render(
-                                    buildPomodoroPosterContent(state)
+                                    buildPomodoroPosterContent(
+                                        state,
+                                        statsHeader = stringResource(R.string.poster_stats_header),
+                                        footerText = stringResource(R.string.poster_footer_brand)
+                                    )
                                 )
                             }
                             saveAndShare(bitmap)
@@ -1884,7 +1888,7 @@ internal fun StatsTab(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("生成今日专注打卡")
+                    Text(stringResource(R.string.poster_checkin_today_btn))
                 }
 
                 OutlinedButton(
@@ -1904,10 +1908,10 @@ internal fun StatsTab(
                             strokeWidth = 2.dp
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("生图背景中…")
+                        Text(stringResource(R.string.poster_bg_generating))
                     } else {
                         Spacer(Modifier.width(8.dp))
-                        Text("用背景图生成打卡")
+                        Text(stringResource(R.string.poster_checkin_with_bg))
                     }
                 }
 
@@ -1928,16 +1932,16 @@ internal fun StatsTab(
                             strokeWidth = 2.dp
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("生图中…")
+                        Text(stringResource(R.string.poster_generating))
                     } else {
                         Spacer(Modifier.width(8.dp))
-                        Text("生图打卡")
+                        Text(stringResource(R.string.poster_checkin_btn))
                     }
                 }
 
                 if (generating) {
                     Text(
-                        text = "生图在后台继续运行，离开这个页面也不会中断。",
+                        text = stringResource(R.string.poster_bg_notice),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1951,13 +1955,13 @@ internal fun StatsTab(
     if (confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
-            title = { Text("重置统计数据") },
-            text = { Text("将清空全部专注记录，所有统计图表归零。任务与学科保留。此操作无法恢复，确认重置？") },
+            title = { Text(stringResource(R.string.pomodoro_reset_stats_title)) },
+            text = { Text(stringResource(R.string.pomodoro_reset_stats_confirm)) },
             confirmButton = {
                 // 两步确认：不可恢复操作，确认键也要再点一次才执行
                 com.mistakebook.ui.common.TwoStepConfirmTextButton(
-                    text = "重置",
-                    confirmText = "确认重置",
+                    text = stringResource(R.string.action_reset),
+                    confirmText = stringResource(R.string.action_confirm_reset),
                     onConfirm = {
                         confirmReset = false
                         onResetStats()
@@ -1965,7 +1969,7 @@ internal fun StatsTab(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { confirmReset = false }) { Text("取消") }
+                TextButton(onClick = { confirmReset = false }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -1988,10 +1992,10 @@ private fun SingleDayCard(
     onPrev: () -> Unit,
     onNext: () -> Unit
 ) {
-    StatsCard(title = "单日专注") {
+    StatsCard(title = stringResource(R.string.pomodoro_stats_single_day)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onPrev) {
-                Icon(Icons.Outlined.ChevronLeft, contentDescription = "前一天")
+                Icon(Icons.Outlined.ChevronLeft, contentDescription = stringResource(R.string.pomodoro_cd_prev_day))
             }
             Column(
                 modifier = Modifier.weight(1f),
@@ -2011,7 +2015,7 @@ private fun SingleDayCard(
                 )
             }
             TextButton(onClick = onNext, enabled = nextEnabled) {
-                Icon(Icons.Outlined.ChevronRight, contentDescription = "后一天")
+                Icon(Icons.Outlined.ChevronRight, contentDescription = stringResource(R.string.pomodoro_cd_next_day))
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -2103,7 +2107,7 @@ private fun WeekBars(values: List<Long>) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "第${index + 1}周",
+                    text = stringResource(R.string.pomodoro_week_n, index + 1),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (index == selected) color else labelColor,
                     fontWeight = if (index == selected) FontWeight.Bold else FontWeight.Normal
@@ -2466,7 +2470,7 @@ private fun Last7Bars(values: List<Long>) {
                 .format(DateTimeFormatter.ofPattern("M月d日"))
         }
         Text(
-            text = "$dayText 周${bars[selected].first} · ${formatDuration(bars[selected].second)}",
+            text = stringResource(R.string.pomodoro_bar_selected_summary, dayText, bars[selected].first, formatDuration(bars[selected].second)),
             style = MaterialTheme.typography.labelSmall,
             color = color,
             fontWeight = FontWeight.Bold
@@ -2646,7 +2650,7 @@ private fun SubjectPieChart(rows: List<Triple<String, Long, Int>>) {
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "${rows.size} 个学科",
+                    text = stringResource(R.string.pomodoro_subject_count, rows.size),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2680,7 +2684,7 @@ private fun PieLegendRow(
             modifier = Modifier.weight(1f)
         )
         Text(
-            text = "${(percent * 100).roundToInt()}% · $sessionCount 次 · ${formatDuration(sec)}",
+            text = stringResource(R.string.pomodoro_slice_summary, (percent * 100).roundToInt(), sessionCount, formatDuration(sec)),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

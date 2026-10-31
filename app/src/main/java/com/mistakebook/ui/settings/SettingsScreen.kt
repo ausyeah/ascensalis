@@ -165,21 +165,21 @@ fun SettingsScreen(
             //   通用: 主题外观、用量统计、网络与代理（高级）、数据与备份、
             //     单词书数据
             SettingsCategoryCard(
-                title = "AI 与识别",
+                title = stringResource(R.string.settings_group_ai),
                 summary = "大模型、识图、生图、搜索的 Key 与参数",
                 icon = Icons.Default.Psychology
             ) {
-                CollapsibleSettingsGroup(title = "识别方式", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_recognition_mode), nested = true) {
                     RecognitionModeSection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "OCR 配置", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_ocr), nested = true) {
                     MineruKeySection(state = state, viewModel = viewModel)
                     Spacer(Modifier.height(12.dp))
                     MineruParamsSection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "大模型配置", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_llm), nested = true) {
                     LlmProfilesSection(
                         state = state,
                         viewModel = viewModel,
@@ -189,25 +189,25 @@ fun SettingsScreen(
                     ReasoningEffortSection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "识图模型", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_vision_model), nested = true) {
                     VisionProfilesSection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "生图渠道", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_image_gen), nested = true) {
                     ImageProfilesSection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "联网搜索", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_websearch), nested = true) {
                     SearchProviderSection(state = state, viewModel = viewModel)
                 }
             }
 
             SettingsCategoryCard(
-                title = "学习",
+                title = stringResource(R.string.settings_group_learning),
                 summary = "番茄钟、复习提醒、打印与学习资料",
                 icon = Icons.AutoMirrored.Filled.MenuBook
             ) {
-                CollapsibleSettingsGroup(title = "学习工具", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_learning_tools), nested = true) {
                     // 成就墙入口放设置「学习」组（而非首页图标行）：
                     // 首页图标行每一寸都要留给刷题主流程入口（用户每天进来
                     // 是为了做题，不是为了看徽章），成就墙是阶段性回访目标，
@@ -221,7 +221,7 @@ fun SettingsScreen(
                     WordbookSection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "复习提醒", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_review_reminder), nested = true) {
                     ReviewReminderSection(
                         state = state,
                         viewModel = viewModel,
@@ -229,31 +229,31 @@ fun SettingsScreen(
                     )
                 }
 
-                CollapsibleSettingsGroup(title = "打印默认", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_print_defaults), nested = true) {
                     PrintDefaultsSection(state = state, viewModel = viewModel)
                 }
             }
 
             SettingsCategoryCard(
-                title = "通用",
+                title = stringResource(R.string.settings_group_general),
                 summary = "外观、用量、网络与数据备份",
                 icon = Icons.Default.Settings
             ) {
-                CollapsibleSettingsGroup(title = "主题外观", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_appearance), nested = true) {
                     ThemeModeSection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "用量统计", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_usage), nested = true) {
                     LlmUsageSection(container = container)
                     Spacer(Modifier.height(12.dp))
                     MineruUsageSection(container = container)
                 }
 
-                CollapsibleSettingsGroup(title = "网络与代理（高级）", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_network), nested = true) {
                     NetworkProxySection(state = state, viewModel = viewModel)
                 }
 
-                CollapsibleSettingsGroup(title = "数据与备份", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_data_backup), nested = true) {
                     DataManageSection(
                         container = container,
                         viewModel = viewModel,
@@ -279,7 +279,7 @@ fun SettingsScreen(
                     )
                 }
 
-                CollapsibleSettingsGroup(title = "单词书数据", nested = true) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_wordbook_data), nested = true) {
                     // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
                     // 都要留给题目），统一收到设置里，与数据管理相邻。
                     WordbookDataSection(

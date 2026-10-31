@@ -5,6 +5,7 @@ import com.mistakebook.data.repos.CaptureTaskRepository
 import com.mistakebook.domain.TaskStatus
 import java.io.File
 import java.util.UUID
+import com.mistakebook.R
 
 /**
  * 统一的任务提交入口：相册多选、PDF 导入都走这里，保证同一批任务共享 groupId，
@@ -12,7 +13,9 @@ import java.util.UUID
  */
 class RecognitionSubmitter(
     private val taskRepository: CaptureTaskRepository,
-    private val engine: RecognitionEngine
+    private val engine: RecognitionEngine,
+    // 阶段文案写入 CaptureTask 落库后由进度页原样展示；本层无 Composable 作用域，从资源解析。
+    private val appContext: android.content.Context
 ) {
 
     suspend fun submitImages(files: List<File>, groupTitle: String): List<Long> {
@@ -24,7 +27,7 @@ class RecognitionSubmitter(
                 CaptureTask(
                     photoPath = file.absolutePath,
                     status = TaskStatus.PENDING,
-                    stageText = "排队中…",
+                    stageText = appContext.getString(R.string.task_stage_queued),
                     groupId = groupId,
                     orderInGroup = index,
                     groupSize = files.size,
@@ -57,7 +60,7 @@ class RecognitionSubmitter(
             CaptureTask(
                 photoPath = file.absolutePath,
                 status = TaskStatus.PENDING,
-                stageText = "排队中…",
+                stageText = appContext.getString(R.string.task_stage_queued),
                 groupId = UUID.randomUUID().toString(),
                 orderInGroup = 0,
                 groupSize = 1,
@@ -84,7 +87,7 @@ class RecognitionSubmitter(
                 CaptureTask(
                     photoPath = file.absolutePath,
                     status = TaskStatus.PENDING,
-                    stageText = "排队中…",
+                    stageText = appContext.getString(R.string.task_stage_queued),
                     groupId = groupId,
                     orderInGroup = index,
                     groupSize = pages.size,

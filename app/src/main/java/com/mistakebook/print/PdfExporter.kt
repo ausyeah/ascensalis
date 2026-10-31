@@ -46,7 +46,12 @@ import java.util.Locale
  *    - 阶段二：逐页生成 [PdfDocument.Page]，在页眉写入文档信息、页脚写入
  *      「第 N / M 页」，并完整绘制该页元素。
  */
-class PdfExporter(private val mathRenderer: MathRenderer) {
+// 画布层没有 Context：重做区角标与页脚模板由调用方从 strings.xml 解析后注入。
+class PdfExporter(
+    private val mathRenderer: MathRenderer,
+    private val redoTagText: String,
+    private val pageFooterTemplate: String
+) {
 
     companion object {
         // A4 尺寸常量（单位：pt，1 pt = 1/72 inch）
@@ -473,7 +478,7 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
                     currentY = ensureSpace(blankH)
 
                     // 仅在左上角绘制微弱极细的【重做区】字样，下方绝对不画任何横线或网格
-                    val tagText = "【重做区】"
+                    val tagText = redoTagText
                     val tagY = currentY + FONT_TAG_PT
                     currentPage.drawItems.add(
                         TextLineDrawItem(
@@ -732,7 +737,7 @@ class PdfExporter(private val mathRenderer: MathRenderer) {
         textPaint.color = COLOR_TEXT_MUTED
         textPaint.isFakeBoldText = false
 
-        val footerText = "第 $pageNumber / $totalPages 页"
+        val footerText = pageFooterTemplate.format(pageNumber, totalPages)
         val textWidth = textPaint.measureText(footerText)
         val centerX = MARGIN_H_PT + (USABLE_WIDTH_PT - textWidth) / 2f
         canvas.drawText(footerText, centerX, 806f, textPaint)

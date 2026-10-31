@@ -173,7 +173,7 @@ class ChatGenerationService : Service() {
                 assistantId = failedId,
                 content = "",
                 status = MessageStatus.FAILED,
-                errorText = "未配置模型",
+                errorText = getString(R.string.chat_service_no_model),
                 sessionId = sessionId
             )
             clearRunningSlot(sessionId)
@@ -638,7 +638,7 @@ class ChatGenerationService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("正在生成回复…")
-            .setContentText("可以切到别的应用，生成会在后台继续")
+            .setContentText(getString(R.string.chat_service_background_hint))
             // 常驻、静默：它是用户主动发起的持续任务，不是一条「通知」
             .setOngoing(true)
             .setSilent(true)
@@ -665,8 +665,8 @@ class ChatGenerationService : Service() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "AI 生成", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "后台生成 AI 回复时的常驻提示"
+            NotificationChannel(CHANNEL_ID, getString(R.string.chat_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
+                description = getString(R.string.chat_channel_desc)
                 setShowBadge(false)
             }
         )

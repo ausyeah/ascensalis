@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.mistakebook.R
 
 data class PrintUiState(
     val questions: List<Question> = emptyList(),
@@ -238,7 +239,7 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
             val doc = ExportCardBuilder(subjectNames).buildDoc(
                 questions = questions,
                 options = options,
-                title = "错题本",
+                title = container.appContext.getString(R.string.print_doc_title),
                 generatedAt = System.currentTimeMillis()
             )
 
@@ -248,7 +249,11 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
             // 直接崩溃；两个阶段失败留下的半成品文件也不清理，导出目录慢性堆积。
             val run = runCatching {
                 when (chosen) {
-                    ExportFormat.PDF -> com.mistakebook.print.PdfExporter(container.mathRenderer).export(doc, target)
+                    ExportFormat.PDF -> com.mistakebook.print.PdfExporter(
+                        container.mathRenderer,
+                        container.appContext.getString(R.string.print_redo_tag),
+                        container.appContext.getString(R.string.print_page_footer_tpl)
+                    ).export(doc, target)
                     ExportFormat.HTML -> HtmlExporter(container.mathRenderer).export(doc, target)
                 }
             }.onFailure { target.delete() }

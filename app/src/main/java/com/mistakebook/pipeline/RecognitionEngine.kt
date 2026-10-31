@@ -17,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import com.mistakebook.R
 
 /**
  * 识别流水线状态机（PRD 4.4）：
@@ -31,6 +32,8 @@ class RecognitionEngine(
     private val llmClient: LlmClient,
     private val settingsStore: SettingsStore,
     private val files: com.mistakebook.data.AppFiles,
+    // 阶段文案写入 CaptureTask 落库后由进度页原样展示；本层无 Composable 作用域，从资源解析。
+    private val appContext: android.content.Context,
     private val ocrEngineDeps: com.mistakebook.net.ocr.OcrEngineDeps? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -266,7 +269,7 @@ class RecognitionEngine(
                 refreshed.copy(
                     status = TaskStatus.LLM,
                     markdown = markdown,
-                    stageText = "AI 整理中",
+                    stageText = appContext.getString(R.string.task_stage_llm_polishing),
                     updatedAt = System.currentTimeMillis()
                 )
             )

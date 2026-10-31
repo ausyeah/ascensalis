@@ -413,7 +413,7 @@ fun HomeScreen(
 
                 state.questions.isEmpty() -> EmptyState(
                     title = stringResource(R.string.home_empty_title),
-                    subtitle = "换个筛选条件试试"
+                    subtitle = stringResource(R.string.home_empty_filter_hint)
                 )
 
                 else -> LazyColumn(

@@ -949,7 +949,7 @@ internal fun MineruKeySection(
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     var pendingDeleteName by remember { mutableStateOf("") }
 
-    SettingsGroup(title = "OCR 识别配置") {
+    SettingsGroup(title = stringResource(R.string.settings_ocr_config_title)) {
         snapshot.ocrProfiles.forEach { profile ->
             OcrProfileCard(
                 profile = profile,
@@ -987,7 +987,7 @@ internal fun MineruKeySection(
         ) {
             Icon(Icons.Default.Add, contentDescription = null)
             Spacer(Modifier.width(6.dp))
-            Text("添加 OCR 供应商")
+            Text(stringResource(R.string.settings_ocr_add_provider))
         }
 
         if (!snapshot.ocrConfigured) {
@@ -998,8 +998,8 @@ internal fun MineruKeySection(
 
     pendingDeleteId?.let { id ->
         ConfirmDialog(
-            title = "删除 OCR 配置",
-            text = "确定要删除「$pendingDeleteName」吗？删除后不可恢复。",
+            title = stringResource(R.string.settings_ocr_delete_title),
+            text = stringResource(R.string.settings_ocr_delete_confirm, pendingDeleteName),
             confirmText = stringResource(R.string.action_confirm),
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
@@ -1089,7 +1089,7 @@ private fun OcrProfileCard(
                     OutlinedTextField(
                         value = draftName,
                         onValueChange = { draftName = it },
-                        label = { Text("渠道名称") },
+                        label = { Text(stringResource(R.string.settings_ocr_channel_name)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1103,7 +1103,7 @@ private fun OcrProfileCard(
                     OutlinedTextField(
                         value = draftNote,
                         onValueChange = { draftNote = it },
-                        label = { Text("备注说明（可选）") },
+                        label = { Text(stringResource(R.string.settings_ocr_note_label)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1111,8 +1111,8 @@ private fun OcrProfileCard(
                     OutlinedTextField(
                         value = draftName,
                         onValueChange = { draftName = it },
-                        label = { Text("渠道名称") },
-                        placeholder = { Text("例如：讯飞星辰 DeepSeek OCR") },
+                        label = { Text(stringResource(R.string.settings_ocr_channel_name)) },
+                        placeholder = { Text(stringResource(R.string.settings_ocr_name_hint)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1123,7 +1123,7 @@ private fun OcrProfileCard(
                         label = { Text("Base URL") },
                         placeholder = { Text("https://api.openai.com/v1") },
                         singleLine = true,
-                        supportingText = { Text("默认标准 /v1，支持填写端点如 /v2/chat/completions 或 /v1/responses") },
+                        supportingText = { Text(stringResource(R.string.settings_ocr_url_support)) },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
@@ -1136,8 +1136,8 @@ private fun OcrProfileCard(
                     OutlinedTextField(
                         value = draftModel,
                         onValueChange = { draftModel = it },
-                        label = { Text("模型名称") },
-                        placeholder = { Text("例如：xopdeepseekocr 或 deepseek-chat") },
+                        label = { Text(stringResource(R.string.settings_ocr_model_label)) },
+                        placeholder = { Text(stringResource(R.string.settings_ocr_model_hint)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1145,7 +1145,7 @@ private fun OcrProfileCard(
                     OutlinedTextField(
                         value = draftNote,
                         onValueChange = { draftNote = it },
-                        label = { Text("备注说明（可选）") },
+                        label = { Text(stringResource(R.string.settings_ocr_note_label)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1171,10 +1171,10 @@ private fun OcrProfileCard(
                             onClick = { onSave(currentDraft) },
                             enabled = currentDraft != profile
                         ) {
-                            Text("保存")
+                            Text(stringResource(R.string.action_save))
                         }
                         TestButton(
-                            text = "测试连接",
+                            text = stringResource(R.string.settings_test_connection),
                             loading = testing,
                             onClick = { onTest(currentDraft) },
                             result = testResult,
@@ -1186,7 +1186,7 @@ private fun OcrProfileCard(
                         IconButton(onClick = onDelete) {
                             Icon(
                                 Icons.Default.Delete,
-                                contentDescription = "删除",
+                                contentDescription = stringResource(R.string.action_delete),
                                 tint = MaterialTheme.colorScheme.error
                             )
                         }
@@ -2133,7 +2133,7 @@ internal fun ThemeModeSection(
         // 自选主题色（v0.0.76）：一排色点，选中描边。只换强调色
         // （按钮/选中态/徽标），背景与正文基调不变。
         Text(
-            text = "主题色",
+            text = stringResource(R.string.settings_theme_color),
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(Modifier.height(8.dp))
@@ -2439,9 +2439,9 @@ private fun TavilyQuotaBlock(
                     strokeWidth = 2.dp
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("查询中")
+                Text(stringResource(R.string.settings_usage_querying))
             } else {
-                Text("查询额度")
+                Text(stringResource(R.string.settings_usage_query))
             }
         }
         if (usage != null) {
@@ -2462,23 +2462,23 @@ private fun TavilyQuotaBlock(
         // 账号级与 Key 级都展示：一个账号可能有多把 Key，单看一边会漏。
         // 只显示「有值」的行，避免一片「—」占满屏幕。
         if (usage.plan.isNotBlank()) {
-            UsageRow(label = "当前套餐", value = usage.plan)
+            UsageRow(label = stringResource(R.string.settings_usage_plan), value = usage.plan)
         }
         if (usage.planLimit != null || usage.planUsage != null) {
             UsageRow(
-                label = "本周期用量",
+                label = stringResource(R.string.settings_usage_period),
                 value = quotaPair(usage.planUsage, usage.planLimit)
             )
         }
         if (usage.keyLimit != null || usage.keyUsage != null) {
             UsageRow(
-                label = "此 Key 用量",
+                label = stringResource(R.string.settings_usage_key),
                 value = quotaPair(usage.keyUsage, usage.keyLimit)
             )
         }
         if (usage.paygoLimit != null || usage.paygoUsage != null) {
             UsageRow(
-                label = "按量付费",
+                label = stringResource(R.string.settings_usage_payg),
                 value = quotaPair(usage.paygoUsage, usage.paygoLimit)
             )
         }
@@ -2493,7 +2493,7 @@ private fun TavilyQuotaBlock(
         )
     } else if (usage == null) {
         Text(
-            text = "额度用尽后搜索会静默失效，建议定期查询。",
+            text = stringResource(R.string.settings_usage_warn),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp)
@@ -2591,14 +2591,14 @@ internal fun PomodoroSection(
     state: SettingsUiState,
     viewModel: SettingsViewModel
 ) {
-    SettingsGroup(title = "番茄钟") {
+    SettingsGroup(title = stringResource(R.string.settings_section_pomodoro)) {
         SwitchRow(
-            label = "到点自动记录",
+            label = stringResource(R.string.settings_pomodoro_auto_record),
             checked = state.snapshot.pomodoroAutoRecord,
             onChange = viewModel::setPomodoroAutoRecord
         )
         SwitchRow(
-            label = "休息循环",
+            label = stringResource(R.string.settings_pomodoro_break_loop),
             checked = state.snapshot.pomodoroBreakLoop,
             onChange = viewModel::setPomodoroBreakLoop
         )
@@ -2608,7 +2608,7 @@ internal fun PomodoroSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "休息时长",
+                    text = stringResource(R.string.settings_pomodoro_break_length),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f)
                 )
@@ -2616,7 +2616,7 @@ internal fun PomodoroSection(
                     FilterChip(
                         selected = state.snapshot.pomodoroBreakMinutes == minutes,
                         onClick = { viewModel.setPomodoroBreakMinutes(minutes) },
-                        label = { Text("$minutes 分钟") }
+                        label = { Text(stringResource(R.string.settings_break_minutes_n, minutes)) }
                     )
                 }
             }
@@ -2634,13 +2634,13 @@ internal fun WordbookSection(
     var showCustomLimitDialog by remember { mutableStateOf(false) }
     val current = state.snapshot.wordbookDailyNewLimit
 
-    SettingsGroup(title = "背单词") {
+    SettingsGroup(title = stringResource(R.string.settings_section_wordbook)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "每日新词上限",
+                text = stringResource(R.string.settings_daily_new_limit),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
@@ -2648,7 +2648,7 @@ internal fun WordbookSection(
                 FilterChip(
                     selected = current == limit,
                     onClick = { viewModel.setWordbookDailyNewLimit(limit) },
-                    label = { Text("$limit 词") }
+                    label = { Text(stringResource(R.string.settings_new_words_n, limit)) }
                 )
             }
             FilterChip(
@@ -2657,16 +2657,16 @@ internal fun WordbookSection(
                 label = {
                     Text(
                         if (current == 50 || current == 100 || current == 200) {
-                            "自定义"
+                            stringResource(R.string.settings_daily_limit_custom)
                         } else {
-                            "自定义（$current）"
+                            stringResource(R.string.settings_daily_limit_custom_value, current)
                         }
                     )
                 }
             )
         }
         Text(
-            text = "一天狂刷新词容易前学后忘；错词复习不受这个限制",
+            text = stringResource(R.string.settings_daily_new_limit_hint),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -2695,11 +2695,11 @@ private fun CustomDailyLimitDialog(
     val parsed = text.toIntOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("自定义每日新词上限") },
+        title = { Text(stringResource(R.string.settings_daily_limit_dialog_title)) },
         text = {
             Column {
                 Text(
-                    text = "每天最多学习多少个新词（1–500）；错词复习不受影响。",
+                    text = stringResource(R.string.settings_daily_limit_dialog_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

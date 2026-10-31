@@ -87,7 +87,7 @@ fun BadgeWallScreen(onBack: () -> Unit) {
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            Text("应用尚未初始化，请返回重试")
+            Text(stringResource(R.string.badge_not_initialized))
         }
         return
     }
