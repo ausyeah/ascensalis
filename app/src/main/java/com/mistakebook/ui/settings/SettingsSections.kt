@@ -8,6 +8,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -93,6 +95,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.data.prefs.LlmKeyEntry
+import com.mistakebook.data.prefs.MAX_DAILY_NEW_LIMIT
+import com.mistakebook.data.prefs.MIN_DAILY_NEW_LIMIT
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.chat.ChatSearchProvider
 import com.mistakebook.data.prefs.NetworkMode
@@ -2625,6 +2629,7 @@ internal fun PomodoroSection(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 internal fun WordbookSection(
     state: SettingsUiState,
     viewModel: SettingsViewModel
@@ -2632,44 +2637,61 @@ internal fun WordbookSection(
     // 自定义档位弹窗：档位换成 50/100/200/自定义（v0.0.84 用户反馈，
     // 旧档 15/20/30 太少）。自定义打开数字输入弹窗，范围 1..500。
     var showCustomLimitDialog by remember { mutableStateOf(false) }
+    // 快照侧已把历史非法值（旧版 0 = 不限）收敛进 1..500，所以这里
+    // 永远能落到「某一个档位被选中」，不会出现四个 chip 全不选中的鬼状态。
     val current = state.snapshot.wordbookDailyNewLimit
 
     SettingsGroup(title = stringResource(R.string.settings_section_wordbook)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.settings_daily_new_limit),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
-            listOf(50, 100, 200).forEach { limit ->
-                FilterChip(
-                    selected = current == limit,
-                    onClick = { viewModel.setWordbookDailyNewLimit(limit) },
-                    label = { Text(stringResource(R.string.settings_new_words_n, limit)) }
+        Column {
+            // 标签独占一行，右侧报当前生效值（v0.0.86 用户反馈：原来标签和
+            // 四个 chip 挤在同一行，一超宽标签就被压成「一字一行」、
+            // 档位换行成两排还错位，整块设置看着是坏的）。
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.settings_daily_new_limit),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = stringResource(R.string.settings_new_words_n, current),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
-            FilterChip(
-                selected = current != 50 && current != 100 && current != 200,
-                onClick = { showCustomLimitDialog = true },
-                label = {
-                    Text(
-                        if (current == 50 || current == 100 || current == 200) {
-                            stringResource(R.string.settings_daily_limit_custom)
-                        } else {
-                            stringResource(R.string.settings_daily_limit_custom_value, current)
-                        }
+            Spacer(Modifier.height(8.dp))
+            // 档位走 FlowRow：窄屏放不下就整行换行，不再有谁被压变形的问题。
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(50, 100, 200).forEach { limit ->
+                    FilterChip(
+                        selected = current == limit,
+                        onClick = { viewModel.setWordbookDailyNewLimit(limit) },
+                        label = { Text(stringResource(R.string.settings_new_words_n, limit)) }
                     )
                 }
+                FilterChip(
+                    selected = current != 50 && current != 100 && current != 200,
+                    onClick = { showCustomLimitDialog = true },
+                    label = {
+                        Text(
+                            if (current == 50 || current == 100 || current == 200) {
+                                stringResource(R.string.settings_daily_limit_custom)
+                            } else {
+                                stringResource(R.string.settings_daily_limit_custom_value, current)
+                            }
+                        )
+                    }
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.settings_daily_new_limit_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Text(
-            text = stringResource(R.string.settings_daily_new_limit_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 
     if (showCustomLimitDialog) {
@@ -2684,7 +2706,7 @@ internal fun WordbookSection(
     }
 }
 
-/** 自定义每日新词上限：数字输入，1..500，非法输入时确认按钮置灰。 */
+/** 自定义每日新词上限：数字输入，区间见 [MIN_DAILY_NEW_LIMIT]..[MAX_DAILY_NEW_LIMIT]，非法输入时确认按钮置灰。 */
 @Composable
 private fun CustomDailyLimitDialog(
     initial: Int,
@@ -2709,13 +2731,15 @@ private fun CustomDailyLimitDialog(
                     onValueChange = { text = it.filter(Char::isDigit).take(3) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    isError = parsed == null || parsed !in 1..500
+                    isError = parsed == null ||
+                        parsed !in MIN_DAILY_NEW_LIMIT..MAX_DAILY_NEW_LIMIT
                 )
             }
         },
         confirmButton = {
             TextButton(
-                enabled = parsed != null && parsed in 1..500,
+                enabled = parsed != null &&
+                    parsed in MIN_DAILY_NEW_LIMIT..MAX_DAILY_NEW_LIMIT,
                 onClick = { parsed?.let(onConfirm) }
             ) { Text(stringResource(R.string.action_confirm)) }
         },

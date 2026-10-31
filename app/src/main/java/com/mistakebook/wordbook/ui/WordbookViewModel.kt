@@ -951,6 +951,8 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         // 近似口径：该词的**全部**作答都发生在今天 = 今天开始学的新词
         // （老词今天恰好答完历史全部次数时会被误计，低频且方向只是提前到线）。
         val newLimit = container.settingsStore.snapshotNow().wordbookDailyNewLimit
+        // 快照侧已把历史非法值收敛进 1..500，这里拿到的必然是有效档位；
+        // `> 0` 只是防守，别把它读成「0 = 不限」——那个入口 v0.0.84 就取消了。
         val dailyNewExhausted =
             newLimit > 0 && withContext(Dispatchers.IO) { countNewWordsToday() } >= newLimit
 

@@ -194,13 +194,15 @@ data class SettingsSnapshot(
     // ===== 背单词 =====
 
     /**
-     * 每日新词上限（0 = 不限）。
+     * 每日新词上限（取值恒在 [normalizeDailyNewLimit] 收敛后的区间内）。
      *
      * 一天狂刷新词是「前学后忘」的头号来源：新词当天见过一面，
      * 隔天基本全忘。默认 20——错词复习不受此限制，只管「今天
-     * 开始学的新词」。设 0 可关闭限制（老习惯用户）。
+     * 开始学的新词」。v0.0.84 起档位是 50/100/200/自定义（自定义
+     * 弹窗限定 1..500），旧的「0 = 不限」入口已取消，读到的历史值
+     * 一律收敛进新区间（见 [normalizeDailyNewLimit]）。
      */
-    val wordbookDailyNewLimit: Int = 20,
+    val wordbookDailyNewLimit: Int = DEFAULT_DAILY_NEW_LIMIT,
 
     /**
      * 考试日期（epochDay，F3 考前排期用）。null = 未设置。
@@ -288,3 +290,29 @@ data class SettingsSnapshot(
         const val OCR_LANG_ZH = "ch"
     }
 }
+
+// ===== 每日新词上限的合法区间 =====
+//
+// 区间放在快照文件里（而不是 SettingsStore 或 UI 各自写死）：读取侧、
+// 写入侧、自定义弹窗三处必须认同一个区间，任何一处跑偏都会出现
+// 「存得进来看不见」或「看得见存不进」的鬼故事。
+
+/** 下限 1：「一天 0 个新词」不是任何用户想要的语义。 */
+internal const val MIN_DAILY_NEW_LIMIT = 1
+
+/** 上限 500：自定义弹窗与写入侧共用，一天不可能真背得下更多。 */
+internal const val MAX_DAILY_NEW_LIMIT = 500
+
+/** 没设置过、或读到历史非法值（旧版 0 = 不限）时回落的默认档。 */
+internal const val DEFAULT_DAILY_NEW_LIMIT = 20
+
+/**
+ * 把 DataStore 里读到的原始值收敛成设置页能表达的合法档位。
+ *
+ * v0.0.84 之前「0 = 不限」，而新档位（50/100/200/自定义 1..500）里
+ * **没有任何一项能表达不限**。于是一个从旧版升上来的用户在设置页会看到
+ * 「自定义（0）」：四个 chip 一个都不选中，实际行为是不限、界面却显示 0，
+ * 怎么看都对不上。收敛之后永远有一个档位被选中，显示与行为一致。
+ */
+internal fun normalizeDailyNewLimit(stored: Int?): Int =
+    stored?.coerceIn(MIN_DAILY_NEW_LIMIT, MAX_DAILY_NEW_LIMIT) ?: DEFAULT_DAILY_NEW_LIMIT

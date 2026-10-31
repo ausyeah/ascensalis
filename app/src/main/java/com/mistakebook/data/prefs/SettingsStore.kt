@@ -146,7 +146,7 @@ class SettingsStore(context: Context) {
             pomodoroAutoRecord = prefs[KEY_POMODORO_AUTO_RECORD] ?: true,
             pomodoroBreakLoop = prefs[KEY_POMODORO_BREAK_LOOP] ?: false,
             pomodoroBreakMinutes = prefs[KEY_POMODORO_BREAK_MINUTES] ?: 10,
-            wordbookDailyNewLimit = prefs[KEY_WORDBOOK_DAILY_NEW] ?: 20,
+            wordbookDailyNewLimit = normalizeDailyNewLimit(prefs[KEY_WORDBOOK_DAILY_NEW]),
             // DataStore 没有"可空 long"，-1 是"未设置"哨兵
             examDateEpochDay = (prefs[KEY_EXAM_DATE] ?: -1L).takeIf { it > 0 }
         )
@@ -589,12 +589,23 @@ class SettingsStore(context: Context) {
     // ===== 背单词 =====
 
     /**
-     * 设置每日新词上限。档位换成 50/100/200/自定义（v0.0.84，旧档太少）：
-     * 白名单放宽为 1..500，自定义档任意合法值都能存。
-     * 旧值（15/20/30/0）读出来仍生效（快照原样透传），下次改设置时落进新区间。
+     * 设置每日新词上限。档位是 50/100/200/自定义（v0.0.84，旧档太少）：
+     * 合法区间 [MIN_DAILY_NEW_LIMIT]..[MAX_DAILY_NEW_LIMIT]，越界值回落
+     * [DEFAULT_DAILY_NEW_LIMIT]——调用方传 0/负数（旧版「不限」语义）时
+     * 宁可给个默认档，也不能存一个 UI 表达不出来的值。
+     *
+     * 读取侧同样收敛（见 [normalizeDailyNewLimit]）：只堵写入不堵读取，
+     * 库里已有的历史 0 还是会以「自定义（0）」的样子出现在设置页。
      */
     suspend fun setWordbookDailyNewLimit(value: Int) =
-        editInt(KEY_WORDBOOK_DAILY_NEW, if (value in 1..500) value else 20)
+        editInt(
+            KEY_WORDBOOK_DAILY_NEW,
+            if (value in MIN_DAILY_NEW_LIMIT..MAX_DAILY_NEW_LIMIT) {
+                value
+            } else {
+                DEFAULT_DAILY_NEW_LIMIT
+            }
+        )
 
     // ===== 外观与主题 =====
 
@@ -711,7 +722,7 @@ class SettingsStore(context: Context) {
         val KEY_POMODORO_BREAK_LOOP = booleanPreferencesKey("pomodoro_break_loop")
         val KEY_POMODORO_BREAK_MINUTES = intPreferencesKey("pomodoro_break_minutes")
 
-        /** 每日新词上限（档位 50/100/200/自定义，历史值 0=不限 仍可读），见 [SettingsSnapshot.wordbookDailyNewLimit]。 */
+        /** 每日新词上限（档位 50/100/200/自定义；读取时收敛进 1..500，见 [normalizeDailyNewLimit]）。 */
         val KEY_WORDBOOK_DAILY_NEW = intPreferencesKey("wordbook_daily_new_limit")
         val KEY_CHAT_SEARCH_ENABLED = booleanPreferencesKey("chat_search_enabled")
         val KEY_CHAT_SEARCH_PROVIDER = stringPreferencesKey("chat_search_provider")
