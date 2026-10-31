@@ -814,6 +814,10 @@ private fun SwipeableQuestionCard(
                         var claimed = false
                         var yielded = false
                         val slop = viewConfiguration.touchSlop
+                        // 本手势累计到的位移。snapTo 经 scope.launch 异步落盘，
+                        // 松手判定不能读 offsetX.value（可能还是上一帧的旧值），
+                        // 用本地累计值才能准确决定「吸附展开 / 回弹归零」。
+                        var curOffset = offsetX.value
 
                         try {
                             while (true) {
@@ -846,14 +850,16 @@ private fun SwipeableQuestionCard(
 
                                 if (claimed) {
                                     change.consume()
-                                    offsetX.snapTo(
-                                        (offsetX.value + dx).coerceIn(-revealWidthPx, 0f)
-                                    )
+                                    // snapTo 是挂起函数，awaitEachGesture 的受限作用域
+                                    // 不允许直接调（编译错误）——与旧 rememberDraggableState
+                                    // 一致，经外层 scope.launch 落盘，帧内顺序由互斥锁保证。
+                                    curOffset = (curOffset + dx).coerceIn(-revealWidthPx, 0f)
+                                    scope.launch { offsetX.snapTo(curOffset) }
                                 }
                             }
                         } finally {
                             if (claimed) {
-                                val opened = offsetX.value < -revealWidthPx * 0.35f
+                                val opened = curOffset < -revealWidthPx * 0.35f
                                 revealed = opened
                                 scope.launch {
                                     offsetX.animateTo(
