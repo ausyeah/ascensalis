@@ -38,13 +38,18 @@ object HtmlSanitizer {
 
     private const val CACHE_ENTRIES = 32
 
-    private val SCRIPT = Regex("<script\\b[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE)
-    private val SCRIPT_EMPTY = Regex("<script\\b[^>]*/?>", RegexOption.IGNORE_CASE)
-    private val IFRAME = Regex("<iframe\\b[^>]*>[\\s\\S]*?</iframe>", RegexOption.IGNORE_CASE)
-    private val OBJECT = Regex("<object\\b[^>]*>[\\s\\S]*?</object>", RegexOption.IGNORE_CASE)
-    private val FORM = Regex("<form\\b[^>]*>[\\s\\S]*?</form>", RegexOption.IGNORE_CASE)
+    // 「整段删」五条（v0.0.85）：闭合部分做成**可选组**——只出现开标签
+    //（<iframe src=…>、<script src=…> 这类未闭合/自闭合形态）时，标签本身
+    // 也要被剥掉。早先要求闭合标签才删，这五种形态会原样穿过清洗层，
+    // 与本文件「宁可少显示，不可执行」的承诺相反。可选组是贪婪的：
+    // 有闭合标签时仍然删到第一个闭合为止（含内容），没有闭合时只删开
+    // 标签本身，后面的正常正文不受牵连。SCRIPT_EMPTY 已被可选组涵盖，删除。
+    private val SCRIPT = Regex("<script\\b[^>]*>(?:[\\s\\S]*?</script>)?", RegexOption.IGNORE_CASE)
+    private val IFRAME = Regex("<iframe\\b[^>]*>(?:[\\s\\S]*?</iframe>)?", RegexOption.IGNORE_CASE)
+    private val OBJECT = Regex("<object\\b[^>]*>(?:[\\s\\S]*?</object>)?", RegexOption.IGNORE_CASE)
+    private val FORM = Regex("<form\\b[^>]*>(?:[\\s\\S]*?</form>)?", RegexOption.IGNORE_CASE)
     private val EMBED = Regex("<embed\\b[^>]*/?>", RegexOption.IGNORE_CASE)
-    private val BUTTON = Regex("<button\\b[^>]*>[\\s\\S]*?</button>", RegexOption.IGNORE_CASE)
+    private val BUTTON = Regex("<button\\b[^>]*>(?:[\\s\\S]*?</button>)?", RegexOption.IGNORE_CASE)
     private val INPUT = Regex("<input\\b[^>]*/?>", RegexOption.IGNORE_CASE)
     private val LINK = Regex("<link\\b[^>]*/?>", RegexOption.IGNORE_CASE)
     private val BASE = Regex("<base\\b[^>]*/?>", RegexOption.IGNORE_CASE)
@@ -98,7 +103,6 @@ object HtmlSanitizer {
     private fun compute(source: String): String {
         var out = source
         out = out.replace(SCRIPT, "")
-        out = out.replace(SCRIPT_EMPTY, "")
         out = out.replace(IFRAME, "")
         out = out.replace(OBJECT, "")
         out = out.replace(FORM, "")

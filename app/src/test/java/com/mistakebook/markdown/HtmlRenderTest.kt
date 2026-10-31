@@ -91,6 +91,38 @@ class HtmlRenderTest {
         assertTrue(clean.contains("hi"))
     }
 
+    // v0.0.85：未闭合 / 自闭合形态早先会原样穿过清洗层（正则要求闭合标签）。
+    @Test
+    fun `未闭合与自闭合的危险标签也被剥掉`() {
+        listOf(
+            "<iframe src=\"https://evil\">",
+            "<iframe/>",
+            "<object data=\"x\">",
+            "<form action=\"x\">",
+            "<button onclick=\"x\">",
+            "<script src=\"evil.js\">"
+        ).forEach { raw ->
+            val clean = HtmlSanitizer.sanitize(raw)
+            val low = clean.lowercase()
+            assertFalse(
+                "危险标签必须被剥掉: $raw -> $clean",
+                low.contains("<iframe") || low.contains("<object") ||
+                    low.contains("<form") || low.contains("<button") ||
+                    low.contains("<script")
+            )
+        }
+    }
+
+    @Test
+    fun `未闭合标签后面的正常正文不被误删且闭合形态清洗不回退`() {
+        // 只剥开标签本身，正文保留
+        val kept = HtmlSanitizer.sanitize("<form action=\"x\">正文")
+        assertTrue(kept.contains("正文"))
+        // 闭合形态仍然整段删（含内容）
+        assertTrue(HtmlSanitizer.sanitize("<button onclick=\"x\">点我</button>").isBlank())
+        assertTrue(HtmlSanitizer.sanitize("<iframe src=\"https://evil\"></iframe>").isBlank())
+    }
+
     @Test
     fun `清洗保留样式与表格`() {
         val html = """<style>.a{color:red}</style><table><tr><td>1</td></tr></table>"""
