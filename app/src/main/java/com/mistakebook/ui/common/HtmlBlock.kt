@@ -60,7 +60,13 @@ fun HtmlBlock(
     val html = remember(source, textColor, backgroundColor) {
         HtmlDocument.wrap(source, textColor, backgroundColor)
     }
-    var heightDp by remember(html) { mutableIntStateOf(60) }
+    // 高度状态**不能**按 html 记（v0.0.84 修复「首屏显示不全」）：
+    // factory 只跑一次，里面 measure/bridge 闭包捕获的是创建那一刻的委托；
+    // 若按 html 记，html 一变（流式内容增长、主题换色）就换一个新 State，
+    // 而闭包还写给旧 State——可见高度永远停在初始 60dp，WebView 被裁剪，
+    // 只能退出页面重建才恢复。不 keyed，与 AndroidView 生命周期一致；
+    // html 变更时在 update 里显式归零重测。
+    var heightDp by remember { mutableIntStateOf(60) }
 
     AndroidView(
         factory = { ctx ->
@@ -95,7 +101,15 @@ fun HtmlBlock(
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
-                        view?.post { view.let { measure(it) } }
+                        view ?: return
+                        // 首测之外再补几拍：KaTeX 渲染、字体就位都会让内容变高，
+                        // onPageFinished 那一刻未必是最终高度。与注入 JS 里的
+                        // ResizeObserver/setTimeout 兜底互为备份（任一侧失灵，
+                        // 另一侧仍能把真实高度补报上来）。
+                        view.post { measure(view) }
+                        listOf(150L, 400L, 1000L, 2000L).forEach { delayMs ->
+                            view.postDelayed({ measure(view) }, delayMs)
+                        }
                     }
 
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -125,6 +139,9 @@ fun HtmlBlock(
         update = { webView ->
             if (webView.tag != html) {
                 webView.tag = html
+                // 内容变了高度必须归零重测：只增不减的桥接是给同一份内容
+                // 的多次上报用的，跨内容沿用旧高度会把新内容撑出一截空白。
+                heightDp = 60
                 webView.setBackgroundColor(backgroundColor)
                 webView.loadDataWithBaseURL("file:///android_asset/katex/", html, "text/html", "utf-8", null)
             }

@@ -23,9 +23,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Delete
@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.BarChart
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.mistakebook.ui.theme.DeleteReveal
 import androidx.compose.material.icons.Icons
@@ -307,13 +308,9 @@ fun HomeScreen(
                     value = state.keyword,
                     onValueChange = viewModel::setKeyword,
                     modifier = Modifier.weight(1f),
-                    placeholder = {
-                        Text(
-                            text = stringResource(R.string.home_search_hint),
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1
-                        )
-                    },
+                    // 不放灰色提示字（v0.0.84 用户反馈）：「搜题干、标题、答案、解析」
+                    // 在让出右侧三个入口按钮后的剩余宽度里显示不全，被裁掉一截
+                    // 反而影响观感；搜索图标本身已足够表达语义。
                     leadingIcon = {
                         Icon(
                             Icons.Default.Search,
@@ -739,12 +736,6 @@ private fun SwipeableQuestionCard(
     // 位移本身走 `Modifier.offset { }`（只跑布局阶段，不重组），这是正确写法。
     var revealed by remember { mutableStateOf(false) }
 
-    val dragState = rememberDraggableState { delta ->
-        scope.launch {
-            offsetX.snapTo((offsetX.value + delta).coerceIn(-revealWidthPx, 0f))
-        }
-    }
-
     fun close() {
         revealed = false
         scope.launch { offsetX.animateTo(0f) }
@@ -797,27 +788,86 @@ private fun SwipeableQuestionCard(
             }
         }
 
-        // 上层：卡片，跟随手势位移
+        // 上层：卡片，跟随手势位移。
+        //
+        // 横向手势 v0.0.84 重写（修「左右滑动卡在一半」）：
+        // Compose 的 Main 指针分发是**子先于父**，早先 `Modifier.draggable` 在越过
+        // 触发阈值那一刻就消费事件——手指落在卡片上的翻页手势全被卡片吃掉，
+        // 页面纹丝不动、卡片却被拖出一截卡在那（松手才回弹）。
+        // 现在按「越过阈值用时」让道：
+        // - 快速甩动（< SWIPE_FLING_YIELD_MS）：翻页意图，不消费不认领——
+        //   门户 Pager 的同轴检测器在**同一事件稍后**处理，自然接手翻页；
+        // - 慢速拖拽：认领为「展开删除」，消费后续移动；
+        // - 纵向占优：交给列表滚动。
+        // 认领过一次就不再反悔（yielded 锁存），避免 Pager 没接手时中途又抢回。
         Box(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                .draggable(
-                    state = dragState,
-                    orientation = Orientation.Horizontal,
-                    onDragStopped = {
-                        val opened = offsetX.value < -revealWidthPx * 0.35f
-                        revealed = opened
-                        scope.launch {
-                            offsetX.animateTo(
-                                targetValue = if (opened) -revealWidthPx else 0f,
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness = Spring.StiffnessMediumLow
-                                )
-                            )
+                .pointerInput(revealWidthPx) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val startTime = down.uptimeMillis
+                        var lastX = down.position.x
+                        var lastY = down.position.y
+                        var accX = 0f
+                        var accY = 0f
+                        var claimed = false
+                        var yielded = false
+                        val slop = viewConfiguration.touchSlop
+
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val pressed = event.changes.filter { it.pressed }
+                                if (pressed.isEmpty()) break
+
+                                // Pager 翻页 / 列表滚动已接手：立即让位
+                                if (event.changes.any { it.isConsumed }) break
+
+                                val change = pressed.first()
+                                val dx = change.position.x - lastX
+                                val dy = change.position.y - lastY
+                                lastX = change.position.x
+                                lastY = change.position.y
+                                accX += dx
+                                accY += dy
+
+                                if (!claimed && !yielded &&
+                                    (abs(accX) > slop || abs(accY) > slop)
+                                ) {
+                                    val elapsedMs = change.uptimeMillis - startTime
+                                    when {
+                                        abs(accY) >= abs(accX) -> yielded = true // 纵向：给列表
+                                        elapsedMs < SWIPE_FLING_YIELD_MS -> yielded = true // 甩动：给 Pager
+                                        else -> claimed = true // 慢速横向：展开删除
+                                    }
+                                    if (!claimed) continue
+                                }
+
+                                if (claimed) {
+                                    change.consume()
+                                    offsetX.snapTo(
+                                        (offsetX.value + dx).coerceIn(-revealWidthPx, 0f)
+                                    )
+                                }
+                            }
+                        } finally {
+                            if (claimed) {
+                                val opened = offsetX.value < -revealWidthPx * 0.35f
+                                revealed = opened
+                                scope.launch {
+                                    offsetX.animateTo(
+                                        targetValue = if (opened) -revealWidthPx else 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
-                )
+                }
         ) {
             QuestionCard(
                 question = question,
@@ -967,3 +1017,10 @@ private fun FilterRow(
  * 拇指能点中，又不至于把整张卡都推走（推太多用户会失去「这是同一张卡」的感觉）。
  */
 private val SwipeDeleteRevealWidth = 88.dp
+
+/**
+ * 横向手势让道阈值（毫秒）：从落指到越过触摸 slop 的用时。
+ * 翻页是快速甩动（几十 ms 就越过 8dp），展开删除是慢速拖拽（通常 150ms+）。
+ * 用时短于该值判为翻页意图，卡片让道给门户 Pager。
+ */
+private const val SWIPE_FLING_YIELD_MS = 90L

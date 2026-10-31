@@ -68,6 +68,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,6 +85,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -295,10 +297,7 @@ internal fun TestButton(
     result: String?,
     resultOk: Boolean
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(modifier = Modifier.height(BUTTON_HEIGHT)) {
             if (loading) {
                 Row(
@@ -320,12 +319,14 @@ internal fun TestButton(
                 Button(onClick = onClick) { Text(text) }
             }
         }
-        // 结果在按钮右边，不另起一行——换行会让按钮下方留一大片空白
+        // 结果独占一行（v0.0.84 用户反馈）：早先挤在按钮右侧的剩余宽度里，
+        // 「连接成功（耗时 XXXms）」这类文案被压成两三行还带省略，观感很差；
+        // 独占一行后宽度充足，长文案自然换行。
         result?.let { message ->
             TestResultBanner(
                 message = message,
                 ok = resultOk,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
@@ -2628,6 +2629,11 @@ internal fun WordbookSection(
     state: SettingsUiState,
     viewModel: SettingsViewModel
 ) {
+    // 自定义档位弹窗：档位换成 50/100/200/自定义（v0.0.84 用户反馈，
+    // 旧档 15/20/30 太少）。自定义打开数字输入弹窗，范围 1..500。
+    var showCustomLimitDialog by remember { mutableStateOf(false) }
+    val current = state.snapshot.wordbookDailyNewLimit
+
     SettingsGroup(title = "背单词") {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2638,13 +2644,26 @@ internal fun WordbookSection(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
-            listOf(15, 20, 30, 0).forEach { limit ->
+            listOf(50, 100, 200).forEach { limit ->
                 FilterChip(
-                    selected = state.snapshot.wordbookDailyNewLimit == limit,
+                    selected = current == limit,
                     onClick = { viewModel.setWordbookDailyNewLimit(limit) },
-                    label = { Text(if (limit == 0) "不限" else "$limit 词") }
+                    label = { Text("$limit 词") }
                 )
             }
+            FilterChip(
+                selected = current != 50 && current != 100 && current != 200,
+                onClick = { showCustomLimitDialog = true },
+                label = {
+                    Text(
+                        if (current == 50 || current == 100 || current == 200) {
+                            "自定义"
+                        } else {
+                            "自定义（$current）"
+                        }
+                    )
+                }
+            )
         }
         Text(
             text = "一天狂刷新词容易前学后忘；错词复习不受这个限制",
@@ -2652,6 +2671,58 @@ internal fun WordbookSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+
+    if (showCustomLimitDialog) {
+        CustomDailyLimitDialog(
+            initial = current,
+            onConfirm = { value ->
+                viewModel.setWordbookDailyNewLimit(value)
+                showCustomLimitDialog = false
+            },
+            onDismiss = { showCustomLimitDialog = false }
+        )
+    }
+}
+
+/** 自定义每日新词上限：数字输入，1..500，非法输入时确认按钮置灰。 */
+@Composable
+private fun CustomDailyLimitDialog(
+    initial: Int,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var text by remember { mutableStateOf(initial.toString()) }
+    val parsed = text.toIntOrNull()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("自定义每日新词上限") },
+        text = {
+            Column {
+                Text(
+                    text = "每天最多学习多少个新词（1–500）；错词复习不受影响。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.filter(Char::isDigit).take(3) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = parsed == null || parsed !in 1..500
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = parsed != null && parsed in 1..500,
+                onClick = { parsed?.let(onConfirm) }
+            ) { Text(stringResource(R.string.action_confirm)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        }
+    )
 }
 
 @Composable

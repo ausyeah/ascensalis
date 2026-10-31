@@ -21,10 +21,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.TextSnippet
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
@@ -457,13 +465,23 @@ private fun LibraryPreviewDialog(
     )
 }
 
-/** 资料库文件类型图标（v0.0.57）：按扩展名给一个一眼可辨的图标。 */
+/**
+ * 资料库文件类型图标（v0.0.57；v0.0.84 换官方 Material 图标并细化到每种类型）。
+ * 早期 md/txt/json/csv 全落到 else 的 Description，一列下来几乎全是同一个图标。
+ */
 private fun libraryFileIcon(name: String): androidx.compose.ui.graphics.vector.ImageVector {
     return when (name.substringAfterLast('.', "").lowercase()) {
         "pdf" -> Icons.Default.PictureAsPdf
-        "xls", "xlsx" -> Icons.Default.TableChart
         "doc", "docx" -> Icons.Default.Description
-        else -> Icons.Default.Description
+        "xls", "xlsx", "csv" -> Icons.Default.TableChart
+        "md", "markdown" -> Icons.Default.Article
+        "txt" -> Icons.Default.TextSnippet
+        "json" -> Icons.Default.DataObject
+        "png", "jpg", "jpeg", "webp", "gif" -> Icons.Default.Image
+        "mp3", "wav", "m4a", "flac", "ogg" -> Icons.Default.LibraryMusic
+        "mp4", "mov", "webm", "mkv" -> Icons.Default.Movie
+        "zip", "rar", "7z" -> Icons.Default.FolderZip
+        else -> Icons.Default.InsertDriveFile
     }
 }
 

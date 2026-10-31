@@ -171,9 +171,15 @@ fun WordbookScreen(
                     }
                 }
 
-                // 外部变更 tab 时驱动 pager 滚动
+                // 外部变更 tab 时驱动 pager 滚动。
+                // 护栏（v0.0.84 修「左右滑动卡在一半」）：用户正在拖页或页面还在
+                // 惯性滑动时绝不回写——早先拖页过半触发 setTab，异步落地的
+                // state.currentTab 撞上手势中段，animateScrollToPage 会把拖到
+                // 一半的页面拽走，表现就是页面卡在中间/被拽回。
                 LaunchedEffect(state.currentTab) {
-                    if (pagerState.currentPage != state.currentTab.ordinal) {
+                    if (!pagerState.isScrollInProgress &&
+                        pagerState.targetPage != state.currentTab.ordinal
+                    ) {
                         pagerState.animateScrollToPage(state.currentTab.ordinal)
                     }
                 }

@@ -41,6 +41,9 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -182,10 +185,16 @@ fun PomodoroScreen(container: AppContainer) {
     }
 
     LaunchedEffect(state.mode) {
-        // 长按主按钮循环模式时，Tab 指示器与 Pager 跟着切
+        // 长按主按钮循环模式时，Tab 指示器与 Pager 跟着切。
+        // 护栏（v0.0.84 修「左右滑动卡在一半」）：拖页/惯性滑动中绝不回写——
+        // 早先 setMode 异步落地撞上手势中段，scrollToPage 会把拖到一半的
+        // 页面瞬间拽走。顺带改成 animate，跳页不再生硬。
         val targetPage = if (state.mode == FocusMode.STOPWATCH) 1 else 0
-        if (pagerState.currentPage != targetPage && pagerState.currentPage != 2) {
-            pagerState.scrollToPage(targetPage)
+        if (!pagerState.isScrollInProgress &&
+            pagerState.currentPage != targetPage &&
+            pagerState.currentPage != 2
+        ) {
+            pagerState.animateScrollToPage(targetPage)
         }
     }
 
@@ -540,9 +549,13 @@ private fun TimerDial(
 
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(264.dp)) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val stroke = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
-            val inset = 10.dp.toPx() / 2f
-            val diameter = size.minDimension - 10.dp.toPx()
+            // v0.0.84 视觉微调：环细一档（10→8dp）更轻盈；进度末端加一颗
+            // 圆头小点（手表指针感），剩余时间一眼可读——纯描边在进度小
+            // 的时候几乎看不出起点在哪。
+            val strokeW = 8.dp.toPx()
+            val stroke = Stroke(width = strokeW, cap = StrokeCap.Round)
+            val inset = strokeW / 2f
+            val diameter = size.minDimension - strokeW
             drawArc(
                 color = trackColor,
                 startAngle = 0f,
@@ -552,15 +565,26 @@ private fun TimerDial(
                 topLeft = Offset(inset, inset),
                 size = Size(diameter, diameter)
             )
-            if (mode.hasTarget) {
+            if (mode.hasTarget && progress > 0f) {
+                val sweep = 360f * progress
                 drawArc(
                     color = progressColor,
                     startAngle = -90f,
-                    sweepAngle = 360f * progress,
+                    sweepAngle = sweep,
                     useCenter = false,
                     style = stroke,
                     topLeft = Offset(inset, inset),
                     size = Size(diameter, diameter)
+                )
+                // 进度末端圆点：圆心落在弧线终点上，半径略大于线宽一半
+                val endAngle = (-90f + sweep) * (Math.PI.toFloat() / 180f)
+                val radius = diameter / 2f
+                val cx = size.minDimension / 2f + radius * kotlin.math.cos(endAngle)
+                val cy = size.minDimension / 2f + radius * kotlin.math.sin(endAngle)
+                drawCircle(
+                    color = progressColor,
+                    radius = strokeW * 0.9f,
+                    center = Offset(cx, cy)
                 )
             }
         }
@@ -605,44 +629,46 @@ private fun TimerDial(
 
             Spacer(Modifier.height(10.dp))
 
-            // ---- 主操作：时间正下方，纯图标、零底色 ----
-            // 早期是一颗 primary 大胶囊「开始」，用户原话：「占整个圆的大
-            // 部分，甚至还要超出去，实在是没有审美」。计时器的控件应该
-            // 像手表一样安静——图形本身即语义，不需要文字 explain：
-            // 三角形 = 开始，竖等号 = 暂停，红方块 = 停止。
+            // ---- 主操作：时间正下方 ----
+            // v0.0.84：裸图标看着太秃（用户「显示有点丑」），给每颗按钮补
+            // 一层安静的圆底——开始用 primaryContainer 呼应主题色，暂停用
+            // 中性容器色，停止仍是唯一的彩色（errorContainer）。尺寸克制，
+            // 不回到早期那颗大胶囊。
             when (status) {
                 RunStatus.IDLE -> {
                     // 开始：长按循环切换模式（隐藏手势，顶部另有可见 Tab）
                     Box(
                         modifier = Modifier
-                            .size(52.dp)
+                            .size(56.dp)
                             .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer)
                             .combinedClickable(onClick = onStart, onLongClick = onCycleMode),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Outlined.PlayArrow,
+                            Icons.Filled.PlayArrow,
                             contentDescription = "开始",
                             modifier = Modifier.size(30.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
                 else -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                         Box(
                             modifier = Modifier
                                 .size(52.dp)
                                 .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                                 .combinedClickable(
                                     onClick = if (status == RunStatus.RUNNING) onPause else onResume
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                if (status == RunStatus.RUNNING) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                                if (status == RunStatus.RUNNING) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                                 contentDescription = if (status == RunStatus.RUNNING) "暂停" else "继续",
-                                modifier = Modifier.size(30.dp),
+                                modifier = Modifier.size(26.dp),
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -651,14 +677,15 @@ private fun TimerDial(
                             modifier = Modifier
                                 .size(52.dp)
                                 .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.errorContainer)
                                 .combinedClickable(onClick = onStopSave),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                Icons.Outlined.Stop,
+                                Icons.Filled.Stop,
                                 contentDescription = "结束并记录",
-                                modifier = Modifier.size(26.dp),
-                                tint = MaterialTheme.colorScheme.error
+                                modifier = Modifier.size(24.dp),
+                                tint = MaterialTheme.colorScheme.onErrorContainer
                             )
                         }
                     }

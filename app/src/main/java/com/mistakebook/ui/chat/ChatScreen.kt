@@ -938,12 +938,11 @@ private fun MessageBubble(
                 if (thinking.isNotBlank()) {
                     ThinkingBlock(
                         text = thinking,
-                        // 「正在思考」= 还在流式**且答案尚未开始**。早先直接传 isStreaming
-                        //（整条消息的流式状态，贯穿思考+作答两阶段），答案输出时思考块
-                        // 一直开着把正文顶出屏幕，直到消息彻底结束才猛地收起——
-                        // 用户反馈「生成时思考会跳转但不折叠」。答案一有内容即视为
-                        // 思考结束，收起时机与思考结束时机对齐。
+                        // 「正在思考」= 还在流式**且答案尚未开始**（v0.0.83 简化折叠规则）。
                         streaming = isStreaming && answer.isBlank(),
+                        // 生成全程（思考+作答）禁手动折叠：思考中不可折叠；
+                        // 结束输出正文时自动折叠；只有生成结束后才可自由展开/收起。
+                        locked = isStreaming,
                         mathRenderer = mathRenderer,
                         // 思考块与正文同属一条消息：共用消息 id 隔离防抖
                         debounceKey = message.id,
@@ -1232,13 +1231,15 @@ private fun StatusRow(
  * 思考过程可能很长而信息量不大，展开占的正是答案的位置。
  * 用户想看的是结论，想查推导时再展开。
  *
- * ## 正在思考时保持展开，答案开始即自动收起
+ * ## 折叠规则（v0.0.83 定稿，用户拍板）
  *
- * 模型还在输出时自动收起，页面会不停跳而且看不到「它在想什么」；
- * 一直展开着，正文一出来就被推到屏幕外。两种做法各错一半，
- * 所以按「思考阶段」切换：调用方传 `streaming = 正在流式 && 答案还没开始`，
- * 展开恰好覆盖思考阶段，答案第一个字到达时收起，各一次，不反复横跳。
- * （早先错传整条消息的流式状态，思考块在作答阶段一直开着——v0.0.83 修复。）
+ * - **思考中**：保持展开且**不可折叠**（[locked]=true，点击无效）——
+ *   用户要看到「它在想什么」；
+ * - **答案开始输出**：自动收起一次（`streaming` 翻假触发 LaunchedEffect），
+ *   把位置让给正文；作答期间同样不可点；
+ * - **生成结束后**：才可以自由折叠/展开。
+ * 早先错传整条消息的流式状态，思考块在作答阶段一直开着、消息结束才猛收——
+ * 就是「会跳转但不折叠」的根因。
  *
  * ## 思考过程同样走 [RichText]
  *
@@ -1257,6 +1258,8 @@ private fun ThinkingBlock(
     streaming: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer,
     debounceKey: Any? = null,
+    /** 生成进行中（思考+作答全程）：折叠/展开点击一律无效。 */
+    locked: Boolean = false,
     onToggle: (Boolean) -> Unit = {}
 ) {
     // 初始展开态直接取 streaming：历史消息（streaming=false）首次组合就是
@@ -1281,11 +1284,20 @@ private fun ThinkingBlock(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .clickable {
-                val next = !expanded
-                expanded = next
-                onToggle(next)
-            }
+            .then(
+                // 生成中（思考中/作答中）点击无效：思考中必须保持展开让人看到
+                // 「在想什么」，作答中保持收起把位置留给正文——用户要求
+                // 「只有不输出的时候才可以折叠展开」。
+                if (!locked) {
+                    Modifier.clickable {
+                        val next = !expanded
+                        expanded = next
+                        onToggle(next)
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1332,9 +1344,9 @@ private fun ThinkingBlock(
                 Spacer(Modifier.width(2.dp))
             }
             Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                imageVector = if (expanded && !locked) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                 contentDescription = stringResource(
-                    if (expanded) R.string.chat_thinking_collapse else R.string.chat_thinking_expand
+                    if (expanded && !locked) R.string.chat_thinking_collapse else R.string.chat_thinking_expand
                 ),
                 modifier = Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant

@@ -436,16 +436,66 @@ private fun BadgeDetailDialog(
     )
 }
 
-/** 徽章 key → 素材资源。新增徽章时同步补图。 */
+/**
+ * 徽章 key → 素材资源。新增徽章时同步补图。
+ * v0.0.84 补齐全部 48 枚（此前只有 10 枚，缺图走程序化渐变章）：
+ * 新素材用与旧素材同一套圆形贴纸风格生成（蓝盘 + 藏青描边 + 白环 + 暖金图案），
+ * 未解锁的置灰逻辑不变（灰度 + 半透明），成就墙不再出现「一半图片一半色块」。
+ */
 private val BADGE_IMAGES: Map<Badge, Int> = mapOf(
+    // 录入错题（10）
     Badge.FIRST_QUESTION to R.drawable.badge_first_question,
+    Badge.TEN_QUESTIONS to R.drawable.badge_ten_questions,
+    Badge.Q25 to R.drawable.badge_q25,
+    Badge.Q50 to R.drawable.badge_q50,
     Badge.HUNDRED_QUESTIONS to R.drawable.badge_hundred_questions,
+    Badge.Q150 to R.drawable.badge_q150,
+    Badge.Q200 to R.drawable.badge_q200,
+    Badge.Q300 to R.drawable.badge_q300,
+    Badge.Q500 to R.drawable.badge_q500,
+    Badge.Q1000 to R.drawable.badge_q1000,
+    // 掌握错题（8）
+    Badge.M1 to R.drawable.badge_m1,
+    Badge.M5 to R.drawable.badge_m5,
     Badge.TEN_MASTERED to R.drawable.badge_ten_mastered,
+    Badge.M25 to R.drawable.badge_m25,
+    Badge.M50 to R.drawable.badge_m50,
+    Badge.M100 to R.drawable.badge_m100,
+    Badge.M200 to R.drawable.badge_m200,
+    Badge.M500 to R.drawable.badge_m500,
+    // 复习次数（8）
+    Badge.R10 to R.drawable.badge_r10,
+    Badge.R50 to R.drawable.badge_r50,
     Badge.HUNDRED_REVIEWS to R.drawable.badge_hundred_reviews,
+    Badge.R250 to R.drawable.badge_r250,
+    Badge.R500 to R.drawable.badge_r500,
+    Badge.R1000 to R.drawable.badge_r1000,
+    Badge.R2000 to R.drawable.badge_r2000,
+    Badge.R5000 to R.drawable.badge_r5000,
+    // 连续学习（8）
+    Badge.S3 to R.drawable.badge_s3,
     Badge.SEVEN_DAY_STREAK to R.drawable.badge_seven_day_streak,
+    Badge.S14 to R.drawable.badge_s14,
+    Badge.S21 to R.drawable.badge_s21,
     Badge.THIRTY_DAY_STREAK to R.drawable.badge_thirty_day_streak,
-    Badge.KNOWLEDGE_CLEARED to R.drawable.badge_knowledge_cleared,
+    Badge.S60 to R.drawable.badge_s60,
+    Badge.S100 to R.drawable.badge_s100,
+    Badge.S365 to R.drawable.badge_s365,
+    // 单日爆发（5）
+    Badge.D3 to R.drawable.badge_d3,
+    Badge.D5 to R.drawable.badge_d5,
     Badge.TEN_IN_ONE_DAY to R.drawable.badge_ten_in_one_day,
+    Badge.D20 to R.drawable.badge_d20,
+    Badge.D30 to R.drawable.badge_d30,
+    // 知识点清零（4）
+    Badge.KNOWLEDGE_CLEARED to R.drawable.badge_knowledge_cleared,
+    Badge.K3 to R.drawable.badge_k3,
+    Badge.K5 to R.drawable.badge_k5,
+    Badge.K10 to R.drawable.badge_k10,
+    // 单词（5）
     Badge.FIRST_WORD to R.drawable.badge_first_word,
-    Badge.HUNDRED_WORDS to R.drawable.badge_hundred_words
+    Badge.W50 to R.drawable.badge_w50,
+    Badge.HUNDRED_WORDS to R.drawable.badge_hundred_words,
+    Badge.W200 to R.drawable.badge_w200,
+    Badge.W500 to R.drawable.badge_w500
 )
