@@ -138,6 +138,16 @@ app/src/main/java/com/mistakebook/
 
 **测试说明**：渲染链路有契约测试守着——`MathHtmlContractTest` 会检查公式渲染函数不允许被改成异步形式（历史上这么改出过全量渲染失败的故障，见提交记录里的 `P0 热修复`）。
 
+**项目文档**（`docs/`）：
+
+| 文档 | 内容 |
+|---|---|
+| [CHANGELOG.md](docs/CHANGELOG.md) | 逐版本更新记录，与 GitHub Releases 同步 |
+| [HANDOFF.md](docs/HANDOFF.md) | 接手本项目的完整上下文（当前状态、硬性规则、常见坑） |
+| [DECISIONS.md](docs/DECISIONS.md) | 架构与功能的设计决策及其取舍理由 |
+| [OPTIMIZATION_NOTES.md](docs/OPTIMIZATION_NOTES.md) | 性能优化任务的动机、测量数据与取舍 |
+| [RENDER-TEST-PROMPT.md](docs/RENDER-TEST-PROMPT.md) | 渲染链路的实测提示词与验收表 |
+
 ---
 
 ## 数据与安全
