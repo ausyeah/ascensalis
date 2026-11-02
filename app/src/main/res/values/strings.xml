@@ -16,7 +16,6 @@
     <string name="action_copy">复制</string>
     <string name="action_close">关闭</string>
     <string name="action_edit">编辑</string>
-    <string name="action_more">更多</string>
     <string name="action_back">返回</string>
     <string name="channel_review_name">复习提醒</string>
     <string name="channel_review_desc">每天提醒待复习的错题</string>
@@ -26,7 +25,6 @@
     <!-- 首页 / 列表 -->
     <!-- home_title 已删：TopAppBar 标题位现在是搜索框，应用名不再显示 -->
 
-    <string name="home_action_settings">设置</string>
     <string name="home_action_print">打印</string>
     <string name="home_add_by_photo">拍错题</string>
     <string name="home_add_from_gallery">从相册选择</string>
@@ -41,7 +39,6 @@
 
     <string name="home_filter_all">全部</string>
     <string name="home_filter_active">未掌握</string>
-    <string name="home_filter_reviewing">复习中</string>
     <string name="home_filter_mastered">已掌握</string>
     <string name="notebook_title">错题本</string>
     <string name="notebook_create">新建错题本</string>
@@ -61,18 +58,13 @@
     <string name="detail_notebook">错题本</string>
     <string name="home_filter_subject">学科</string>
     <string name="home_filter_mastery">掌握</string>
-    <string name="home_search_hint">搜题干、标题、答案、解析</string>
     <string name="home_search_clear">清空搜索</string>
     <string name="print_item_index">#%1$d</string>
     <string name="print_unclassified">未分类</string>
     <string name="home_subject_all">全部学科</string>
-    <string name="home_deleted_toast">已删除</string>
-    <string name="home_undo">撤销</string>
     <string name="home_due_badge">待复习</string>
-    <string name="home_trash_cleared">已清空回收站</string>
 
     <!-- 拍照 -->
-    <string name="capture_title">拍摄错题</string>
     <string name="capture_flash_auto">闪光灯自动</string>
     <string name="capture_flash_on">闪光灯开</string>
     <string name="capture_flash_off">闪光灯关</string>
@@ -86,8 +78,6 @@
     <string name="capture_permission_grant">去授权</string>
     <string name="capture_permission_settings">打开系统设置</string>
     <string name="capture_failed">拍照失败，请重试</string>
-    <string name="capture_gallery_permission">需要相册访问权限</string>
-    <string name="capture_ocr_title">照片增强</string>
     <string name="capture_ocr_off">关闭</string>
     <string name="capture_ocr_light">轻度</string>
     <string name="capture_ocr_standard">标准</string>
@@ -98,17 +88,14 @@
     <string name="crop_reset">重置</string>
     <string name="crop_confirm">确认</string>
     <string name="crop_mask">涂鸦</string>
-    <string name="crop_mask_done">完成涂鸦</string>
     <string name="crop_mask_undo">撤销</string>
     <string name="crop_mask_clear">清空</string>
     <string name="crop_mask_hint">用白色笔涂掉不想识别的区域（红笔批注、旁边的题、草稿）</string>
     <string name="crop_preview">预览</string>
     <string name="crop_preview_title">这张图将送去识别</string>
     <string name="crop_preview_title_chat">这张图将作为对话附件发送</string>
-    <string name="crop_preview_hint">确认裁剪范围与涂白位置无误。涂白部分不会被识别。</string>
     <string name="crop_decoding">正在加载照片…</string>
     <string name="crop_enhancing">正在增强对比度…</string>
-    <string name="crop_enhance_hint">增强只影响送识别的图：纸面压白、字迹压黑，红笔批注会保留颜色。选「关」就是相机原始像素。</string>
 <string name="crop_decode_failed">图片加载失败：%1$s</string>
     <string name="crop_decode_missing">照片文件已丢失</string>
     <string name="crop_decode_oom">照片太大，内存不足</string>
@@ -130,14 +117,9 @@
     <string name="progress_cancel">取消识别</string>
     <string name="progress_cancel_confirm_body">取消后本次识别结果会丢失，临时文件将被删除。</string>
     <string name="progress_skip_llm">跳过 AI，直接用原始文本</string>
-    <string name="progress_retry">重试</string>
     <string name="progress_failed_title">识别失败</string>
-    <string name="progress_group_format">第 %1$d / %2$d 张</string>
     <string name="progress_stage_uploading">上传照片</string>
-    <string name="progress_stage_parsing">OCR 解析中</string>
-    <string name="progress_stage_llm">AI 整理中</string>
     <string name="progress_stage_done">识别完成</string>
-    <string name="progress_queue_format">排队中，前方还有 %1$d 张</string>
 
     <!-- 编辑页 -->
     <string name="edit_title">确认题目</string>
@@ -157,7 +139,6 @@
     <string name="edit_knowledge_add_hint">输入知识点后回车添加</string>
     <string name="edit_note">备注</string>
     <string name="edit_view_raw">查看原始识别文本</string>
-    <string name="edit_raw_copied">原始识别文本已复制</string>
     <string name="edit_degraded_warning">AI 整理失败，已保留原始识别文本，请手动整理</string>
     <string name="edit_truncated_warning">内容过长已截断</string>
     <string name="edit_preview">渲染预览</string>
@@ -165,11 +146,7 @@
     <string name="edit_saved">已保存</string>
     <string name="edit_prev">上一题</string>
     <string name="edit_next">下一题</string>
-    <string name="edit_uncertain_title">待确认片段</string>
     <string name="edit_referenced_images">识别到的插图</string>
-    <string name="edit_image_removed">已移除该插图</string>
-    <string name="edit_no_image_ref">未识别到插图</string>
-    <string name="edit_delete_draft">删除本题</string>
     <string name="edit_saved_count_format">已保存 %1$d 题</string>
 
     <!-- 编辑页文本审计 -->
@@ -184,35 +161,23 @@
 
     <!-- 详情页 -->
     <string name="detail_title">题目详情</string>
-    <string name="detail_edit">编辑</string>
     <string name="detail_delete">删除</string>
     <string name="detail_delete_confirm">删除后可在回收站保留 30 天，确认删除这道题？</string>
     <string name="detail_delete_confirm_action">确认删除</string>
-    <string name="detail_mark_mastered">标记已掌握</string>
     <string name="detail_mastered_hint">已掌握 🎉</string>
-    <string name="detail_add_to_print">加入打印清单</string>
-    <string name="detail_review_history">复习记录</string>
-    <string name="detail_review_empty">还没有复习记录</string>
-    <string name="detail_review_stage_format">第 %1$d 轮</string>
-    <string name="detail_source_text">原始识别文本</string>
     <string name="detail_knowledge_points">知识点</string>
     <string name="detail_note">备注</string>
-    <string name="detail_reset_review">重新开始复习</string>
 
     <!-- 打印 -->
     <string name="print_title">打印错题</string>
     <string name="print_select_all">全选当前结果</string>
     <string name="print_select_invert">反选</string>
     <string name="reorder_drag_handle">长按拖动调整顺序</string>
-    <string name="print_options">打印选项</string>
     <string name="print_include_image">包含题目原图</string>
     <string name="print_show_answer">显示答案与解析</string>
     <string name="print_blank_redo">留白重做模式</string>
-    <string name="print_blank_height">重做区高度</string>
-    <string name="print_generate">生成 %1$s</string>
     <string name="print_selected_format">已选 %1$d 题 · 生成 %2$s</string>
     <string name="print_empty">没有可打印的题目</string>
-    <string name="print_generating">正在生成 PDF…</string>
     <string name="print_done_title">%1$s 已生成</string>
     <string name="print_share">分享</string>
     <string name="print_open">打开</string>
@@ -236,7 +201,6 @@
     <string name="settings_usage_llm_calls">大模型调用</string>
     <string name="settings_usage_prompt">输入 tokens</string>
     <string name="settings_usage_completion">输出 tokens</string>
-    <string name="settings_usage_cached">缓存命中 tokens</string>
     <string name="settings_usage_total">总计 tokens（输入 + 输出）</string>
     <string name="settings_usage_mineru_calls">OCR 解析</string>
     <string name="settings_usage_mineru_pages">解析页数（计费额度按页算）</string>
@@ -277,7 +241,6 @@
     <string name="settings_recognition_hint_auto">默认方式。先试 OCR（带超时，超时或失败即转大模型）；再用大模型识别一次——当前模型能识图就用当前模型，否则用配置好的识图模型，不会转给另一个大模型重试。只有全部途径都不可用才失败。</string>
     <string name="settings_recognition_warn_vision">还没有配置可用的识图模型。请到设置 → 大模型 → 识图模型里填写地址、Key 与模型名，或把识别方式改成「自动」。</string>
     <string name="settings_recognition_warn_llm">当前模型不支持识图（或尚未配置模型），大模型识别这条路走不通。请到下方切换到识图模型，或把识别方式改回「自动」/「仅 OCR」。</string>
-    <string name="settings_recognition_warn_auto">当前模型不支持识图（或尚未配置模型），OCR 不可用时将没有兜底。建议切换到识图模型以获得自动回落能力。</string>
 
     <!-- 生图渠道（v0.0.45） -->
     <string name="settings_image_profiles">生图设置</string>
@@ -297,13 +260,10 @@
     <string name="settings_vision_profile_model">模型名（识图）</string>
     <string name="settings_vision_profile_model_hint">填渠道提供的具体模型名，不是供应商名。例如 qwen-vl-max、gpt-4o-mini、glm-4v-flash。</string>
     <string name="settings_hint_vision_key">尚未配置识图模型。配好后，不识图的主模型也能通过「看图」工具读取图片。</string>
-    <string name="settings_vision_profile_none">不指定</string>
-    <string name="settings_vision_profile_hint">指定一套专门用来看图的模型。指定后，对话里会多出一个「看图」工具：主模型看不到图片时由它来读，也能回答「图里画了什么」这类问题。不指定时沿用原来的 OCR 识别。</string>
     <string name="settings_save">保存</string>
 
     <string name="settings_active_profile">当前使用</string>
     <string name="settings_add_profile">新增配置</string>
-    <string name="settings_edit_profile">编辑配置</string>
     <string name="settings_delete_profile">删除配置</string>
     <string name="settings_delete_profile_title">删除这条配置？</string>
     <string name="settings_delete_profile_body">删除「%1$s」后不可恢复，其中的 Key 也会一起清掉。确定删除吗？</string>
@@ -328,9 +288,6 @@
     <string name="settings_supports_vision">该模型支持图片</string>
     <string name="settings_supports_vision_on">直接发送图片给模型</string>
     <string name="settings_supports_vision_off">不识图：先用 OCR 识别图片文字再发送</string>
-    <string name="settings_profile_saved">配置已保存</string>
-    <string name="settings_profile_deleted">配置已删除</string>
-    <string name="settings_profile_need_one">至少需要保留一套配置</string>
     <string name="settings_mineru_params">图片处理</string>
     <!-- settings_model_version / settings_ocr_language / settings_force_ocr 已删：
          三项固定为 vlm / ch / 开启，不再暴露给用户 -->
@@ -359,15 +316,11 @@
 
     <string name="settings_print_defaults">打印默认项</string>
     <string name="settings_review_reminder">每日复习提醒</string>
-    <string name="settings_reminder_time">提醒时间</string>
-    <string name="settings_test_reminder">立即提醒一次</string>
     <string name="settings_reminder_pick">选择每日提醒时间</string>
     <string name="settings_blank_height_title">重做区高度</string>
     <string name="settings_blank_height_range">%1$d pt</string>
     <string name="settings_fetch_models">获取模型列表</string>
-    <string name="settings_test_reminder_done">已触发一次提醒检查</string>
     <string name="settings_test_connection">测试连接</string>
-    <string name="settings_test_mineru">测试 OCR</string>
     <string name="settings_test_llm">测试大模型</string>
     <string name="settings_testing">测试中…</string>
     <string name="settings_data_manage">数据管理</string>
@@ -384,7 +337,6 @@
     <string name="settings_restore_failed">备份文件无效：%1$s</string>
     <string name="settings_backup_exported">备份已导出</string>
     <string name="settings_backup_failed">导出失败：%1$s</string>
-    <string name="settings_keys_saved">密钥已保存</string>
 
     <!-- 英语单词数据重置 -->
     <string name="settings_wordbook_reset_title">英语单词数据重置</string>
@@ -406,8 +358,6 @@
     <string name="detail_re_recognize">重新识别</string>
     <string name="detail_re_recognize_confirm">重新识别会用 AI 重新整理这道题的原图，识别完成后**覆盖**当前的题干、选项、答案、解析与附图。\n\n掌握状态、复习时间和你的备注会保留。\n\n下一步会先打开裁切页：你可以重新裁切、涂掉不要的部分，确认后才提交识别。</string>
     <string name="detail_re_recognize_confirm_action">去裁切</string>
-    <string name="detail_re_recognize_need_key">请先到设置填写 API Key</string>
-    <string name="detail_re_recognize_no_file">原图已不存在，无法重新识别</string>
     <string name="detail_re_recognize_failed">提交失败，请重试</string>
     <string name="edit_question_title">题目标题</string>
     <string name="edit_title_hint">列表里显示的短标题，可留空</string>
@@ -417,7 +367,6 @@
     <string name="edit_recrop">重新裁剪</string>
     <string name="edit_subject_manual">识别不出来？手动填学科</string>
     <string name="edit_subject_manual_hint">例如：通信原理</string>
-    <string name="detail_note_saved">备注已保存</string>
     <string name="detail_variant_generate">举一反三：出一道同源变式题</string>
 
     <!-- 辅助图（F-IMG-4） -->
@@ -493,8 +442,6 @@
     <string name="error_server">服务端返回错误</string>
     <string name="error_cancelled">已取消</string>
     <string name="error_bad_response">服务端返回内容无法解析</string>
-    <string name="error_connection_ok">连接成功</string>
-    <string name="error_key_invalid">Key 无效</string>
 
     <!-- PDF 导入 -->
     <string name="pdf_import_title">导入 PDF</string>
@@ -506,13 +453,9 @@
     <string name="pdf_import_range_hint">例如 1-5,8,11-12</string>
     <string name="pdf_import_start">开始导入</string>
     <string name="pdf_import_invalid_range">页码范围无效</string>
-    <string name="pdf_import_failed">PDF 解析失败：%1$s</string>
     <string name="pdf_import_too_large">PDF 超过 %1$d 页，请分段导入</string>
-    <string name="pdf_import_preparing">正在准备导入任务…</string>
-    <string name="pdf_import_pages_selected">已选 %1$d 页</string>
 
     <!-- 相册批量 -->
-    <string name="gallery_pick_limit">最多一次选择 %1$d 张</string>
     <string name="gallery_copying">正在读取图片…</string>
     <string name="gallery_copy_failed">图片读取失败：%1$s</string>
 
@@ -521,7 +464,6 @@
     <string name="review_notification_channel">复习提醒</string>
     <string name="wordbook_reminder_title">单词目标还差 %1$d 个</string>
     <string name="wordbook_reminder_text">今日目标 %1$d 词，已学 %2$d 词</string>
-    <string name="review_filter_due">待复习</string>
 
     <!-- ========== AI 对话（v0.0.6） ========== -->
     <string name="chat_title_question">AI 讲解</string>
@@ -534,10 +476,7 @@
     <string name="chat_list_clear_confirm_title">清空全部对话？</string>
     <string name="chat_list_clear_confirm_action">确认清空</string>
     <string name="chat_delete_confirm_action">确认删除</string>
-    <string name="chat_delete_session_confirm_body">删除后该对话及其消息将无法恢复，确认删除？</string>
     <string name="chat_list_clear_confirm_body">所有对话记录都会被删除，此操作不可恢复。</string>
-    <string name="chat_list_item_messages">%1$d 条消息</string>
-    <string name="chat_list_bound_question">题目：%1$s</string>
     <string name="chat_list_free_tag">自由对话</string>
     <string name="chat_time_today">今天</string>
     <string name="chat_time_yesterday">昨天</string>
@@ -578,27 +517,19 @@
     <string name="chat_failed_badge">发送失败</string>
     <string name="chat_jump_to_bottom">回到底部</string>
 
-    <string name="chat_role_user">我</string>
-    <string name="chat_role_assistant">AI</string>
     <string name="chat_context_header">题目上下文</string>
-    <string name="chat_context_not_injected">未能读取这道题的信息，将只按你的提问回答。</string>
 
     <string name="chat_attach">添加附件</string>
     <string name="chat_pick_model">选择模型</string>
     <string name="chat_model_unset">未配置模型</string>
     <string name="chat_model_manage">管理模型配置</string>
     <string name="chat_model_few_hint">只显示已勾选的模型。去设置页勾选更多 →</string>
-    <string name="chat_attach_image">图片</string>
     <string name="chat_attach_file">文档</string>
     <string name="chat_attach_gallery">从相册选择</string>
+    <string name="chat_attach_library">@资料库</string>
     <string name="chat_attach_camera">拍照</string>
-    <string name="chat_camera_failed">拍照失败，请重试或从相册选择</string>
     <string name="chat_attach_files">浏览文件</string>
-    <string name="chat_attach_no_camera">没有找到可用的相机应用，请从相册选择图片</string>
-    <string name="chat_attach_photo_unavailable">拍照功能暂时不可用，请从相册选择图片</string>
-    <string name="chat_attach_photo_empty">相机没有返回照片，请重试或从相册选择</string>
     <string name="chat_attachment_preparing">准备中…</string>
-    <string name="chat_attachment_ready">就绪</string>
     <string name="chat_attachment_failed">处理失败</string>
     <string name="chat_attachment_remove">移除附件</string>
     <string name="chat_attachment_open">用系统应用打开</string>
@@ -606,15 +537,7 @@
     <string name="chat_attachment_no_viewer">没有可以打开这类文件的应用</string>
     <string name="chat_attachment_extracted">已提取 %1$d 字</string>
     <string name="chat_attachment_library">资料库文件 · 原文已注入本轮上下文</string>
-    <string name="chat_attachment_size">%1$s</string>
-    <string name="chat_attachment_unsupported">不支持这种文件：%1$s</string>
-    <string name="chat_attachment_too_large">文件太大：%1$s（上限 %2$s）</string>
-    <string name="chat_attachment_read_failed">读取文件失败：%1$s</string>
-    <string name="chat_attachment_empty_text">没有从 %1$s 里读到任何文字</string>
 
-    <string name="chat_error_generic">对话失败</string>
-    <string name="chat_error_needs_key">还没配置 API Key</string>
-    <string name="chat_error_needs_key_body">配置后才能与 AI 对话。Key 只保存在本机，不会上传到任何地方。</string>
     <string name="chat_loading">正在打开对话…</string>
 
     <!-- ========== 导出格式 ========== -->
@@ -623,13 +546,6 @@
     <string name="export_format_html">HTML（单文件·浏览器打开）</string>
     <string name="export_format_html_short">HTML</string>
     <string name="print_export_format">导出格式</string>
-    <string name="export_generating">正在生成…</string>
-    <string name="export_done">已导出：%1$s</string>
-    <string name="export_open">打开</string>
-    <string name="export_share">分享</string>
-    <string name="export_failed">导出失败：%1$s</string>
-    <string name="export_skipped">有 %1$d 道题排版失败已跳过</string>
-    <string name="export_page_count">共 %1$d 页</string>
 
     <!-- ========== 思考过程（v0.0.9） ========== -->
     <string name="chat_thinking_header">思考过程</string>
@@ -637,10 +553,6 @@
     <string name="chat_thinking_collapse">收起思考过程</string>
     <string name="chat_thinking_ongoing">正在思考…</string>
     <string name="chat_thinking_chars">%1$d 字</string>
-    <string name="chat_empty_reply">模型未返回内容。可能是拒答，也可能是模型名填错了。</string>
-    <string name="chat_math_failed_title">有公式没渲染出来</string>
-    <string name="chat_math_failed_body">下面这几个公式的 LaTeX 源文有问题，已显示为小字体。可以在编辑页点「检查」一键修复。</string>
-    <string name="chat_math_failed_count">%1$d 处公式未渲染</string>
 
     <string name="chat_image_unreadable">（图片无法显示）</string>
     <string name="chat_image_content_description">发送的图片</string>
@@ -653,37 +565,10 @@
     <string name="portal_mistake_book">错题本</string>
     <string name="portal_word_book">背单词</string>
     <string name="portal_pomodoro">番茄钟</string>
-    <string name="wordbook_tab_study">学习刷题</string>
-    <string name="wordbook_tab_wrong">错题本</string>
-    <string name="wordbook_tab_library">词库检索</string>
-    <string name="wordbook_tab_stats">学习统计</string>
-    <string name="wordbook_quiz_mode">四选一模式</string>
-    <string name="wordbook_card_mode">卡片自测</string>
-    <string name="wordbook_master_star">熟词标记</string>
     <string name="wordbook_next_question">下一题</string>
-    <string name="wordbook_reveal_card">点击揭晓完整释义</string>
-    <string name="wordbook_rate_forget">忘记了</string>
-    <string name="wordbook_rate_fuzzy">模糊</string>
-    <string name="wordbook_rate_know">认识</string>
-    <string name="wordbook_rate_master">熟练</string>
     <string name="wordbook_library_search_hint">搜索 4356 个考研单词或中文释义…</string>
-    <string name="wordbook_study_empty_title">太棒了，当前词库学习已告一段落！</string>
-    <string name="wordbook_study_empty_desc">错词本与待复习列表已清空，可去词库检索更多生词</string>
     <string name="wordbook_extract_practice">抽取练习题</string>
-    <string name="wordbook_wrong_empty">错词本干干净净，暂无待复习错词 🎉</string>
-    <string name="wordbook_ever_wrong_empty">暂无曾错毕业词汇</string>
-    <string name="wordbook_mastered_empty">暂无手动标记的熟词</string>
-    <string name="wordbook_stats_progress_title">词库总览与进度</string>
-    <string name="wordbook_stats_today">今日已学</string>
-    <string name="wordbook_stats_due_wrong">待复习错词</string>
-    <string name="wordbook_stats_rules_title">四级掌握度体系规则</string>
-    <string name="wordbook_subtab_wrong">错词本 (%1$d)</string>
-    <string name="wordbook_subtab_ever_wrong">曾错毕业本</string>
-    <string name="wordbook_subtab_mastered">熟词本 (%1$d)</string>
     <string name="wordbook_remove">移出</string>
-    <string name="wordbook_remove_success">已移出错题本</string>
-    <string name="wordbook_master_marked">已标记为熟词，后续不再安排练习</string>
-    <string name="wordbook_master_unmarked">已取消熟词</string>
     <!-- ===== T1 独立复习页（v0.0.34） ===== -->
     <string name="review_screen_title">今日复习</string>
     <string name="review_progress_format">第 %1$d / %2$d 题</string>
@@ -704,26 +589,15 @@
     <string name="review_finish_continue">还有 %1$d 道，继续复习</string>
     <string name="review_notification_title_99">今天有 99+ 道错题待复习</string>
     <!-- ===== T4 编辑页草稿防丢 ===== -->
-    <string name="edit_discard_title">有未保存的修改</string>
-    <string name="edit_discard_message">有未保存的修改，确定丢弃吗？</string>
-    <string name="edit_discard_confirm">丢弃并退出</string>
-    <string name="edit_discard_cancel">继续编辑</string>
-    <string name="edit_restore_title">恢复上次未保存的草稿？</string>
-    <string name="edit_restore_message">上次手动录入的内容还没保存，可以接着上次的继续填。</string>
-    <string name="edit_restore_confirm">恢复</string>
-    <string name="edit_restore_dismiss">丢弃</string>
     <!-- ===== T13 手写过程批改 ===== -->
     <string name="chat_grading_toggle">批改我的解题过程</string>
     <string name="chat_input_hint_grading">已开启批改：附上手写过程照片，发送后 AI 逐步对照</string>
     <string name="chat_save_to_note">存入题目备注</string>
-    <string name="chat_grading_need_image">批改模式需要附上手写过程照片</string>
-    <string name="chat_saved_to_note">已存入题目备注</string>
     <string name="capture_chat_batch_count">本批 %1$d 张</string>
     <string name="capture_chat_batch_done">完成</string>
     <string name="capture_chat_batch_full">一次最多 9 张，本批已满</string>
     <string name="capture_chat_batch_discard_title">丢弃本批照片？</string>
     <string name="capture_chat_batch_discard_body">本批 %1$d 张将丢弃</string>
-    <string name="crop_chat_skip">不裁切，下一张</string>
     <string name="library_title">资料库</string>
     <string name="library_desc">存放在 App 内的资料（.md / .txt / .json / .csv / .docx / .pdf）。对话时可让 AI 参考或整理存入；.docx 与 .pdf 自动提取文字，原文件保留。</string>
     <string name="library_empty">还没有资料。右下角导入或新建。</string>
@@ -741,7 +615,6 @@
     <string name="library_truncated">内容超过 50KB，已截断显示（保存会丢失被截断部分）</string>
     <string name="library_loading">正在读取…</string>
     <string name="library_binary_preview_hint">.docx / .pdf 只读预览：以下为自动提取的文字，原文件不受影响</string>
-    <string name="settings_library_section">资料库</string>    <string name="chat_attach_library">@资料库</string>
     <string name="widget_no_exam">暂无考试</string>
     <string name="badge_title">成就墙</string>
     <string name="badge_loading">正在统计…</string>
@@ -749,7 +622,6 @@
     <string name="badge_progress">%1$d / %2$d</string>
     <string name="badge_locked">未达成</string>
     <string name="settings_badge_entry">成就墙</string>
-    <string name="badge_new_toast">解锁新成就：%1$s</string>
     <string name="badge_wall_section_unlocked">已解锁</string>
     <string name="badge_wall_section_locked">未解锁</string>
     <string name="badge_wall_section_count">%1$s · %2$d 枚</string>
@@ -891,7 +763,6 @@
     <string name="wordbook_spell_correct">拼写正确！</string>
     <string name="wordbook_spell_wrong_added">拼写不对（已加入错词本待复习）</string>
     <string name="wordbook_spell_answer">正确拼写：%1$s</string>
-    <string name="wordbook_daily_goal_title">今日目标</string>
     <string name="wordbook_quiz_tab_wrong">错词本</string>
     <string name="wordbook_quiz_tab_ever">曾错本</string>
     <string name="wordbook_quiz_tab_familiar">熟词本</string>
