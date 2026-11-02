@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -84,4 +85,17 @@ interface WordbookDao {
      */
     @Query("DELETE FROM word_progress")
     suspend fun clearAllProgress()
+
+    /**
+     * 全部重置：进度与流水**同一个事务**里清。
+     *
+     * 早先两步分开跑在 UI 的 rememberCoroutineScope 里——导航离开取消协程
+     * 正好落在两步之间，留下「有流水无进度」的中间态（[clearAllProgress]
+     * 注释警告过的那个）。事务保证两步要么都发生要么都没发生。
+     */
+    @Transaction
+    suspend fun resetAll() {
+        clearAllProgress()
+        clearLogs()
+    }
 }

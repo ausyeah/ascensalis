@@ -2805,16 +2805,9 @@ internal fun DataManageSection(
  * 跳过一堆词，而库里其实已经空了。
  */
 @Composable
-internal fun WordbookDataSection(
-    container: com.mistakebook.di.AppContainer,
-    onResetDone: (String) -> Unit
-) {
-    val scope = rememberCoroutineScope()
-    val dao = container.wordbookDao
+internal fun WordbookDataSection(viewModel: SettingsViewModel) {
     var confirmToday by remember { mutableStateOf(false) }
     var confirmAll by remember { mutableStateOf(false) }
-    val todayDoneMsg = stringResource(R.string.settings_wordbook_reset_today_done)
-    val allDoneMsg = stringResource(R.string.settings_wordbook_reset_all_done)
 
     SettingsGroup(title = stringResource(R.string.settings_wordbook_reset_title)) {
         Text(
@@ -2859,20 +2852,7 @@ internal fun WordbookDataSection(
                     confirmText = stringResource(R.string.settings_wordbook_reset_today_confirm),
                     onConfirm = {
                         confirmToday = false
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                val startOfDay = java.util.Calendar.getInstance().apply {
-                                    set(java.util.Calendar.HOUR_OF_DAY, 0)
-                                    set(java.util.Calendar.MINUTE, 0)
-                                    set(java.util.Calendar.SECOND, 0)
-                                    set(java.util.Calendar.MILLISECOND, 0)
-                                }.timeInMillis
-                                dao.clearLogsSince(startOfDay)
-                            }
-                            // 广播后再提示：背单词页先完成重载，用户切回去看到的就是新状态
-                            container.wordbookEpoch.value += 1
-                            onResetDone(todayDoneMsg)
-                        }
+                        viewModel.resetWordbookToday()
                     }
                 )
             },
@@ -2895,17 +2875,10 @@ internal fun WordbookDataSection(
                     confirmText = stringResource(R.string.settings_wordbook_reset_all_confirm),
                     onConfirm = {
                         confirmAll = false
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                // 先清进度再清流水：反过来的话，若进程在两步之间被杀，
-                                // 会留下「有流水无进度」的中间态，统计页按旧流水
-                                // 还能算出学习量，进度却是全新的，两边对不上。
-                                dao.clearAllProgress()
-                                dao.clearLogs()
-                            }
-                            container.wordbookEpoch.value += 1
-                            onResetDone(allDoneMsg)
-                        }
+                        // 进度与流水在 DAO 的 resetAll() 里同一个事务清：
+                        // 早先两步分跑在 UI scope 里，导航取消正好落在两步
+                        // 之间就制造出注释警告的「有流水无进度」中间态。
+                        viewModel.resetWordbookAll()
                     }
                 )
             },

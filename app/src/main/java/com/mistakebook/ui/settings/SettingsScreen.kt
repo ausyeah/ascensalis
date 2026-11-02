@@ -71,35 +71,24 @@ fun SettingsScreen(
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
 
+    val restoreDoneCount by viewModel.restoreDoneCount.collectAsState()
     val restoreLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val stream = context.contentResolver.openInputStream(uri)
-            if (stream == null) {
-                snackbarHostState.showSnackbar(
-                    context.getString(R.string.settings_restore_failed, "")
-                )
-                return@launch
-            }
-            val result = container.backupManager.restore(stream)
-            result.onSuccess { count ->
-                // bump 背单词纪元：万一进程没死（ROM 拦截 killProcess），
-                // 词库页的内存缓存也会立刻重建，不会拿旧进度写回新库。
-                container.wordbookEpoch.value += 1
-                snackbarHostState.showSnackbar(
-                    context.getString(R.string.settings_restore_done, count)
-                )
-                delay(1_500)
-                Process.killProcess(Process.myPid())
-            }
-            result.onFailure { error ->
-                snackbarHostState.showSnackbar(
-                    context.getString(R.string.settings_restore_failed, error.message.orEmpty())
-                )
-            }
-        }
+        // 恢复全程在 SettingsViewModel（viewModelScope + NonCancellable 落库段）：
+        // 原实现在这里 scope.launch——导航离开取消协程，restore 覆盖库文件
+        // 中途被打断 = 半恢复 = 库损坏。
+        viewModel.restoreBackup(uri, context.contentResolver)
+    }
+    // 恢复成功：让用户看清提示再杀进程换库。恢复完成的信号走独立通道，
+    // 与普通 backupMessage 区分（后者只弹条不杀进程）。
+    LaunchedEffect(restoreDoneCount) {
+        val count = restoreDoneCount ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(context.getString(R.string.settings_restore_done, count))
+        viewModel.consumeRestoreDone()
+        delay(1_500)
+        Process.killProcess(Process.myPid())
     }
 
     // 测试结果**常驻显示**，不再用 snackbar。
@@ -257,24 +246,7 @@ fun SettingsScreen(
                     DataManageSection(
                         container = container,
                         viewModel = viewModel,
-                        onExportClick = {
-                            scope.launch {
-                                val result = container.backupManager.export()
-                                result.onSuccess { path ->
-                                    snackbarHostState.showSnackbar(
-                                        context.getString(R.string.settings_backup_exported) + "：" + path
-                                    )
-                                }
-                                result.onFailure { error ->
-                                    snackbarHostState.showSnackbar(
-                                        context.getString(
-                                            R.string.settings_backup_failed,
-                                            error.message.orEmpty()
-                                        )
-                                    )
-                                }
-                            }
-                        },
+                        onExportClick = { viewModel.exportBackup() },
                         onRestoreClick = { showRestoreConfirm = true }
                     )
                 }
@@ -282,12 +254,7 @@ fun SettingsScreen(
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_wordbook_data), nested = true) {
                     // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
                     // 都要留给题目），统一收到设置里，与数据管理相邻。
-                    WordbookDataSection(
-                        container = container,
-                        onResetDone = { message ->
-                            scope.launch { snackbarHostState.showSnackbar(message) }
-                        }
-                    )
+                    WordbookDataSection(viewModel = viewModel)
                 }
             }
 

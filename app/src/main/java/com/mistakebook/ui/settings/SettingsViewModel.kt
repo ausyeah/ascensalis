@@ -1,5 +1,7 @@
 package com.mistakebook.ui.settings
 
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.data.prefs.LlmProfile
@@ -14,9 +16,13 @@ import com.mistakebook.net.ApiError
 import com.mistakebook.net.errorOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -70,6 +76,14 @@ data class SettingsUiState(
     /** 每个模型的来源 key 标签（「主 Key」/「Key 2」…），勾选区用来标注。 */
     val modelSourcesByProfile: Map<String, Map<String, String>> = emptyMap(),
     val backupMessage: String? = null,
+
+    /**
+     * 备份恢复成功的消息条数；null = 没有恢复完成。
+     *
+     * 单独于 [backupMessage]：恢复成功后 UI 要先让用户看清提示
+     * 再杀进程换库，恢复完成的「杀进程」分支必须能和普通消息区分开。
+     */
+    val restoreDoneCount: Int? = null,
 
     /** 最近一次查到的 Tavily 额度；null 表示还没查过或查失败。 */
     val tavilyUsage: com.mistakebook.data.chat.TavilySearch.Usage? = null,
@@ -155,6 +169,10 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val modelSourcesByProfile = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
     private val modelsError = MutableStateFlow<String?>(null)
     private val backupMessage = MutableStateFlow<String?>(null)
+
+    /** 恢复完成信号（消息条数），独立于 backupMessage：杀进程分支需要区分。 */
+    private val restoreDoneCountFlow = MutableStateFlow<Int?>(null)
+    val restoreDoneCount: StateFlow<Int?> = restoreDoneCountFlow.asStateFlow()
     private val tavilyUsageState = MutableStateFlow(TavilyUsageState())
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -651,6 +669,95 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             }
             backupMessage.value = if (trash.isEmpty()) "回收站已经是空的" else "已清空回收站"
         }
+    }
+
+    /**
+     * 备份**恢复**。原实现跑在 Screen 的 rememberCoroutineScope 里：
+     * 导航离开即取消协程，而 restore 中途会关库、覆盖库文件——
+     * 取消正落在写入中途 = 半恢复 = 库损坏。现在挂在 viewModelScope,
+     * 且**落库段用 NonCancellable 包死**：这一段没有任何挂起点可被安全打断。
+     */
+    fun restoreBackup(uri: Uri, resolver: ContentResolver) {
+        viewModelScope.launch {
+            val stream = runCatching { resolver.openInputStream(uri) }.getOrNull()
+            if (stream == null) {
+                backupMessage.value = container.appContext.getString(
+                    com.mistakebook.R.string.settings_restore_failed, ""
+                )
+                return@launch
+            }
+            val result = withContext(Dispatchers.IO + NonCancellable) {
+                container.backupManager.restore(stream)
+            }
+            result.onSuccess { count ->
+                // bump 背单词纪元：万一进程没死（ROM 拦截 killProcess），
+                // 词库页的内存缓存也会立刻重建，不会拿旧进度写回新库。
+                container.wordbookEpoch.value += 1
+                restoreDoneCountFlow.value = count
+            }
+            result.onFailure { error ->
+                backupMessage.value = container.appContext.getString(
+                    com.mistakebook.R.string.settings_restore_failed, error.message.orEmpty()
+                )
+            }
+        }
+    }
+
+    /** 备份导出：与恢复同权下沉，生命周期不再绑在某个组合上。 */
+    fun exportBackup() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { container.backupManager.export() }
+            result.onSuccess { path ->
+                backupMessage.value = container.appContext.getString(
+                    com.mistakebook.R.string.settings_backup_exported
+                ) + "：" + path
+            }
+            result.onFailure { error ->
+                backupMessage.value = container.appContext.getString(
+                    com.mistakebook.R.string.settings_backup_failed, error.message.orEmpty()
+                )
+            }
+        }
+    }
+
+    /**
+     * 重置背单词「今日记录」。UI 层不再直接握 dao：重置落在 viewModelScope，
+     * 会话离开设置页不再把删除中途掐断。
+     */
+    fun resetWordbookToday() {
+        viewModelScope.launch {
+            val startOfDay = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            withContext(Dispatchers.IO + NonCancellable) {
+                container.wordbookDao.clearLogsSince(startOfDay)
+            }
+            // 广播后再提示：背单词页先完成重载，用户切回去看到的就是新状态
+            container.wordbookEpoch.value += 1
+            backupMessage.value = container.appContext.getString(
+                com.mistakebook.R.string.settings_wordbook_reset_today_done
+            )
+        }
+    }
+
+    /** 重置背单词**全部**数据：进度与流水经 [com.mistakebook.wordbook.data.WordbookDao.resetAll] 单事务清空。 */
+    fun resetWordbookAll() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO + NonCancellable) {
+                container.wordbookDao.resetAll()
+            }
+            container.wordbookEpoch.value += 1
+            backupMessage.value = container.appContext.getString(
+                com.mistakebook.R.string.settings_wordbook_reset_all_done
+            )
+        }
+    }
+
+    fun consumeRestoreDone() {
+        restoreDoneCountFlow.value = null
     }
 
     fun consumeBackupMessage() {
