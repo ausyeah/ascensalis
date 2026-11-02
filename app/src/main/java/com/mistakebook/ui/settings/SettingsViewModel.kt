@@ -692,7 +692,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             result.onSuccess { count ->
                 // bump 背单词纪元：万一进程没死（ROM 拦截 killProcess），
                 // 词库页的内存缓存也会立刻重建，不会拿旧进度写回新库。
-                container.wordbookEpoch.value += 1
+                container.invalidateWordbookCaches()
                 restoreDoneCountFlow.value = count
             }
             result.onFailure { error ->
@@ -736,7 +736,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 container.wordbookDao.clearLogsSince(startOfDay)
             }
             // 广播后再提示：背单词页先完成重载，用户切回去看到的就是新状态
-            container.wordbookEpoch.value += 1
+            container.invalidateWordbookCaches()
             backupMessage.value = container.appContext.getString(
                 com.mistakebook.R.string.settings_wordbook_reset_today_done
             )
@@ -749,7 +749,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             withContext(Dispatchers.IO + NonCancellable) {
                 container.wordbookDao.resetAll()
             }
-            container.wordbookEpoch.value += 1
+            container.invalidateWordbookCaches()
             backupMessage.value = container.appContext.getString(
                 com.mistakebook.R.string.settings_wordbook_reset_all_done
             )

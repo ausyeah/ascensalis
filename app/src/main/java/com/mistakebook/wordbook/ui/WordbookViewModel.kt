@@ -260,7 +260,7 @@ class WordbookViewModel(private val container: AppContainer) : ViewModel() {
         // 设置页重置了单词数据（清流水 / 清进度）：缓存、历史栈、当前题全部作废，
         // 按数据库的新现状重载。drop(1) 跳过初始值——init 本身就要做一遍全量载入。
         viewModelScope.launch {
-            container.wordbookEpoch.drop(1).collect {
+            container.wordbookEpochChanges.drop(1).collect {
                 reloadAfterExternalReset()
             }
         }

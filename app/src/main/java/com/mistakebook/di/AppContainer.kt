@@ -235,8 +235,24 @@ class AppContainer(context: Context) {
      * 也可能是两个（独立设置路由时）——所以不能用「调用 VM 方法」，
      * 必须有一个进程级的广播让所有实例各自重载。
      */
-    val wordbookEpoch: kotlinx.coroutines.flow.MutableStateFlow<Long> =
+    private val wordbookEpoch: kotlinx.coroutines.flow.MutableStateFlow<Long> =
         kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    /**
+     * 单词库数据被外部改动（重置 / 恢复备份）后的**唯一广播入口**。
+     *
+     * 背单词页的抽词缓存是进程内内存（progressCache / wrongWordsCache），
+     * 所有 WordbookViewModel 实例监听 [wordbookEpochChanges] 各自重载。
+     * 写入曾散落三处 `wordbookEpoch.value += 1`——让人找不到
+     * 「谁在什么时候让缓存失效」，现在只能从这里走。
+     */
+    fun invalidateWordbookCaches() {
+        wordbookEpoch.value += 1
+    }
+
+    /** 纪元变化流（含初始值；消费方自行 drop(1) 跳过 init 全量载入）。 */
+    val wordbookEpochChanges: kotlinx.coroutines.flow.Flow<Long>
+        get() = wordbookEpoch
 
     val vocabRepository: com.mistakebook.wordbook.data.VocabRepository by lazy {
         com.mistakebook.wordbook.data.VocabRepository(appContext)
