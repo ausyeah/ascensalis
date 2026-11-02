@@ -1333,56 +1333,6 @@ private fun SpellAnswerArea(
     }
 }
 
-/**
- * 每日目标进度条（刷题页顶部）。
- *
- * 达标了就把文案换成「今日目标已达成 🎉」并把进度条填满——
- * 明确的正反馈比一个 100% 的数字更让人愿意第二天继续。
- */
-@Composable
-private fun DailyGoalBar(studiedToday: Int, goal: Int) {
-    val isDark = LocalDarkTheme.current
-    val okColor = if (isDark) com.mistakebook.ui.theme.PaperOkDark else PaperOk
-    val reached = goal > 0 && studiedToday >= goal
-    val ratio = if (goal <= 0) 0f else (studiedToday.toFloat() / goal).coerceIn(0f, 1f)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline))
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource(R.string.wordbook_daily_goal_title),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    text = if (reached) "今日目标已达成 🎉" else "$studiedToday / $goal 词",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (reached) okColor else MaterialTheme.colorScheme.onSurface
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-            LinearProgressIndicator(
-                progress = { ratio },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp)),
-                color = if (reached) okColor else MaterialTheme.colorScheme.primary,
-                trackColor = if (isDark) Color(0xFF282D42) else PaperPrimaryTint
-            )
-        }
-    }
-}
-
 @Composable
 private fun QuizOptionRow(
     option: QuizOption,

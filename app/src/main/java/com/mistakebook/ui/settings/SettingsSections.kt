@@ -2969,27 +2969,4 @@ internal fun KnowledgePointEditor(
     }
 }
 
-// 编辑页错因单选
-@Composable
-internal fun ErrorReasonChooser(
-    selected: ErrorReason,
-    onSelect: (ErrorReason) -> Unit
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ErrorReason.entries.forEach { reason ->
-            FilterChip(
-                selected = selected == reason,
-                onClick = { onSelect(reason) },
-                label = { Text(reason.label) }
-            )
-        }
-    }
-}
 
-@Composable
-internal fun AddOptionButton(onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
-        Icon(Icons.Default.Add, contentDescription = null)
-        Text(stringResource(R.string.edit_add_option))
-    }
-}

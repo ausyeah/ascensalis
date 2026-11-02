@@ -2286,5 +2286,3 @@ private fun Context.findActivity(): Activity? {
  * 流式期间裁掉未闭合的行内/块级公式尾巴；静态文本原样返回。
  * 纯函数抽出便于与防抖组合。
  */
-private fun trimIncomplete(text: String, streaming: Boolean): String =
-    if (streaming) trimIncompleteTrailingFormula(text) else text
