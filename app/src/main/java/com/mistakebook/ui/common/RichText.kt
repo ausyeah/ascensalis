@@ -13,6 +13,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.conflate
 import kotlin.math.roundToInt
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -46,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -160,18 +163,39 @@ fun RichText(
     }
     val cachedMath = remember(mathRenderer, requests) { mathRenderer.cachedOf(requests) }
 
-    LaunchedEffect(mathRenderer, requests) {
-        renderedMath.putAll(cachedMath)
-        var pending = requests.filter { it.first !in renderedMath }
-        var attempt = 0
-        while (pending.isNotEmpty()) {
-            val result = mathRenderer.renderAll(pending)
-            renderedMath.putAll(result)
-            val failedKeys = result.filterValues { it == null }.keys
-            if (failedKeys.isEmpty() || attempt >= MAX_RENDER_ATTEMPTS - 1) break
-            attempt++
-            delay(RETRY_DELAY_MS * attempt)
-            pending = requests.filter { it.first in failedKeys }
+    // ---- 渲染循环**绝不随 requests 重启**（流式「一卡一卡」的根因）----
+    //
+    // 早先渲染协程直接挂在 LaunchedEffect(mathRenderer, requests) 上：
+    // 流式文本每长一段（防抖后约 100ms 一次），blocks → mathKeys → requests
+    // 就换一批新键，effect 被取消重启。而 renderAll 是「WebView 往返 +
+    // 等帧 + 抓长卷切图」的慢操作，挂在 awaitFrame / evaluateJavascript
+    // 上时被取消，整批结果全部丢弃（切片与缓存写入都在挂起点之后）。
+    // 于是每闭合一个新公式，上一批渲染进度作废重来——用户看到的就是
+    // 「同一段回答里输出一卡一卡」，而历史消息（text 不变）从不卡。
+    //
+    // 现在拆成两段：requests 变化只更新队列（SideEffect，同步、零打断）；
+    // 渲染循环是挂在 mathRenderer 上的长协程，conflate 保证积压的中间帧
+    // 被合并、永远只渲染最新一批，且**任何一次渲染都不再被打断**。
+    val mathQueue = remember(mathRenderer) {
+        MutableStateFlow<List<Triple<String, String, Boolean>>>(emptyList())
+    }
+    SideEffect { mathQueue.value = requests }
+    LaunchedEffect(mathRenderer) {
+        mathQueue.conflate().collect { latest ->
+            // 先把 renderer 级缓存里已有的条目补进本地图（滑回视口的
+            // item、同屏另一条消息渲染过的公式，都不必再过一遍 WebView）。
+            renderedMath.putAll(mathRenderer.cachedOf(latest))
+            var pending = mathPendingOf(latest, renderedMath)
+            var attempt = 0
+            while (pending.isNotEmpty()) {
+                val result = mathRenderer.renderAll(pending)
+                renderedMath.putAll(result)
+                val failedKeys = result.filterValues { it == null }.keys
+                if (failedKeys.isEmpty() || attempt >= MAX_RENDER_ATTEMPTS - 1) break
+                attempt++
+                delay(RETRY_DELAY_MS * attempt)
+                pending = latest.filter { it.first in failedKeys && it.first !in renderedMath }
+            }
         }
     }
     // 合并已渲染位图；流式文本变化时旧公式不退回占位态。
@@ -350,6 +374,21 @@ private fun collectMathKeys(blocks: List<MarkdownParser.Block>, maxMathChars: In
     }
     return keys.toList()
 }
+
+/**
+ * 差分：请求清单里哪些条目**还没渲染过**（纯函数，可单测）。
+ *
+ * [rendered] 里已有的条目——包括值为 null 的**渲染失败**条目——一律视为
+ * 已处理，不再排队：失败重试由渲染循环的 attempt 分支负责，
+ * 差分若把失败项也捞回来，流式期间每一帧都会重排整批失败公式，
+ * WebView 永远轮不到空闲。
+ * 提到顶层 internal 是为了让 JVM 单测能引用（测试源集看不到 private）。
+ */
+internal fun mathPendingOf(
+    requests: List<Triple<String, String, Boolean>>,
+    rendered: Map<String, *>
+): List<Triple<String, String, Boolean>> =
+    requests.filter { it.first !in rendered }
 
 /**
  * 估算块级公式的换行预算：一行最多多少个字符还不会被 [MathLayout.fit] 压小。
