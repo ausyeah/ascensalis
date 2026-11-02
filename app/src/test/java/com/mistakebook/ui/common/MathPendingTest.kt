@@ -88,11 +88,11 @@ class MathPendingTest {
             "requests 更新必须走 SideEffect（同步赋值、零打断）",
             src.contains("SideEffect { mathQueue.value = requests }")
         )
-        // conflate() 在 StateFlow 上是无效调用（kotlinx.coroutines 已弃用并标 error 级），
-        // 钉住不许加回来
+        // 合并算子在 StateFlow 上是无效调用（kotlinx.coroutines 已弃用并标 error 级），
+        // 只盯调用形态（.conflate），注释里的措辞不误伤
         assertFalse(
-            "StateFlow 上不得调用 conflate()（无效且已被协程库弃用）",
-            src.contains("conflate")
+            "StateFlow 上不得套合并算子（无效且已被协程库弃用）",
+            src.contains(".conflate")
         )
     }
 

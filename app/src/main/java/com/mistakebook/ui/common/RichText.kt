@@ -164,24 +164,25 @@ fun RichText(
 
     // ---- 渲染循环**绝不随 requests 重启**（流式「一卡一卡」的根因）----
     //
-    // 早先渲染协程直接挂在 LaunchedEffect(mathRenderer, requests) 上：
-    // 流式文本每长一段（防抖后约 100ms 一次），blocks → mathKeys → requests
-    // 就换一批新键，effect 被取消重启。而 renderAll 是「WebView 往返 +
-    // 等帧 + 抓长卷切图」的慢操作，挂在 awaitFrame / evaluateJavascript
-    // 上时被取消，整批结果全部丢弃（切片与缓存写入都在挂起点之后）。
-    // 于是每闭合一个新公式，上一批渲染进度作废重来——用户看到的就是
-    // 「同一段回答里输出一卡一卡」，而历史消息（text 不变）从不卡。
+    // 早先渲染协程直接挂在以 requests 为键的 effect 上：流式文本每长一段
+    // （防抖后约 100ms 一次），blocks → mathKeys → requests 就换一批新键，
+    // effect 被取消重启。而 renderAll 是「WebView 往返 + 等帧 + 抓长卷
+    // 切图」的慢操作，挂在 awaitFrame / evaluateJavascript 上时被取消，
+    // 整批结果全部丢弃（切片与缓存写入都在挂起点之后）。于是每闭合一个
+    // 新公式，上一批渲染进度作废重来——用户看到的就是「同一段回答里
+    // 输出一卡一卡」，而历史消息（text 不变）从不卡。
     //
     // 现在拆成两段：requests 变化只更新队列（SideEffect，同步、零打断）；
-    // 渲染循环是挂在 mathRenderer 上的长协程，conflate 保证积压的中间帧
-    // 被合并、永远只渲染最新一批，且**任何一次渲染都不再被打断**。
+    // 渲染循环是挂在 mathRenderer 上的长协程，积压的中间帧被自动覆盖、
+    // 永远只渲染最新一批，且**任何一次渲染都不再被打断**。
     val mathQueue = remember(mathRenderer) {
         MutableStateFlow<List<Triple<String, String, Boolean>>>(emptyList())
     }
     SideEffect { mathQueue.value = requests }
     LaunchedEffect(mathRenderer) {
-        // StateFlow 本身就是 conflated 语义：collect 处理完当前批之后
-        // 一定读到最新值，积压的中间帧自动被覆盖，无需 conflate()。
+        // StateFlow 天然只保留最新值：collect 处理完当前批之后一定读到
+        // 最新一批，中间帧自动被覆盖——不要再套任何合并算子（协程库
+        // 对 StateFlow 上的这类算子标了 error 级弃用）。
         mathQueue.collect { latest ->
             // 先把 renderer 级缓存里已有的条目补进本地图（滑回视口的
             // item、同屏另一条消息渲染过的公式，都不必再过一遍 WebView）。
