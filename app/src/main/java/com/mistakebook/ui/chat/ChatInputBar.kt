@@ -402,7 +402,7 @@ internal fun PendingAttachmentChip(
                             else -> if (attachment.extractedChars > 0) {
                                 stringResource(R.string.chat_attachment_extracted, attachment.extractedChars)
                             } else {
-                                formatSize(attachment.sizeBytes)
+                                com.mistakebook.ui.common.Format.fileSize(attachment.sizeBytes)
                             }
                         }
                     }

@@ -32,6 +32,19 @@ object Format {
             .toLocalDate()
             .format(dateFormatter)
 
+    /**
+     * 字节数 -> 人类可读。全仓三处重复实现（设置页存储统计/对话附件芯片/
+     * MinerU 上传日志）收敛于此：GB 档补齐、KB 取整、0 字节显示空串
+     * （附件芯片拼副标题时空文件不该出现「0 B」噪声）。
+     */
+    fun fileSize(bytes: Long): String = when {
+        bytes <= 0 -> ""
+        bytes >= 1L shl 30 -> "%.1f GB".format(bytes / 1024.0 / 1024 / 1024)
+        bytes >= 1L shl 20 -> "%.1f MB".format(bytes / 1024.0 / 1024)
+        bytes >= 1024L -> "%.0f KB".format(bytes / 1024.0)
+        else -> "$bytes B"
+    }
+
     /** 题干摘要：去掉换行，最多 [max] 字。 */
     fun stemDigest(stem: String, max: Int = 60): String =
         stem.replace('\n', ' ').trim().let {

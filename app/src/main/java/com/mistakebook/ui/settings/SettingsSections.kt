@@ -380,9 +380,9 @@ internal fun StorageInfoRow(container: com.mistakebook.di.AppContainer) {
                         stringResource(
                             R.string.settings_storage_detail,
                             current.questionCount,
-                            formatSize(current.imagesBytes),
-                            formatSize(current.databaseBytes),
-                            formatSize(current.totalBytes)
+                            com.mistakebook.ui.common.Format.fileSize(current.imagesBytes),
+                            com.mistakebook.ui.common.Format.fileSize(current.databaseBytes),
+                            com.mistakebook.ui.common.Format.fileSize(current.totalBytes)
                         )
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -460,13 +460,6 @@ private fun countFiles(dir: java.io.File?): Int {
         }
     }
     return total
-}
-
-private fun formatSize(bytes: Long): String = when {
-    bytes >= 1024L * 1024 * 1024 -> "%.1f GB".format(bytes / 1024.0 / 1024 / 1024)
-    bytes >= 1024L * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024)
-    bytes >= 1024L -> "%.0f KB".format(bytes / 1024.0)
-    else -> "$bytes B"
 }
 
 @Composable

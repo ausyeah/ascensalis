@@ -123,7 +123,7 @@ class MineruClient(
             }
 
         // 关键：OSS 签名不允许带 Content-Type 头，带了会 SignatureDoesNotMatch(403)
-        onStage("上传文件 ${formatSize(file.length())}…")
+        onStage("上传文件 ${com.mistakebook.ui.common.Format.fileSize(file.length())}…")
         val uploaded = rethrowCancellation {
             api.uploadFile(
                 uploadUrl = uploadUrl,
@@ -471,9 +471,6 @@ class MineruClient(
             fail(ApiError(kind = ApiErrorKind.AUTH, serverMessage = body.msg))
         }
     }
-
-    private fun formatSize(bytes: Long): String =
-        if (bytes < 1024 * 1024) "${bytes / 1024} KB" else "${bytes / 1024 / 1024} MB"
 
     /** 轮询阶段的 HTTP 错误载体（[ApiError] 不是 Throwable，包一层才能走 runCatching 的异常通道）。 */
     private class PollHttpError(val error: ApiError) : Exception(error.serverMessage)

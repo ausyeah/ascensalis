@@ -278,7 +278,7 @@ internal fun AttachmentFileChip(file: BubbleFile, onImageClick: (String) -> Unit
                         R.string.chat_attachment_extracted, file.extractedChars
                     )
                     buildString {
-                        file.sizeBytes.takeIf { it > 0 }?.let { append(formatSize(it)) }
+                        file.sizeBytes.takeIf { it > 0 }?.let { append(com.mistakebook.ui.common.Format.fileSize(it)) }
                         file.extractedChars.takeIf { it > 0 }?.let {
                             if (isNotEmpty()) append(" · ")
                             append(extracted)
@@ -342,11 +342,4 @@ internal fun openChatAttachment(context: Context, file: BubbleFile) {
     }
 }
 
-
-internal fun formatSize(bytes: Long): String = when {
-    bytes <= 0 -> ""
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-    else -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
-}
 
