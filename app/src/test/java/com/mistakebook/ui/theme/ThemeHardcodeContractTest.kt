@@ -7,10 +7,10 @@ import java.io.File
 /**
  * 「界面层不写裸色值」的防回归契约（premium-ui 铁律：每个颜色有槽位）。
  *
- * 背景：v0.0.88 UI 重构前，theme 包外散落 62 处 `Color(0xFF…)`，
- * 大多配合 `LocalDarkTheme` 手写明暗分支——主题换血后这些值不再与新
- * 色板同族，是质感崩坏的主要来源。迁移策略是逐屏收敛进 colorScheme
- * 槽位，本契约把**当前存量 62 钉死**：
+ * 背景：v0.0.88 UI 重构前，theme 包外散落 92 处 `Color(0xFF…)`（按出现
+ * 次数计，一行多匹配分别计数），大多配合 `LocalDarkTheme` 手写明暗分支
+ * ——主题换血后这些值不再与新色板同族，是质感崩坏的主要来源。迁移策略
+ * 是逐屏收敛进 colorScheme 槽位，本契约把**当前存量 92 钉死**：
  * - 每迁移一处，基线就该跟着调低；
  * - 任何新增裸色值（新界面、新功能）都会让测试变红——新增颜色必须
  *   先进色板槽位，再在界面里引用。
@@ -20,7 +20,7 @@ import java.io.File
  */
 class ThemeHardcodeContractTest {
 
-    private val hardcodedColorLimit = 62
+    private val hardcodedColorLimit = 92
 
     @Test
     fun `界面层裸色值存量只减不增`() {
