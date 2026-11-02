@@ -627,27 +627,42 @@ private fun EmptyStateWithActions(
 ) {
     EmptyState(
         title = stringResource(R.string.home_empty_title),
+        // Mihon 空态配方：一个低对比字形给视线一个落点，纯文字太飘
+        glyph = "◌",
         action = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                androidx.compose.material3.Button(onClick = onAddByPhoto) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // 主操作等宽撑满（Row + weight）：次级按钮两枚也各占一半，
+                // 触控目标一致宽，间距节奏才不会歪
+                androidx.compose.material3.Button(
+                    onClick = onAddByPhoto,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Icon(Icons.Default.PhotoCamera, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.home_add_by_photo))
                 }
                 Spacer(Modifier.height(8.dp))
-                Row {
-                    androidx.compose.material3.TextButton(onClick = onAddFromGallery) {
-                        Text(stringResource(R.string.home_add_from_gallery))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = onAddFromGallery,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(stringResource(R.string.home_add_from_gallery), maxLines = 1)
                     }
-                    Spacer(Modifier.width(8.dp))
-                    androidx.compose.material3.TextButton(onClick = onImportPdf) {
-                        Text(stringResource(R.string.home_import_pdf))
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = onImportPdf,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(stringResource(R.string.home_import_pdf), maxLines = 1)
                     }
                 }
                 Spacer(Modifier.height(4.dp))
                 // 空状态里也留着手动录入：新用户没有题，第一个键还可能没配，
                 // 这时如果只有「拍照/相册/PDF」三条路，他会以为自己用不了
-                androidx.compose.material3.TextButton(onClick = onAddManual) {
+                androidx.compose.material3.TextButton(
+                    onClick = onAddManual,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(stringResource(R.string.home_add_manual))
                 }
             }
