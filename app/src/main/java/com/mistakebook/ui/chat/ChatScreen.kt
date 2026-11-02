@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -670,15 +671,22 @@ private fun MessageList(
         // 贴底判定/回底/增长补偿全部假定 **index 0 = 最新一条消息**；
         // 早先声明在前面时它是 index 0，只要会话出现过省略提示，
         // 整套触底几何就都在盯着这条小提示条而不是正在流式的那条消息。
-        items(
+        itemsIndexed(
             items = messages.asReversed(),
             // key 用消息 id：内容更新（流式 / 落库）时按 id 对齐，
             // 不因为实例变化而丢掉滚动位置与已组合的 item。
             key = { it.id },
             // contentType 让 Compose 按类型分池复用：不写的话滚动时
             // 每条消息都可能拿到上一条不同类型的容器重新组合。
-            contentType = { "message" }
-        ) { message ->
+            contentType = { _, _ -> "message" }
+) { index, message ->
+            // 连发清角（Element X 模式）：同角色相邻气泡相接的角收窄，
+            // 一屏内的连续消息黏成一列。reverseLayout 下 index-1 是屏幕上方（更新）。
+            val reversedMessages = messages.asReversed()
+            val aboveSameRole = index > 0 &&
+                reversedMessages[index - 1].role == message.role
+            val belowSameRole = index < reversedMessages.lastIndex &&
+                reversedMessages[index + 1].role == message.role
             val preview = if (message.id == state.streamingMessageId) {
                 state.streamingContent
             } else {
@@ -687,6 +695,8 @@ private fun MessageList(
             val visibleMessage = if (preview != null) message.copy(content = preview) else message
             MessageBubble(
                 message = visibleMessage,
+                aboveSameRole = aboveSameRole,
+                belowSameRole = belowSameRole,
                 images = bubbleImages[message.id].orEmpty(),
                 files = bubbleFiles[message.id].orEmpty(),
                 stage = state.generationStage.takeIf {
@@ -801,6 +811,10 @@ private fun ContextStatusRow(
 @Composable
 private fun MessageBubble(
     message: ChatMessage,
+    /** 屏幕上方相邻消息与本条同角色：相接角收窄（连发黏列）。 */
+    aboveSameRole: Boolean = false,
+    /** 屏幕下方相邻消息同角色。 */
+    belowSameRole: Boolean = false,
     images: List<String>,
     /** 非图片附件（PDF/文档等）。点击交给系统打开，本应用不做阅读器。 */
     files: List<BubbleFile>,
@@ -885,11 +899,15 @@ private fun MessageBubble(
             } else {
                 Color.Transparent
             },
+            // 连发清角：与同角色相邻的一侧收 4dp（保一丝间隙感不焊死），
+            // 悬空侧保持 14dp 大圆角。助手通栏无气泡轮廓，收角只影响 user 分支。
+            val bubbleCorner = 14.dp
+            val joinedCorner = 4.dp
             shape = RoundedCornerShape(
-                topStart = 14.dp,
-                topEnd = 14.dp,
-                bottomStart = if (isUser) 14.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 14.dp
+                topStart = if (isUser && aboveSameRole) joinedCorner else bubbleCorner,
+                topEnd = if (isUser && aboveSameRole) joinedCorner else bubbleCorner,
+                bottomStart = if (!isUser || belowSameRole) joinedCorner else bubbleCorner,
+                bottomEnd = if (belowSameRole) joinedCorner else if (isUser) bubbleCorner else joinedCorner
             ),
             modifier = if (isUser) Modifier.widthIn(max = 320.dp) else Modifier.fillMaxWidth()
         ) {
