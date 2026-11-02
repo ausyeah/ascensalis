@@ -44,16 +44,24 @@ class UsageStatsStore(context: Context) {
     private val prefs =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    /** 记一次大模型调用。cachedTokens 为 0 表示服务端没给缓存字段。 */
+    /**
+     * 记一次大模型调用。cachedTokens 为 0 表示服务端没给缓存字段。
+     *
+     * 调用方分布在三个线程域（网络回调 / 前台服务 / 压缩协程），
+     * 读-改-写必须互斥：两个并发 record 用同一个旧值起算会互相覆盖，
+     * 丢一次计数——统计用途丢数字没人发现，但账目从此对不上。
+     */
     fun recordLlm(promptTokens: Int, completionTokens: Int, cachedTokens: Int) {
-        prefs.edit {
-            putInt(KEY_LLM_CALLS, prefs.getInt(KEY_LLM_CALLS, 0) + 1)
-            putInt(KEY_LLM_PROMPT, prefs.getInt(KEY_LLM_PROMPT, 0) + promptTokens.coerceAtLeast(0))
-            putInt(
-                KEY_LLM_COMPLETION,
-                prefs.getInt(KEY_LLM_COMPLETION, 0) + completionTokens.coerceAtLeast(0)
-            )
-            putInt(KEY_LLM_CACHED, prefs.getInt(KEY_LLM_CACHED, 0) + cachedTokens.coerceAtLeast(0))
+        synchronized(this) {
+            prefs.edit {
+                putInt(KEY_LLM_CALLS, prefs.getInt(KEY_LLM_CALLS, 0) + 1)
+                putInt(KEY_LLM_PROMPT, prefs.getInt(KEY_LLM_PROMPT, 0) + promptTokens.coerceAtLeast(0))
+                putInt(
+                    KEY_LLM_COMPLETION,
+                    prefs.getInt(KEY_LLM_COMPLETION, 0) + completionTokens.coerceAtLeast(0)
+                )
+                putInt(KEY_LLM_CACHED, prefs.getInt(KEY_LLM_CACHED, 0) + cachedTokens.coerceAtLeast(0))
+            }
         }
     }
 
@@ -64,10 +72,12 @@ class UsageStatsStore(context: Context) {
      *   `total_pages` 时传 0：次数照记，页数不记。
      */
     fun recordMineru(pages: Int = 0) {
-        prefs.edit {
-            putInt(KEY_MINERU_CALLS, prefs.getInt(KEY_MINERU_CALLS, 0) + 1)
-            if (pages > 0) {
-                putInt(KEY_MINERU_PAGES, prefs.getInt(KEY_MINERU_PAGES, 0) + pages)
+        synchronized(this) {
+            prefs.edit {
+                putInt(KEY_MINERU_CALLS, prefs.getInt(KEY_MINERU_CALLS, 0) + 1)
+                if (pages > 0) {
+                    putInt(KEY_MINERU_PAGES, prefs.getInt(KEY_MINERU_PAGES, 0) + pages)
+                }
             }
         }
     }
