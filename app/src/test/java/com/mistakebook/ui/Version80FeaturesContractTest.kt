@@ -37,15 +37,17 @@ class Version80FeaturesContractTest {
 
     @Test
     fun `思考过程折叠移除冲突动画并增加重锚定回调`() {
-        val src = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
+        // 拆分后 ThinkingBlock 在 ChatMessageBubble.kt、列表接线在 ChatMessageList.kt
+        val src = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatMessageBubble.kt")
+        val listSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatMessageList.kt")
         assertTrue("ThinkingBlock 必须提供 onToggle 回调", src.contains("onToggle: (Boolean) -> Unit = {}"))
-        assertTrue("MessageList 必须在折叠时回滚到列表底部", src.contains("onToggleThinking = {"))
+        assertTrue("MessageList 必须在折叠时回滚到列表底部", listSrc.contains("onToggleThinking = {"))
         assertTrue("ThinkingBlock 移除多帧高度过渡动画防 reverseLayout 抖动", !src.contains("ThinkingBlock") || !src.contains(".animateContentSize()\n            .clip(RoundedCornerShape(8.dp))\n            .background(MaterialTheme.colorScheme.surface"))
     }
 
     @Test
     fun `主题色排版一排 8 个等宽居中排布防止第八个圆球挤压`() {
-        val src = readSource("app/src/main/java/com/mistakebook/ui/settings/SettingsSections.kt")
+        val src = readSource("app/src/main/java/com/mistakebook/ui/settings/SettingsAppearanceSections.kt")
         assertTrue("AccentTone 采用单排 8 列自适应排布", src.contains("AccentTone.entries.forEach") && src.contains("weight(1f)"))
     }
 

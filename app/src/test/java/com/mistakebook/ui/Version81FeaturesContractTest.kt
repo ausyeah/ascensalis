@@ -60,7 +60,8 @@ class Version81FeaturesContractTest {
         assertEquals("这是纯净的助手回答", ChatThinking.answerOf(mixedContent))
         assertEquals("这里是详细推理过程", ChatThinking.thinkingOf(mixedContent))
 
-        val chatSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
+        // 气泡簇（复制逻辑与 ThinkingBlock）在拆分后位于 ChatMessageBubble.kt
+        val chatSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatMessageBubble.kt")
         assertTrue("复制助手消息时必须剥离 think 标签", chatSrc.contains("ChatThinking.answerOf(message.content)"))
         assertTrue(
             "ThinkingBlock 必须提供独立的复制思考按钮（文案已外移到 strings.xml）",
