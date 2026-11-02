@@ -41,7 +41,9 @@ class Version80FeaturesContractTest {
         val src = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatMessageBubble.kt")
         val listSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatMessageList.kt")
         assertTrue("ThinkingBlock 必须提供 onToggle 回调", src.contains("onToggle: (Boolean) -> Unit = {}"))
-        assertTrue("MessageList 必须在折叠时回滚到列表底部", listSrc.contains("onToggleThinking = {"))
+        // 折叠回滚 lambda 在入口接线处（ChatScreen.kt 传给 MessageList）
+        val mainSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
+        assertTrue("MessageList 必须在折叠时回滚到列表底部", mainSrc.contains("onToggleThinking = {") && listSrc.contains("onToggleThinking"))
         assertTrue("ThinkingBlock 移除多帧高度过渡动画防 reverseLayout 抖动", !src.contains("ThinkingBlock") || !src.contains(".animateContentSize()\n            .clip(RoundedCornerShape(8.dp))\n            .background(MaterialTheme.colorScheme.surface"))
     }
 
