@@ -27,7 +27,7 @@ class MathPendingTest {
     @Test
     fun `全部未渲染时返回全部请求`() {
         val requests = listOf(req("i:a"), req("i:b"), req("d:c"))
-        assertEquals(requests, mathPendingOf(requests, emptyMap()))
+        assertEquals(requests, mathPendingOf(requests, emptyMap<String, Any?>()))
     }
 
     @Test
