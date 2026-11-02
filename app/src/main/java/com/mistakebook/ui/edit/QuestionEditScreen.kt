@@ -1,5 +1,7 @@
 package com.mistakebook.ui.edit
 
+import com.mistakebook.ui.common.SubjectDropdown
+import com.mistakebook.ui.common.KnowledgePointEditor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -384,78 +386,4 @@ fun QuestionEditScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SubjectDropdown(
-    subjects: List<com.mistakebook.data.local.entities.Subject>,
-    selectedId: Long?,
-    onSelect: (Long?) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val label = subjects.firstOrNull { it.id == selectedId }?.name ?: "未分类"
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-        OutlinedTextField(
-            value = label,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(stringResource(R.string.edit_subject)) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            subjects.forEach { subject ->
-                DropdownMenuItem(
-                    text = { Text(subject.name) },
-                    onClick = {
-                        onSelect(subject.id)
-                        expanded = false
-                    }
-                )
-            }
-        }
-    }
-}
 
-@Composable
-private fun KnowledgePointEditor(
-    points: List<String>,
-    onAdd: (String) -> Unit,
-    onRemove: (String) -> Unit
-) {
-    var input by remember { mutableStateOf("") }
-    Column {
-        OutlinedTextField(
-            value = input,
-            onValueChange = { input = it },
-            placeholder = { Text(stringResource(R.string.edit_knowledge_add_hint)) },
-            singleLine = true,
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    onAdd(input)
-                    input = ""
-                }
-            ),
-            modifier = Modifier.fillMaxWidth()
-        )
-        if (points.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(points) { point ->
-                    InputChip(
-                        selected = false,
-                        onClick = { onRemove(point) },
-                        label = { Text(point) },
-                        trailingIcon = {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.action_delete),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    )
-                }
-            }
-        }
-    }
-}

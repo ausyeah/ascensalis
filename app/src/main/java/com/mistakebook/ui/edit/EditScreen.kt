@@ -80,6 +80,7 @@ import com.mistakebook.domain.ErrorReason
 import com.mistakebook.ui.common.DifficultyPicker
 import com.mistakebook.ui.common.FullScreenImageDialog
 import kotlinx.coroutines.launch
+import com.mistakebook.ui.common.KnowledgePointEditor
 import com.mistakebook.ui.common.RichText
 import com.mistakebook.ui.common.SectionLabel
 import com.mistakebook.ui.common.containerViewModel
@@ -659,48 +660,6 @@ private fun InfoBanner(text: String) {
     }
 }
 
-@Composable
-private fun KnowledgePointEditor(
-    points: List<String>,
-    onAdd: (String) -> Unit,
-    onRemove: (String) -> Unit
-) {
-    var input by remember { mutableStateOf("") }
-    Column {
-        OutlinedTextField(
-            value = input,
-            onValueChange = { input = it },
-            placeholder = { Text(stringResource(R.string.edit_knowledge_add_hint)) },
-            singleLine = true,
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    onAdd(input)
-                    input = ""
-                }
-            ),
-            modifier = Modifier.fillMaxWidth()
-        )
-        if (points.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(points) { point ->
-                    InputChip(
-                        selected = false,
-                        onClick = { onRemove(point) },
-                        label = { Text(point) },
-                        trailingIcon = {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.action_delete),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
 
 // 学科选择：列表只包含用户已建的学科；AI 建议但库里没有的学科作为「新增」项直接可选，
 // 选中后保存时自动入库（不再预置十个学科）。

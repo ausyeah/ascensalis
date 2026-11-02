@@ -1,5 +1,7 @@
 package com.mistakebook.ui.common
 
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -98,8 +100,9 @@ internal fun KnowledgePointEditor(
         )
         if (points.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                points.forEach { point ->
+            // LazyRow：知识点多时横向滚动，不把编辑区撑爆
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(points) { point ->
                     InputChip(
                         selected = false,
                         onClick = { onRemove(point) },
