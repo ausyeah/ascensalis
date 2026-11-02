@@ -81,12 +81,18 @@ class MathPendingTest {
     fun `requests 变化经队列合并不直接触发渲染`() {
         val src = readSource("RichText.kt", "src/main/java/com/mistakebook/ui/common/RichText.kt")
         assertTrue(
-            "requests 必须经 MutableStateFlow + conflate 进渲染循环（合并积压帧）",
-            src.contains("mathQueue.conflate().collect")
+            "requests 必须经 MutableStateFlow 进渲染循环（StateFlow 天然 conflated：处理完当前批必读最新值，积压中间帧自动被覆盖）",
+            src.contains("mathQueue.collect")
         )
         assertTrue(
             "requests 更新必须走 SideEffect（同步赋值、零打断）",
             src.contains("SideEffect { mathQueue.value = requests }")
+        )
+        // conflate() 在 StateFlow 上是无效调用（kotlinx.coroutines 已弃用并标 error 级），
+        // 钉住不许加回来
+        assertFalse(
+            "StateFlow 上不得调用 conflate()（无效且已被协程库弃用）",
+            src.contains("conflate")
         )
     }
 

@@ -14,7 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.conflate
 import kotlin.math.roundToInt
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -181,7 +180,9 @@ fun RichText(
     }
     SideEffect { mathQueue.value = requests }
     LaunchedEffect(mathRenderer) {
-        mathQueue.conflate().collect { latest ->
+        // StateFlow 本身就是 conflated 语义：collect 处理完当前批之后
+        // 一定读到最新值，积压的中间帧自动被覆盖，无需 conflate()。
+        mathQueue.collect { latest ->
             // 先把 renderer 级缓存里已有的条目补进本地图（滑回视口的
             // item、同屏另一条消息渲染过的公式，都不必再过一遍 WebView）。
             renderedMath.putAll(mathRenderer.cachedOf(latest))
