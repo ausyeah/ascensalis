@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -102,6 +103,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import android.content.ClipData
@@ -453,7 +457,7 @@ fun ChatScreen(
                     // 弹层里 enabled=false 只禁改动项，入口本身不该装死。
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(18.dp))
+                            .clip(MaterialTheme.shapes.large)
                             .clickable { showModelSheet = true }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -714,7 +718,7 @@ private fun OmittedNoticeRow(count: Int) {
     ) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(10.dp)
+            shape = MaterialTheme.shapes.small
         ) {
             Text(
                 text = stringResource(R.string.chat_omitted_notice, count),
@@ -829,8 +833,8 @@ private fun MessageBubble(
             )
             Spacer(Modifier.height(4.dp))
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.small,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
                 Text(
@@ -875,7 +879,9 @@ private fun MessageBubble(
             // 原来助手也用 surfaceVariant 气泡 + 320dp 限宽，长公式/表格/HTML
             // 全被挤在窄列里——既割裂阅读，也让宽公式更容易被右侧裁掉。
             color = if (isUser) {
-                MaterialTheme.colorScheme.primaryContainer
+                // 用户气泡走中性面（T3 messageSurface 口径）而不是 primaryContainer：
+                // 强调色只给主操作，气泡靠对齐方向区分归属，蓝底蓝字的克制感更足
+                MaterialTheme.colorScheme.surfaceContainerHigh
             } else {
                 Color.Transparent
             },
@@ -1402,9 +1408,9 @@ private fun ThinkingBlock(
 @Composable
 private fun JumpToBottomButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shadowElevation = 4.dp,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = modifier
     ) {
         IconButton(onClick = onClick) {
@@ -1419,9 +1425,8 @@ private fun JumpToBottomButton(modifier: Modifier = Modifier, onClick: () -> Uni
 @Composable
 private fun OcrProgressBar(stage: String) {
     Surface(
-        tonalElevation = 1.dp,
         color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = RoundedCornerShape(10.dp),
+        shape = MaterialTheme.shapes.small,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -1455,9 +1460,8 @@ private fun OcrProgressBar(stage: String) {
 @Composable
 private fun OcrNoticeBar(notice: String, onRetry: () -> Unit) {
     Surface(
-        tonalElevation = 1.dp,
         color = MaterialTheme.colorScheme.errorContainer,
-        shape = RoundedCornerShape(10.dp),
+        shape = MaterialTheme.shapes.small,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -1509,7 +1513,19 @@ private fun ChatInputBar(
     gradingVisible: Boolean = false,
     onToggleGrading: () -> Unit = {}
 ) {
-    Surface(tonalElevation = 3.dp, shadowElevation = 8.dp) {
+    // 输入栏与画布同色、零阴影，层次靠顶部 1dp 描边（与门户顶栏同一手法）：
+    // 键盘弹出/收起时表面不再明暗跳变，只有一条静默的界线。
+    val inputBarBorder = MaterialTheme.colorScheme.outlineVariant
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.drawBehind {
+            drawRect(
+                color = inputBarBorder,
+                topLeft = Offset(0f, 0f),
+                size = Size(size.width, 1.dp.toPx())
+            )
+        }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1558,7 +1574,7 @@ private fun ChatInputBar(
                     )
                 },
                 maxLines = 5,
-                shape = RoundedCornerShape(20.dp),
+                shape = MaterialTheme.shapes.large,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color.Transparent,
                     unfocusedBorderColor = Color.Transparent,
@@ -1609,7 +1625,7 @@ private fun ChatInputBar(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(18.dp))
+                        .clip(MaterialTheme.shapes.large)
                         .clickable(enabled = !streaming, onClick = onPickModel)
                         .padding(horizontal = 6.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -2021,7 +2037,7 @@ private fun PendingAttachmentChip(
     onRemove: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = MaterialTheme.shapes.extraSmall,
         color = if (attachment.status == com.mistakebook.domain.AttachmentStatus.FAILED) {
             MaterialTheme.colorScheme.errorContainer
         } else {
@@ -2113,7 +2129,7 @@ private fun AttachmentFileChip(file: BubbleFile, onImageClick: (String) -> Unit 
     val context = LocalContext.current
     val failed = file.errorMessage != null
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = MaterialTheme.shapes.extraSmall,
         color = if (failed) {
             MaterialTheme.colorScheme.errorContainer
         } else {
