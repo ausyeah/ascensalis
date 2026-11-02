@@ -260,7 +260,6 @@ private fun WordbookHeaderSummary(
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(

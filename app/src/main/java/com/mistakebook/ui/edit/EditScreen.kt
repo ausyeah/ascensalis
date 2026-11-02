@@ -83,7 +83,7 @@ import kotlinx.coroutines.launch
 import com.mistakebook.ui.common.RichText
 import com.mistakebook.ui.common.SectionLabel
 import com.mistakebook.ui.common.containerViewModel
-import com.mistakebook.ui.theme.WarningAmber
+import com.mistakebook.ui.theme.PaperWarnBg
 
 /**
  * 编辑页（PRD 7.5）：一次识别可含多道题，顶部翻页切换。
@@ -628,8 +628,8 @@ private fun WarningBanner(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp),
-        color = WarningAmber.copy(alpha = 0.16f),
-        shape = RoundedCornerShape(8.dp)
+        color = PaperWarnBg,
+        shape = MaterialTheme.shapes.extraSmall
     ) {
         Text(
             text = text,
@@ -647,8 +647,8 @@ private fun InfoBanner(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
-        shape = RoundedCornerShape(8.dp)
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.extraSmall
     ) {
         Text(
             text = text,

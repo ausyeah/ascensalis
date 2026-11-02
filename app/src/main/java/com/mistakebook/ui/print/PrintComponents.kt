@@ -63,7 +63,7 @@ fun PrintBottomBar(
     onGenerate: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(tonalElevation = 2.dp, modifier = modifier) {
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = modifier) {
         Button(
             onClick = onGenerate,
             enabled = selectedCount > 0 && !generating,

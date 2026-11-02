@@ -99,7 +99,7 @@ fun QuestionEditScreen(
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 2.dp) {
+            Surface(color = MaterialTheme.colorScheme.surface) {
                 Button(
                     onClick = { viewModel.save(onBack) },
                     enabled = state.canSave,
