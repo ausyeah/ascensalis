@@ -1,6 +1,7 @@
 package com.mistakebook.ui.edit
 
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -186,7 +187,7 @@ fun EditScreen(
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 2.dp) {
+            Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -291,9 +292,9 @@ fun EditScreen(
                         }
                         if (previewText.contains("$")) {
                             Card(
-                                shape = RoundedCornerShape(8.dp),
+                                shape = MaterialTheme.shapes.medium,
                                 colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -350,8 +351,8 @@ fun EditScreen(
                         Spacer(Modifier.height(8.dp))
                         Card(
                             onClick = { showFullImage = true },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            shape = MaterialTheme.shapes.medium,
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),

@@ -1,6 +1,7 @@
 package com.mistakebook.ui.settings
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -109,14 +110,17 @@ internal fun CollapsibleSettingsGroup(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 10.dp),
-            shape = MaterialTheme.shapes.small,
+            shape = MaterialTheme.shapes.medium,
+            // 卡槽浮底一级 + 1dp 描边 + 零阴影；收起态直接用不透明的
+            // 次级面（半透明叠层在浅色暖卡上会透出下层内容，显得脏）
             colors = CardDefaults.cardColors(
                 containerColor = if (isExpanded) {
-                    MaterialTheme.colorScheme.surface
+                    MaterialTheme.colorScheme.surfaceContainerLow
                 } else {
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    MaterialTheme.colorScheme.surfaceVariant
                 }
-            )
+            ),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             header()
             AnimatedVisibility(visible = isExpanded) {
@@ -166,11 +170,12 @@ internal fun SettingsCategoryCard(
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = if (isExpanded) {
-                MaterialTheme.colorScheme.surface
+                MaterialTheme.colorScheme.surfaceContainerLow
             } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                MaterialTheme.colorScheme.surfaceVariant
             }
-        )
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
             modifier = Modifier
