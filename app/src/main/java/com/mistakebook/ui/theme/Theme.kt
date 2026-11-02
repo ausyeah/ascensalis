@@ -49,7 +49,9 @@ internal val ZincLight = lightColorScheme(
     surfaceVariant = PaperVariantLight,
     onSurfaceVariant = PaperTextMutedLight,
     surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFFAFAFA),
+    // 卡槽：浮在 #FCFCFC 底上的纯白卡（T3 浅色结构）。卡片统一用 low，
+    // 深色对应的卡槽是 #111111（low）——两种明暗同一槽位语义
+    surfaceContainerLow = Color(0xFFFFFFFF),
     surfaceContainer = Color(0xFFF4F4F5),
     surfaceContainerHigh = Color(0xFFF4F4F5),
     surfaceContainerHighest = Color(0xFFEBEBEE),

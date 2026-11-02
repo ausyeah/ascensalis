@@ -1,5 +1,6 @@
 package com.mistakebook.ui.home
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -115,7 +115,6 @@ import com.mistakebook.ui.common.ReorderDragHandle
 import com.mistakebook.ui.common.moveItem
 import com.mistakebook.ui.common.orderByIds
 import com.mistakebook.ui.common.containerViewModel
-import com.mistakebook.ui.theme.Danger
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -335,7 +334,7 @@ fun HomeScreen(
                     },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium,
-                    shape = RoundedCornerShape(16.dp),
+                    shape = MaterialTheme.shapes.medium,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -435,7 +434,7 @@ fun HomeScreen(
                         item(key = "review-banner", contentType = "banner") {
                             Surface(
                                 onClick = onStartReview,
-                                shape = RoundedCornerShape(12.dp),
+                                shape = MaterialTheme.shapes.medium,
                                 color = MaterialTheme.colorScheme.primaryContainer,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -911,8 +910,11 @@ private fun QuestionCard(
 ) {
     Card(
         onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = MaterialTheme.shapes.medium,
+        // 卡 = 面浮底一级（surfaceContainerLow）+ 1dp 描边 + 零阴影：
+        // 浅色底 #FCFCFC 上白卡靠描边划界，深色近黑上 111 卡同理
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(modifier = Modifier.padding(10.dp)) {
@@ -942,7 +944,7 @@ private fun QuestionCard(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(Danger)
+                                .background(MaterialTheme.colorScheme.error)
                         )
                     }
                 }
@@ -964,7 +966,8 @@ private fun QuestionCard(
                     Text(
                         text = Format.relativeDay(question.nextReviewAt),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
+                        // outline 是描边槽不是文字槽： auxiliary 文字走 onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
