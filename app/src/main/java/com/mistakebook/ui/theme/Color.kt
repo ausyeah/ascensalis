@@ -17,7 +17,7 @@ val PaperCardLight = Color(0xFFFFFFFF)       // 卡：唯一比底更亮的面
 val PaperBorderLight = Color(0xFFE4E4E7)     // 描边：层次全靠它
 val PaperTextPrimaryLight = Color(0xFF27272A)// 正文
 val PaperTextSecondaryLight = Color(0xFF52525B)
-val PaperTextMutedLight = Color(0xFF71717B)  // 辅助文字（4.5:1 on FCFCFC）
+val PaperTextMutedLight = Color(0xFF6B6B74)  // 辅助文字（4.5:1 on 次级面 #F4F4F5；T3 原值 #71717B 差 0.07，这里压过线）
 val PaperVariantLight = Color(0xFFF4F4F5)    // 次级面（chip/控件底）
 
 // 强调：单一蓝，浅/深同色相不同明度（T3 做法）
