@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFF5EFE3</color>
-    <color name="window_background">#FFF6F7F9</color>
-    <color name="brand">#FF4F7DF3</color>
+    <!-- 启动窗口底色与 Compose 画布同值（#FCFCFC）：冷启动第一帧不跳色 -->
+    <color name="window_background">#FFFCFCFC</color>
+    <color name="brand">#FF1B4ED8</color>
 </resources>

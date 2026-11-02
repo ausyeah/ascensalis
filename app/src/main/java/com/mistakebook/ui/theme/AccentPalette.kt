@@ -23,9 +23,12 @@ internal data class AccentColors(
 )
 
 internal fun AccentTone.palette(): AccentColors = when (this) {
+    // INDIGO 是默认强调（品牌蓝）：浅/深同色相不同明度（T3 做法）。
+    // 旧版暗色给的是琥珀——「暗色换琥珀」让同一用户白天见蓝夜里见金，
+    // 不成体系；蓝紫光晕的担忧针对旧 #748FFC，#346BF1 亮度饱和都低一档。
     AccentTone.INDIGO -> AccentColors(
-        light = Color(0xFF3B5BDB), lightContainer = Color(0xFFE9EDFB), lightOnContainer = Color(0xFF2F4BC0),
-        dark = Color(0xFFE9B95C), darkContainer = Color(0xFF3D2F12), darkOnContainer = Color(0xFFF0DDB4)
+        light = Color(0xFF1B4ED8), lightContainer = Color(0xFFE7EDFC), lightOnContainer = Color(0xFF1E40AF),
+        dark = Color(0xFF346BF1), darkContainer = Color(0xFF16213D), darkOnContainer = Color(0xFFBFD3FF)
     )
 
     AccentTone.JADE -> AccentColors(

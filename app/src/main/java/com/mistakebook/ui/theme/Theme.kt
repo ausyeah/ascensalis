@@ -2,7 +2,9 @@ package com.mistakebook.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -15,54 +17,100 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
-// 经典浅色暖纸模式（Warm Paper）
-private val PaperLightColors = lightColorScheme(
+// ==========================================================
+// 色槽映射：语义槽位只有一套，明暗两份值。
+// 哲学（逆向自 T3 Code）：单强调色、中性灰阶、层次靠描边不靠阴影。
+// 槽位填得越全，界面越没有借口写裸色值。
+// ==========================================================
+
+internal val ZincLight = lightColorScheme(
     primary = PaperPrimary,
     onPrimary = Color.White,
     primaryContainer = PaperPrimaryTint,
     onPrimaryContainer = PaperPrimaryDark,
-    secondary = PaperTextSecondaryLight,
-    onSecondary = Color.White,
+    // secondary/tertiary 收敛为中性面：单强调色体系里它们只做「次级灰」，
+    // M3 的 FilledTonalButton 之类组件吃这两个槽，给彩色反而破坏克制
+    secondary = PaperVariantLight,
+    onSecondary = PaperTextPrimaryLight,
+    secondaryContainer = PaperVariantLight,
+    onSecondaryContainer = PaperTextPrimaryLight,
+    tertiary = PaperVariantLight,
+    onTertiary = PaperTextPrimaryLight,
+    tertiaryContainer = PaperVariantLight,
+    onTertiaryContainer = PaperTextPrimaryLight,
     background = PaperBgLight,
     onBackground = PaperTextPrimaryLight,
-    surface = PaperCardLight,
+    surface = PaperBgLight,
     onSurface = PaperTextPrimaryLight,
-    surfaceVariant = Color(0xFFEFECE3),
+    surfaceVariant = PaperVariantLight,
     onSurfaceVariant = PaperTextMutedLight,
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFFAFAFA),
+    surfaceContainer = Color(0xFFF4F4F5),
+    surfaceContainerHigh = Color(0xFFF4F4F5),
+    surfaceContainerHighest = Color(0xFFEBEBEE),
+    surfaceTint = Color.Transparent,
     outline = PaperBorderLight,
+    outlineVariant = PaperBorderLight,
+    inverseSurface = PaperTextPrimaryLight,
+    inverseOnSurface = PaperBgLight,
     error = PaperBad,
-    onError = Color.White
+    onError = Color.White,
+    errorContainer = PaperBadBg,
+    onErrorContainer = Color(0xFF9B0E17)
 )
 
-// 深色墨砚夜读模式（Dark Ink Paper）
-private val PaperDarkColors = darkColorScheme(
+internal val ZincDark = darkColorScheme(
     primary = PaperPrimaryDarkTheme,
-    // 琥珀是高亮色，上面的字必须压到近黑的暖棕才够对比度
-    onPrimary = Color(0xFF2A1F06),
+    onPrimary = Color.White,
     primaryContainer = PaperPrimaryTintDark,
-    onPrimaryContainer = Color(0xFFF0DDB4),
-    secondary = PaperTextSecondaryDark,
-    onSecondary = Color(0xFF2A1F06),
+    onPrimaryContainer = Color(0xFFBFD3FF),
+    secondary = PaperVariantDark,
+    onSecondary = PaperTextPrimaryDark,
+    secondaryContainer = PaperVariantDark,
+    onSecondaryContainer = PaperTextPrimaryDark,
+    tertiary = PaperVariantDark,
+    onTertiary = PaperTextPrimaryDark,
+    tertiaryContainer = PaperVariantDark,
+    onTertiaryContainer = PaperTextPrimaryDark,
     background = PaperBgDark,
     onBackground = PaperTextPrimaryDark,
-    surface = PaperCardDark,
+    surface = PaperBgDark,
     onSurface = PaperTextPrimaryDark,
-    // 容器色阶按 M3 的 tone 递进（12 / 16 / 22 / 28），
-    // 制造层次而不是靠阴影——深色下阴影几乎看不见
-    surfaceContainerLowest = Color(0xFF0C0C0C),
-    surfaceContainerLow = Color(0xFF161616),
-    surfaceContainer = Color(0xFF1C1C1C),
-    surfaceContainerHigh = Color(0xFF262523),
-    surfaceContainerHighest = Color(0xFF31302D),
-    surfaceVariant = Color(0xFF262523),
+    // 表面阶梯从底到浮：0A(底) → 11(卡) → 14(控件) → 1C → 24，
+    // 每级只差一线，「面浮在底上」的感觉全靠这条极窄的明度带
+    surfaceContainerLowest = Color(0xFF0A0A0A),
+    surfaceContainerLow = Color(0xFF111111),
+    surfaceContainer = Color(0xFF141414),
+    surfaceContainerHigh = Color(0xFF1C1C1C),
+    surfaceContainerHighest = Color(0xFF242424),
+    surfaceVariant = PaperVariantDark,
     onSurfaceVariant = PaperTextMutedDark,
-    outline = PaperBorderDark,
-    outlineVariant = Color(0xFF2A2825),
+    surfaceTint = Color.Transparent,
+    outline = Color(0xFF1E1E1E),
+    outlineVariant = PaperBorderDark,
+    inverseSurface = PaperTextPrimaryDark,
+    inverseOnSurface = PaperBgDark,
     error = PaperBadDark,
-    onError = Color(0xFF3A211C)
+    onError = Color.White,
+    errorContainer = PaperBadBgDark,
+    onErrorContainer = Color(0xFFFFB3B6)
+)
+
+/**
+ * 全局形状：三档圆角（8 小控件 / 14 卡片 / 28 大分组与 sheet）。
+ * M3 组件默认取这里的值；界面里显式传形状的旧代码在逐屏重构时收敛。
+ */
+private val ZincShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(28.dp)
 )
 
 /**
@@ -74,8 +122,36 @@ private val PaperDarkColors = darkColorScheme(
  *    按英文规范排会显得糊成一片。
  * 2. **字号越大，字距越紧**。大标题若沿用正文的字距会松散得像没排过版，
  *    display 级收 -0.25~-0.5sp 是排版的常识，不是风格选择。
+ *
+ * 档位补齐到 M3 全集：组件（TopAppBar/ListItem/Badge…）默认吃
+ * headlineSmall/titleSmall/labelMedium 等槽，缺省会让没显式指定
+ * style 的文字退回 M3 默认值，与主题脱节。
  */
-private val MistakeBookTypography = Typography(
+private val ZincTypography = Typography(
+    displayLarge = TextStyle(
+        fontSize = 57.sp,
+        lineHeight = 64.sp,
+        letterSpacing = (-0.25).sp,
+        fontFeatureSettings = "tnum"
+    ),
+    displaySmall = TextStyle(
+        fontWeight = FontWeight.Bold,
+        fontSize = 32.sp,
+        lineHeight = 38.sp,
+        letterSpacing = (-0.3).sp
+    ),
+    headlineMedium = TextStyle(
+        fontWeight = FontWeight.Bold,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+        letterSpacing = (-0.2).sp
+    ),
+    headlineSmall = TextStyle(
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        lineHeight = 28.sp,
+        letterSpacing = (-0.2).sp
+    ),
     titleLarge = TextStyle(
         fontWeight = FontWeight.Bold,
         fontSize = 20.sp,
@@ -87,6 +163,11 @@ private val MistakeBookTypography = Typography(
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.sp
+    ),
+    titleSmall = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp
     ),
     bodyLarge = TextStyle(
         fontSize = 16.sp,
@@ -106,27 +187,24 @@ private val MistakeBookTypography = Typography(
         fontSize = 14.sp,
         lineHeight = 20.sp
     ),
+    labelMedium = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp
+    ),
     labelSmall = TextStyle(
         fontSize = 11.sp,
         lineHeight = 16.sp
-    ),
-    // 番茄钟与统计里的大数字：等宽字形（tnum）让每秒跳动的数字不左右抖
-    displayLarge = TextStyle(
-        fontSize = 57.sp,
-        lineHeight = 64.sp,
-        letterSpacing = (-0.25).sp,
-        fontFeatureSettings = "tnum"
     )
 )
 
 val LocalDarkTheme = compositionLocalOf { false }
 
 /**
- * 全局纸质化主题系统（支持浅色暖纸与深色墨砚自适应 + 自选主题色）。
+ * 全局主题（中性锌灰基调 + 单强调色 + 自选主题色）。
  *
  * @param accent 自选主题色（v0.0.76）。只替换 primary 一组色槽，
- *   背景/卡片/文字仍走暖纸与墨砚两套基调——主题色是「强调」不是换肤，
- *   整个 App 的背景与正文对比度不该随配色波动。
+ *   背景/卡片/文字走中性锌灰两套基调——强调色是「强调」不是换肤。
  */
 @Composable
 fun MistakeBookTheme(
@@ -136,16 +214,16 @@ fun MistakeBookTheme(
 ) {
     val activity = LocalContextActivity()
     val view = LocalView.current
-    val base = if (darkTheme) PaperDarkColors else PaperLightColors
+    val base = if (darkTheme) ZincDark else ZincLight
     val palette = accent.palette()
-    // 默认靛蓝直接用万彩本身（浅色模式与旧版逐像素一致；深色模式下
-    // 靛蓝条目返回的正是原琥珀，所以「默认」两种明暗都零变化）
     val colorScheme = if (accent == com.mistakebook.data.prefs.AccentTone.DEFAULT) {
         base
     } else {
         base.copy(
             primary = if (darkTheme) palette.dark else palette.light,
-            onPrimary = if (darkTheme) Color(0xFF2A1F06) else Color.White,
+            // 暗色的自定义强调是高亮度浅色块（OLED 可读性口径），必须压近黑字；
+            // 浅色主色深，用白字。按明暗分派而不是逐 tone 手调——8 个 tone 一个规则。
+            onPrimary = if (darkTheme) Color(0xFF1A1A1E) else Color.White,
             primaryContainer = if (darkTheme) palette.darkContainer else palette.lightContainer,
             onPrimaryContainer = if (darkTheme) palette.darkOnContainer else palette.lightOnContainer
         )
@@ -161,7 +239,8 @@ fun MistakeBookTheme(
     CompositionLocalProvider(LocalDarkTheme provides darkTheme) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = MistakeBookTypography,
+            typography = ZincTypography,
+            shapes = ZincShapes,
             content = content
         )
     }

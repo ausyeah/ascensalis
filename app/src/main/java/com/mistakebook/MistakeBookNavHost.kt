@@ -3,6 +3,11 @@
 package com.mistakebook
 
 import android.net.Uri
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.navigation.NavHostController
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -162,7 +167,25 @@ fun MistakeBookNavHost(
         }
     }
 
-    NavHost(navController = navController, startDestination = Routes.HOME) {
+    // 转场统一 200/150ms fade + 纵向 4% 滑动（T3 的 MOBILE_MOTION 口径）：
+    // 默认平台转场（横滑+缩放）在多级导航里显得重，fade 更「快而顺」。
+    // slide 位移取 it/25：恰好提示层级方向，又不至于把两屏内容同时甩进视口。
+    NavHost(
+        navController = navController,
+        startDestination = Routes.HOME,
+        enterTransition = {
+            fadeIn(tween(200)) + slideInVertically(tween(200)) { it / 25 }
+        },
+        exitTransition = {
+            fadeOut(tween(150))
+        },
+        popEnterTransition = {
+            fadeIn(tween(200))
+        },
+        popExitTransition = {
+            fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 25 }
+        }
+    ) {
 
         composable(Routes.HOME) {
             MainPortalScreen(
