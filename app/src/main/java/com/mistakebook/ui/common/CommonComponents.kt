@@ -324,21 +324,36 @@ private fun ZoomableImage(
     }
 }
 
-// 空状态占位
+/**
+ * 空状态占位（Mihon 配方：字形符号 + 居中说明 + 等宽操作区）。
+ *
+ * 字形符号用几何空圆而不是插画：克制派空态的自我表达止于一个
+ * 低对比的形状，插画一上就抢了内容的戏。默认不传则保持纯文字。
+ */
 @Composable
 fun EmptyState(
     title: String,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
+    /** 顶部低对比字形符号（如「◌」）；不传则只有文字。 */
+    glyph: String? = null,
     action: (@Composable () -> Unit)? = null
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(horizontal = 24.dp, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        if (glyph != null) {
+            Text(
+                text = glyph,
+                style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+            Spacer(Modifier.height(12.dp))
+        }
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
@@ -348,12 +363,13 @@ fun EmptyState(
             Spacer(Modifier.height(8.dp))
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
         if (action != null) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
             action()
         }
     }
