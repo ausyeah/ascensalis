@@ -30,6 +30,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -39,7 +42,6 @@ import com.mistakebook.R
 import com.mistakebook.di.AppContainer
 import com.mistakebook.ui.home.HomeScreen
 import com.mistakebook.ui.settings.SettingsScreen
-import com.mistakebook.ui.theme.PaperPrimary
 import com.mistakebook.wordbook.ui.WordbookScreen
 import kotlinx.coroutines.launch
 
@@ -99,10 +101,20 @@ fun MainPortalScreen(
 
     Scaffold(
         topBar = {
+            // 顶栏与画布同色、零阴影，层次靠底部 1dp 描边（T3 header 口径）：
+            // 悬浮感交给内容滚动，顶栏只做「安静的骨架」。
+            val headerBorder = MaterialTheme.colorScheme.outlineVariant
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .drawBehind {
+                        drawRect(
+                            color = headerBorder,
+                            topLeft = Offset(0f, size.height - 1.dp.toPx()),
+                            size = Size(size.width, 1.dp.toPx())
+                        )
+                    }
             ) {
                 Row(
                     modifier = Modifier
@@ -208,8 +220,10 @@ private fun PortalTabRow(
     ) {
         titles.forEachIndexed { index, title ->
             val selected = selectedIndex == index
+            // 字重只用 Regular/Medium 两档的对比（T3 字重纪律）：
+            // Bold 在 14sp 中文上过重，选中态的份量交给颜色与指示条。
             val contentColor = if (selected) {
-                PaperPrimary
+                MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             }
@@ -225,7 +239,7 @@ private fun PortalTabRow(
                     text = title,
                     style = MaterialTheme.typography.labelLarge,
                     fontSize = 14.sp,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    fontWeight = FontWeight.Medium,
                     color = contentColor,
                     maxLines = 1
                 )
@@ -236,7 +250,11 @@ private fun PortalTabRow(
                         .width(20.dp)
                         .height(3.dp)
                         .background(
-                            color = if (selected) PaperPrimary else Color.Transparent,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color.Transparent
+                            },
                             shape = RoundedCornerShape(2.dp)
                         )
                 )
