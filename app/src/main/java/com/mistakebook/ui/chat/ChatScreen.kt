@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
@@ -447,11 +448,38 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    // 模型入口提到顶栏：原先藏在输入栏底部的弱样式入口用户找不到
+                    //（用户反馈「对话时不能换模型」）。生成中也保持可点——
+                    // 弹层里 enabled=false 只禁改动项，入口本身不该装死。
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { showModelSheet = true }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = state.currentModel.ifBlank { stringResource(R.string.chat_model_unset) },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 120.dp)
+                        )
+                        Icon(
+                            Icons.Default.ExpandMore,
+                            contentDescription = stringResource(R.string.chat_pick_model),
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     IconButton(onClick = {
                         renameText = state.title
                         showRenameDialog = true
                     }) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.chat_rename))
+                        // ContentCopy 语义是「复制」，重命名该用 Edit——
+                        // 早先用复制图标纯属选错，用户盯着不知道这颗按钮是干嘛的。
+                        Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.chat_rename))
                     }
                 }
             )
@@ -591,6 +619,10 @@ fun ChatScreen(
             onEffortChange = viewModel::setReasoningEffort,
             onSearchEnabledChange = viewModel::setChatSearchEnabled,
             onSearchProviderChange = viewModel::setChatSearchProvider,
+            onOpenSettings = {
+                showModelSheet = false
+                onOpenSettings()
+            },
             onDismiss = { showModelSheet = false }
         )
     }
@@ -1657,6 +1689,8 @@ private fun ModelPickerSheet(
     onEffortChange: (ReasoningEffort) -> Unit,
     onSearchEnabledChange: (Boolean) -> Unit,
     onSearchProviderChange: (ChatSearchProvider) -> Unit,
+    /** 跳设置页的大模型配置区：面板里的列表只是「勾选结果」，增删配置要回设置页。 */
+    onOpenSettings: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var page by remember { mutableStateOf(0) } // 0 模型列表 / 1 思考强度
@@ -1782,6 +1816,41 @@ private fun ModelPickerSheet(
                         }
                     }
                 }
+
+                // ---- 管理模型配置（常驻）----
+                //
+                // 面板里的模型列表只是设置页勾选的**结果**：一个都没勾时
+                // 列表只剩主模型（availableModels 的口径），用户观感是
+                // 「换不了模型」。入口必须常驻，少模型时附一句提示指路。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenSettings)
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = stringResource(R.string.chat_model_manage),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (needsModelHint(models)) {
+                            Text(
+                                text = stringResource(R.string.chat_model_few_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             } else {
                 // 思考强度：五档单选。当场生效打勾，不关弹层——
                 // 用户往往要「调完强度继续换模型」。
@@ -1870,6 +1939,16 @@ private fun ModelPickerSheet(
         }
     }
 }
+
+/**
+ * 模型列表是否需要「去设置勾选更多」的指路提示（纯函数，可单测）。
+ *
+ * availableModels() 的口径是「主模型 + 设置页勾选的模型」：
+ * 一个都没勾时列表只有主模型一项，用户观感是「换不了模型」——
+ * 这个判定把「少」显式化，提示行跟着它出现或消失。
+ * 提到顶层 internal 是为了让 JVM 单测能引用（测试源集看不到 private）。
+ */
+internal fun needsModelHint(models: List<String>): Boolean = models.size <= 1
 
 private fun effortLabel(effort: ReasoningEffort): String = when (effort) {
     ReasoningEffort.OFF -> "关闭"

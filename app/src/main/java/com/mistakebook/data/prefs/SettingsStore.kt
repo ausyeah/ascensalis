@@ -480,6 +480,37 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ===== 每个会话选用的模型（临时状态，存 DataStore 不进 Room）=====
+
+    /**
+     * 每会话所选模型的存储键（与聊天草稿同构的 per-session 模式）。
+     *
+     * 为什么不存 ChatSession.model：那个字段在每轮生成时被
+     * 「这条是哪个模型答的」覆盖，语义是历史快照；会话当前选用哪个模型
+     * 是另一个状态，塞进同一段数据就是两套真相互相覆盖。
+     * 会话 id 是自增主键，与草稿键不会冲突。
+     */
+    private fun chatModelKey(sessionId: Long) = stringPreferencesKey(CHAT_MODEL_KEY_PREFIX + sessionId)
+
+    /** 读某个会话所选的模型；没存过返回 null（= 用供应商默认模型）。 */
+    suspend fun getChatModel(sessionId: Long): String? {
+        if (sessionId <= 0L) return null
+        val key = chatModelKey(sessionId)
+        return appContext.settingsDataStore.data.first()[key]
+    }
+
+    /**
+     * 写会话所选模型。空串表示清掉（切了供应商时旧模型名已无意义），
+     * 键一并删除，不攒空字符串。
+     */
+    suspend fun setChatModel(sessionId: Long, model: String) {
+        if (sessionId <= 0L) return
+        val key = chatModelKey(sessionId)
+        appContext.settingsDataStore.edit { prefs ->
+            if (model.isEmpty()) prefs.remove(key) else prefs[key] = model
+        }
+    }
+
     // ===== 手动录入草稿（T4，临时状态，存 DataStore 不进 Room）=====
 
     /**
@@ -730,6 +761,9 @@ class SettingsStore(context: Context) {
         val KEY_TAVILY_API_KEY = stringPreferencesKey("tavily_api_key")
 
         const val DEFAULT_WORDBOOK_DAILY_GOAL = 20
+
+        /** 每会话所选模型的 DataStore 键前缀（见 [chatModelKey]）。 */
+        const val CHAT_MODEL_KEY_PREFIX = "chat_model_"
         const val MIN_WORDBOOK_DAILY_GOAL = 5
         // 200 封顶是早期拍的：有用户一天刷 300+ 词，200 直接顶格设不上去。
         // 500 对「雅思/托福刷词」也够用，再高就不是目标是许愿了。

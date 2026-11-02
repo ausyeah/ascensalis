@@ -435,6 +435,18 @@ class ChatViewModel(
             if (draft.isNotEmpty() && _state.value.input.isBlank()) {
                 _state.value = _state.value.copy(input = draft)
             }
+            // **恢复会话所选模型**（与草稿同理：用户切过的模型退出再进不能丢）。
+            // 回填在 settings 首帧与 refreshModelOptions 前后都收敛：
+            // 两处重算 currentModel 的口径都是 selectedModel.ifBlank { 默认 }，
+            // selectedModel 一旦非空就不会被覆盖回去。
+            val savedModel = runCatching { settingsStore.getChatModel(session.id) }.getOrNull()
+            val sessionModel = resolveSessionModel(savedModel, "")
+            if (sessionModel.isNotBlank()) {
+                _state.value = _state.value.copy(
+                    selectedModel = sessionModel,
+                    currentModel = sessionModel
+                )
+            }
             // 模型列表：配置里可能有多个模型（一个 provider 供应多种模型），
             // 对话页要能直接切。
             runCatching { refreshModelOptions() }
@@ -655,9 +667,18 @@ class ChatViewModel(
      *
      * 一个 provider（尤其是中转站）供应多个模型，用户在对话页直接切，
      * 不用为每个模型各建一套配置。空串 = 用配置里的默认模型。
+     *
+     * **必须按会话落库**：早先只改内存，退出会话再进就回到配置默认值，
+     * 用户观感是「换了模型没生效」。走 SettingsStore 的 per-session 键
+     *（与聊天草稿同构），不碰 Room（避免迁移风险）。
      */
     fun selectModel(model: String) {
         _state.value = _state.value.copy(selectedModel = model, currentModel = model)
+        val sessionId = _state.value.sessionId
+        if (sessionId <= 0L) return
+        viewModelScope.launch {
+            runCatching { settingsStore.setChatModel(sessionId, model) }
+        }
     }
 
     /**
@@ -667,6 +688,7 @@ class ChatViewModel(
      * 所以两边永远同步。切换后清空 [ChatUiState.selectedModel]——
      * 旧供应商的模型名在新供应商里大概率不存在，继续带着它只会
      * 让下一次请求 404；清空即「用新供应商的默认模型」。
+     * 会话落库的模型一并清掉，否则下次进会话又把旧供应商的模型名捡回来。
      *
      * 设置里没有配置任何供应商时给一条提示，别让用户点了没反应。
      */
@@ -675,8 +697,12 @@ class ChatViewModel(
         // 先清选择再落盘：落盘会触发 settings 流重发，届时 currentModel
         // 会用新供应商的默认模型重算，不会读到旧的 selectedModel。
         _state.value = _state.value.copy(selectedModel = "")
+        val sessionId = _state.value.sessionId
         viewModelScope.launch {
             settingsStore.setActiveProfileId(profileId)
+            if (sessionId > 0L) {
+                runCatching { settingsStore.setChatModel(sessionId, "") }
+            }
         }
     }
 
@@ -1500,6 +1526,16 @@ class ChatViewModel(
          * 自动压缩是安全网不是可选项。
          */
         const val AUTO_COMPRESS_TOKENS = 500_000
+
+        /**
+         * 进会话时的模型回填决策（纯函数，可单测）。
+         *
+         * 会话存过非空模型名就用存的；没存过（或只有空白）落回默认——
+         * 「空串 = 用供应商默认模型」的口径由这里统一，读写两端各自
+         * 传 fallback，谁都不用自己写 ifBlank 的第二份。
+         */
+        fun resolveSessionModel(saved: String?, profileDefault: String): String =
+            saved?.trim()?.takeIf { it.isNotBlank() } ?: profileDefault
 
         /**
          * 错误文本是否「上下文超限」（纯函数，可单测）。

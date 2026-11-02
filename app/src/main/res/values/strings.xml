@@ -586,6 +586,8 @@
     <string name="chat_attach">添加附件</string>
     <string name="chat_pick_model">选择模型</string>
     <string name="chat_model_unset">未配置模型</string>
+    <string name="chat_model_manage">管理模型配置</string>
+    <string name="chat_model_few_hint">只显示已勾选的模型。去设置页勾选更多 →</string>
     <string name="chat_attach_image">图片</string>
     <string name="chat_attach_file">文档</string>
     <string name="chat_attach_gallery">从相册选择</string>
