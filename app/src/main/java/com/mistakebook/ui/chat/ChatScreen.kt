@@ -675,11 +675,11 @@ private fun MessageList(
             items = messages.asReversed(),
             // key 用消息 id：内容更新（流式 / 落库）时按 id 对齐，
             // 不因为实例变化而丢掉滚动位置与已组合的 item。
-            key = { it.id },
+            key = { _, item -> item.id },
             // contentType 让 Compose 按类型分池复用：不写的话滚动时
             // 每条消息都可能拿到上一条不同类型的容器重新组合。
             contentType = { _, _ -> "message" }
-) { index, message ->
+        ) { index, message ->
             // 连发清角（Element X 模式）：同角色相邻气泡相接的角收窄，
             // 一屏内的连续消息黏成一列。reverseLayout 下 index-1 是屏幕上方（更新）。
             val reversedMessages = messages.asReversed()
@@ -887,6 +887,10 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
+        // 连发清角：与同角色相邻的一侧收 4dp（保一丝间隙感不焊死），
+        // 悬空侧保持 14dp 大圆角。助手通栏无气泡轮廓，收角只影响 user 分支。
+        val bubbleCorner = 14.dp
+        val joinedCorner = 4.dp
         Surface(
             // v0.0.58：**只有用户消息有气泡**，AI 回复全宽度铺开
             //（对齐 ChatGPT 移动端：用户消息框起来，助手消息通栏）。
@@ -899,10 +903,6 @@ private fun MessageBubble(
             } else {
                 Color.Transparent
             },
-            // 连发清角：与同角色相邻的一侧收 4dp（保一丝间隙感不焊死），
-            // 悬空侧保持 14dp 大圆角。助手通栏无气泡轮廓，收角只影响 user 分支。
-            val bubbleCorner = 14.dp
-            val joinedCorner = 4.dp
             shape = RoundedCornerShape(
                 topStart = if (isUser && aboveSameRole) joinedCorner else bubbleCorner,
                 topEnd = if (isUser && aboveSameRole) joinedCorner else bubbleCorner,
