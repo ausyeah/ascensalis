@@ -213,7 +213,15 @@ fun MistakeBookNavHost(
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenPrint = { navController.navigate(Routes.PRINT) },
                 onOpenNotebooks = { navController.navigate(Routes.NOTEBOOKS) },
-                onOpenChatList = { navController.navigate(Routes.CHAT_LIST) },
+                // 会话：**直接**开一条新对话，不再先进「对话记录」列表（v0.0.96）。
+                // openFreeSession 会复用已存在的空自由会话，连点几下也只有一条空白对话。
+                onNewChat = {
+                    scope.launch {
+                        navController.navigate(
+                            Routes.chat(null, container.chatRepository.openFreeSession())
+                        )
+                    }
+                },
                 onOpenQuestion = { id -> navController.navigate(Routes.detail(id)) },
                 onStartReview = { navController.navigate(Routes.REVIEW) },
                 // 门户设置 Tab 内嵌 SettingsScreen，资料库/成就墙两个子页面

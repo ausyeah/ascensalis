@@ -28,7 +28,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.BarChart
@@ -145,8 +145,8 @@ fun HomeScreen(
     onOpenPrint: () -> Unit,
     onOpenNotebooks: () -> Unit = {},
     onOpenQuestion: (Long) -> Unit,
-    /** AI 对话：进历史会话列表（规格锁定只放顶栏，不加底部按钮）。 */
-    onOpenChatList: () -> Unit = {},
+    /** AI 对话：直接开一条新对话（v0.0.96）。历史会话改从对话页左上角进。 */
+    onNewChat: () -> Unit = {},
     /** 今日有到期题时横幅点击 → 进独立复习页（T1）。 */
     onStartReview: () -> Unit = {}
 ) {
@@ -352,10 +352,13 @@ fun HomeScreen(
                         modifier = Modifier.size(22.dp)
                     )
                 }
-                IconButton(onClick = onOpenChatList, modifier = Modifier.size(40.dp)) {
+                // 会话：一颗带加号的对话气泡，点下去直接进新对话（ChatGPT 手机端的做法）。
+                // 以前这颗进的是「对话记录」，用户得先看一页列表再点新对话——
+                // 两步都落不到「我要问点东西」这个唯一目的上。
+                IconButton(onClick = onNewChat, modifier = Modifier.size(40.dp)) {
                     Icon(
-                        imageVector = Icons.Default.Forum,
-                        contentDescription = stringResource(R.string.chat_list_title),
+                        imageVector = Icons.Default.AddComment,
+                        contentDescription = stringResource(R.string.chat_new_conversation),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(22.dp)
                     )

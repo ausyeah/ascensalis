@@ -71,7 +71,7 @@ fun MainPortalScreen(
     onOpenPrint: () -> Unit,
     onOpenNotebooks: () -> Unit = {},
     onOpenQuestion: (Long) -> Unit,
-    onOpenChatList: () -> Unit = {},
+    onNewChat: () -> Unit = {},
     onStartReview: () -> Unit = {},
     /** 资料库管理页（T6）：门户设置 Tab 的内嵌设置页经此进子页面。 */
     onOpenLibrary: () -> Unit = {},
@@ -162,7 +162,7 @@ fun MainPortalScreen(
                         onOpenPrint = onOpenPrint,
                         onOpenNotebooks = onOpenNotebooks,
                         onOpenQuestion = onOpenQuestion,
-                        onOpenChatList = onOpenChatList,
+                        onNewChat = onNewChat,
                         onStartReview = onStartReview
                     )
                 }
