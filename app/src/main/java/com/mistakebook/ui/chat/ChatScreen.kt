@@ -309,6 +309,16 @@ fun ChatScreen(
     //
     // 还要判 input 为空：恢复了历史草稿的会话不能再被预填覆盖，
     // 否则用户上次打的字照样会丢（只是丢的方式换了）。
+    // 功能入口带过来的草稿（v0.0.96）：只在「刚开的新会话」里填，且不覆盖
+    // 用户已经打的字。取走即置空——放在容器里就是等着被消费一次。
+    LaunchedEffect(state.sessionId, state.loading) {
+        val draft = container.pendingChatDraft ?: return@LaunchedEffect
+        if (!state.loading && state.messages.isEmpty() && state.input.isBlank()) {
+            container.pendingChatDraft = null
+            viewModel.onInputChange(draft)
+        }
+    }
+
     LaunchedEffect(state.sessionId, state.loading) {
         if (state.sessionId != 0L && !state.loading && state.messages.isEmpty() &&
             questionId != null && state.input.isBlank()

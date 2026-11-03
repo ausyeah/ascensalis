@@ -68,6 +68,11 @@ class ChatListViewModel(
         }
     }
 
+    /** 置顶 / 取消置顶（v0.0.96）。列表按 pinned DESC, updatedAt DESC 自动重排。 */
+    fun setPinned(id: Long, pinned: Boolean) {
+        viewModelScope.launch { repository.setPinned(id, pinned) }
+    }
+
     fun rename(id: Long, title: String) {
         viewModelScope.launch { repository.renameSession(id, title) }
     }

@@ -2,7 +2,9 @@ package com.mistakebook.ui.chat
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +23,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -57,7 +61,11 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
@@ -76,10 +84,12 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatListScreen(
+internal fun ChatListScreen(
     container: AppContainer,
     onBack: () -> Unit,
-    onOpenSession: (sessionId: Long, questionId: Long?) -> Unit
+    onOpenSession: (sessionId: Long, questionId: Long?) -> Unit,
+    /** 顶部功能入口被点：拍题走相机，其余进一条预填了提示词的新对话。 */
+    onPickTool: (ChatTool) -> Unit = {}
 ) {
     val viewModel = containerViewModel(container) { c ->
         ChatListViewModel(c.chatRepository, c.database.questionDao())
@@ -90,6 +100,17 @@ fun ChatListScreen(
     var renaming by remember { mutableStateOf<ChatListItemUi?>(null) }
     var renameText by remember { mutableStateOf("") }
     val untitled = stringResource(R.string.chat_untitled)
+
+    // 能力入口的可用状态（v0.0.96）。只在进页面时读一次：用户在设置里配好
+    // 再回来，这一页会重建（导航回退），不需要在这里挂着订阅。
+    var llmConfigured by remember { mutableStateOf(true) }
+    var ocrConfigured by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        runCatching { container.settingsStore.snapshotNow() }.getOrNull()?.let {
+            llmConfigured = it.llmConfigured
+            ocrConfigured = it.mineruConfigured
+        }
+    }
 
     // 删除撤销（v0.0.66）：软删不再删附件，恢复即完整还原。
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
@@ -146,14 +167,18 @@ fun ChatListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.chat_list_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.chat_cancel)
+                title = {
+                    // 左上角是应用签名（v0.0.96，用户指定）。这一页是「这个产品的家」：
+                    // 用名字打头，比一句「对话记录」更像入口。
+                    Text(
+                        text = stringResource(R.string.app_signature),
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = FontFamily.Serif,
+                            fontStyle = FontStyle.Italic,
+                            fontWeight = FontWeight.Normal,
+                            letterSpacing = 2.sp
                         )
-                    }
+                    )
                 },
                 actions = {
                     if (state.items.isNotEmpty()) {
@@ -170,6 +195,13 @@ fun ChatListScreen(
                                 }
                             )
                         }
+                    }
+                    // 顶栏左格让给了签名，返回用右上角这颗关闭——与抽屉式历史页一致
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = stringResource(R.string.crop_back)
+                        )
                     }
                 }
             )
@@ -188,29 +220,6 @@ fun ChatListScreen(
             androidx.compose.material3.SnackbarHost(hostState = snackbarHostState)
         }
     ) { padding ->
-        if (state.items.isEmpty() && !state.loading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        stringResource(R.string.chat_list_empty),
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        stringResource(R.string.chat_list_empty_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            return@Scaffold
-        }
-
         LazyColumn(
             // `padding` 是 Scaffold 的 innerPadding，含 TopAppBar 高度与状态栏。
             // 漏掉它的话列表从 y=0 开始画，第一行正好被顶栏压掉上半截——
@@ -222,6 +231,57 @@ fun ChatListScreen(
                 .padding(top = padding.calculateTopPadding()),
             contentPadding = PaddingValues(bottom = 88.dp)
         ) {
+            item(key = "tools") {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Text(
+                        text = stringResource(R.string.chat_tools_title),
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    ChatToolGrid(
+                        llmConfigured = llmConfigured,
+                        ocrConfigured = ocrConfigured,
+                        onPick = onPickTool
+                    )
+                    if (!llmConfigured || !ocrConfigured) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = stringResource(R.string.chat_tools_needs_config_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                HorizontalDivider()
+                Text(
+                    text = stringResource(R.string.chat_history_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
+
+            if (state.items.isEmpty() && !state.loading) {
+                item(key = "empty") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            stringResource(R.string.chat_list_empty),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.chat_list_empty_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
             items(state.items, key = { it.session.id }) { item ->
                 SwipeableChatRow(
                     item = item,
@@ -234,6 +294,7 @@ fun ChatListScreen(
                         renameText = item.session.title
                         renaming = item
                     },
+                    onTogglePin = { viewModel.setPinned(item.session.id, !item.session.pinned) },
                     onDelete = {
                         // 删除可撤销（v0.0.66）：软删保留附件，撤销即完整还原
                         val sessionId = item.session.id
@@ -276,7 +337,8 @@ private fun SwipeableChatRow(
     item: ChatListItemUi,
     onOpen: () -> Unit,
     onRename: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onTogglePin: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -392,7 +454,10 @@ private fun SwipeableChatRow(
                 item = item,
                 onClick = {
                     if (revealed) close() else onOpen()
-                }
+                },
+                onRename = onRename,
+                onDelete = onDelete,
+                onTogglePin = onTogglePin
             )
         }
     }
@@ -439,10 +504,14 @@ private fun SwipeActionBlock(
 }
 
 /** 对话记录一行的内容（标题 + 预览 + 时间）。 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatRowContent(
     item: ChatListItemUi,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+    onTogglePin: () -> Unit
 ) {
     val untitled = stringResource(R.string.chat_untitled)
     // 时间标签里的 DateTimeFormatter 提到顶层缓存（原每次重组都编译一遍），
@@ -451,15 +520,31 @@ private fun ChatRowContent(
     val time = timeLabel(item.session.updatedAt)
 
     Surface(color = MaterialTheme.colorScheme.surface) {
+        var menuOpen by remember { mutableStateOf(false) }
+        Box {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onClick)
+                // 长按出菜单（v0.0.96 用户要求）：置顶 / 重命名 / 删除。
+                // 左滑仍然保留——两种手势各管一路，老习惯不用改。
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { menuOpen = true }
+                )
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (item.session.pinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = stringResource(R.string.chat_pinned_badge),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
                     Text(
                         text = item.session.title.ifBlank { untitled },
                         style = MaterialTheme.typography.titleSmall,
@@ -487,7 +572,7 @@ private fun ChatRowContent(
                 }
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    text = item.session.lastPreview.ifBlank { stringResource(R.string.chat_input_hint) },
+                    text = item.session.lastPreview.ifBlank { stringResource(R.string.chat_list_empty) },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -500,6 +585,36 @@ private fun ChatRowContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(
+                            if (item.session.pinned) R.string.chat_unpin else R.string.chat_pin
+                        )
+                    )
+                },
+                onClick = {
+                    menuOpen = false
+                    onTogglePin()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.chat_rename)) },
+                onClick = {
+                    menuOpen = false
+                    onRename()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.swipe_delete_hint)) },
+                onClick = {
+                    menuOpen = false
+                    onDelete()
+                }
+            )
+        }
         }
     }
 }

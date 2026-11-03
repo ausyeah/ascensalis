@@ -488,6 +488,14 @@ class AppContainer(context: Context) {
     var pendingChatAttachmentPath: String? by mutableStateOf(null)
 
     /**
+     * 从历史页的功能入口带进对话页的一句草稿（v0.0.96）。
+     *
+     * 用容器标志而不是导航参数：提示词里有换行和冒号，塞进路由要来回编码，
+     * 而这条数据本来就是「一次性交接」——ChatScreen 取走后立刻置空。
+     */
+    var pendingChatDraft: String? by mutableStateOf(null)
+
+    /**
      * 对话连拍（T2）已裁完成果的暂存队列。
      *
      * CHAT 用途的批次在 CropScreen 接力时，每裁完一张就把成果路径推进这里
