@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -81,6 +82,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -581,14 +583,40 @@ internal fun StudyView(
                             // 才是听写练习。
                         } else {
                             // 常规四选一 / 卡片模式题干
-                            Text(
-                                text = currentWord.word,
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Serif,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Center
-                            )
+                            //
+                            // 为什么不能再「36sp + 居中 + 不管多宽」：词库最长
+                            // 28 字母（antidisestablishmentarianism），36sp 衬线
+                            // 粗体实测约 0.54em/字，13 字的 sophisticated 就要
+                            // 252dp——而卡片内容区在 PIXEL_5 上只有 320dp，
+                            // 右端直接压住右上角的星标/喇叭/收藏。用户截图报的
+                            // 「长单词显示和上方UI冲突」就是这一处。
+                            //
+                            // 修法：单词仍然居中，但可用宽度左右各扣掉一个右上角
+                            // 工具带（左侧一并让出是为了保持居中，只让右边的话
+                            // 长单词会整体歪向左边），字号「塞得下就 36sp、塞不下
+                            // 按比例缩」，外面再叠一层 widthIn 硬钳——字体度量
+                            // 估算有偏差、或用户把系统字号调到 1.3x 时，宁可折行
+                            // 也绝不压到图标（双保险，同 RichText 的取宽思路）。
+                            BoxWithConstraints(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val safeWidthDp = wordHeadlineMaxWidthDp(maxWidth.value)
+                                Text(
+                                    text = currentWord.word,
+                                    fontSize = wordHeadlineSizeSp(
+                                        word = currentWord.word,
+                                        availableWidthDp = safeWidthDp,
+                                        fontScale = LocalDensity.current.fontScale
+                                    ).sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Serif,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2,
+                                    modifier = Modifier.widthIn(max = safeWidthDp.dp)
+                                )
+                            }
 
                             if (currentWord.pos.isNotBlank()) {
                                 Spacer(Modifier.height(6.dp))
@@ -1319,4 +1347,62 @@ internal const val OPTION_MEANING_SLOT_QUIZ = 40
  * 43 字符，刚好全覆盖。未作答时也恒定占位，作答不改变选项高度。
  */
 internal const val OPTION_MEANING_SLOT_SENSE = 36
+
+/**
+ * 单词卡右上角工具带的宽度（dp）：星标 + 发音 + 收藏三个 32dp IconButton。
+ *
+ * 单独拎成常量，是因为它是题干可用宽度的**扣减项**——三颗按钮改尺寸或
+ * 增删一颗，题干的 safe 宽度必须跟着变；写死在 UI 里就会漏改，
+ * 于是长单词又开始压图标。
+ */
+internal const val WORD_CARD_TOOL_BAND_DP = 96f
+
+/** 题干（单词本身）的最大字号：设计稿基准值，短单词一律用满。 */
+internal const val WORD_HEADLINE_MAX_SP = 36f
+
+/**
+ * 题干的最小字号。
+ *
+ * 为什么必须有下限：字数继续涨时按比例缩会小到看不清，而 widthIn 硬钳
+ * 已经保证不会压图标——所以缩到 18sp（正文 bodyLarge 量级）就停，
+ * 剩下的交给折行，折两行仍读得清。
+ */
+internal const val WORD_HEADLINE_MIN_SP = 18f
+
+/**
+ * Noto Serif Bold 下每个字符约占多少个 em。
+ *
+ * 实测：PIXEL_5 渲染 ubiquitous（10 字母）36sp 宽 193.9dp → 0.539em/字。
+ * 取 0.58 是**故意留 7% 余量**，不是四舍五入——选字号用的是
+ * `可用宽度 / (字宽 × 字数)`，估算偏小的结果就是「算出来的字号刚够塞，
+ * 实际排版宽了几个百分点」，于是 maxLines=2 生效、单词被折行。
+ * 0.55 那版就是这么翻车的：ubiquitous 折成两行，用户以为显示坏了。
+ *
+ * 它只用来**选字号**；真正防压图标靠 widthIn 硬钳，所以估算偏大了
+ * 顶多字号小一两号，不可能让单词越过工具带。
+ */
+internal const val WORD_HEADLINE_EM_PER_CHAR = 0.58f
+
+/**
+ * 题干可以占用的最大宽度（dp）。
+ *
+ * 左右各扣一个工具带：右边是真实占用（右上角三颗按钮），左边让出来是为了
+ * 单词保持居中。兜底 96dp 对应 360dp 宽的设计下限屏——再窄卡片内容区只剩
+ * 96dp，已超出本项目的设计包络（内边距写死 16/20dp、题干写死 36sp）。
+ */
+internal fun wordHeadlineMaxWidthDp(cardContentWidthDp: Float): Float =
+    (cardContentWidthDp - 2 * WORD_CARD_TOOL_BAND_DP).coerceAtLeast(96f)
+
+/**
+ * 按可用宽度给题干选字号（sp）。
+ *
+ * 三个入参都是「当前实际约束」而不是设备型号：可用宽度由 BoxWithConstraints
+ * 量出来，fontScale 取系统的（用户在设置里放大字号时，单词占的 dp 会同比例
+ * 变大，必须一起算进去，否则放大模式下又会压图标）。
+ */
+internal fun wordHeadlineSizeSp(word: String, availableWidthDp: Float, fontScale: Float): Float {
+    if (word.isEmpty()) return WORD_HEADLINE_MAX_SP
+    val availableEm = availableWidthDp / (fontScale * WORD_HEADLINE_EM_PER_CHAR)
+    return (availableEm / word.length).coerceIn(WORD_HEADLINE_MIN_SP, WORD_HEADLINE_MAX_SP)
+}
 
