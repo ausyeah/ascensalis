@@ -168,6 +168,28 @@ internal fun CropRect.rotatedQuarters(quarters: Int): CropRect {
 }
 
 /**
+ * 批次里当前这张的序号（1 起）。
+ *
+ * 为什么从 [cropped] 推而不是另存一个索引：队列本身就是推进器——
+ * 裁完一张出队一张、成果入账一张，两者相加天然就是「已经处理了几张」。
+ * 另存索引就得在每个出队点手动同步，漏一处就是错位一张（而且只在
+ * 第三人称视角下才发现：用户看到「第 3 / 3 张」裁的是第二张）。
+ *
+ * 总数 ≤ 1 返回 null：单张照片上挂「第 1 / 1 张」是纯噪音。
+ */
+internal fun batchPosition(cropped: Int, total: Int): Int? {
+    if (total <= 1) return null
+    return (cropped + 1).coerceIn(1, total)
+}
+
+/** 顶栏那枚「第 N / M 张」胶囊的文案；单张返回 null（不占位）。 */
+@Composable
+private fun batchProgressLabel(cropped: Int, total: Int): String? {
+    val position = batchPosition(cropped, total) ?: return null
+    return stringResource(R.string.crop_progress, position, total)
+}
+
+/**
  * 自研裁剪页（PRD 7.3）：全屏显示 + 可拖拽裁剪框（8 个手柄，热区 40dp），
  * 框外压暗 60%；支持旋转 90°、重置；结果长边压到 1600px、JPEG q85 存盘。
  */
@@ -283,9 +305,11 @@ fun CropScreen(
     //
     // -1 = 还没初始化（等会话/设置读回来），此时不派生增强基图。
     var enhanceStrength by remember(imagePath) { mutableStateOf(-1) }
-    // 增强档位条默认收起：工具栏已经有一排模式切换和一排操作，
-    // 再常驻一排四档会把裁剪区压得很小。点「增强」才展开。
-    var enhancePanelOpen by remember { mutableStateOf(false) }
+
+    // 连拍接力时的「第几张」：cropped 是已裁完的张数，队首就是当前这张。
+    // 直接读 CaptureBatch 的 Compose 状态，接力到下一张时这里自动重组。
+    val batchCropped = container.captureBatch.cropped.size
+    val batchTotal = container.captureBatch.size
 
     // 涂鸦遮蔽：把不想识别的区域（红笔批注、旁边的题、草稿）涂白
     var maskMode by remember { mutableStateOf(false) }
@@ -552,50 +576,36 @@ fun CropScreen(
         return Offset(toScreenX(d.x), toScreenY(d.y))
     }
 
-    
+    // 预览：把当前框选 + 涂鸦合成一张交给弹层查看。
+    // 抽成局部函数，顶栏只管「有没有在算」这一件事。
+    fun requestPreview() {
+        scope.launch {
+            previewing = true
+            val preview = withContext(Dispatchers.IO) {
+                buildPreviewBitmap(
+                    shown,
+                    rect.rotatedQuarters(rotationQuarter),
+                    strokes.map { it.rotated(rotationQuarter) },
+                    brushWidthPx,
+                    imageSize.width.toFloat()
+                )
+            }
+            previewBitmap = preview
+            previewing = false
+            if (preview == null) {
+                errorText = context.getString(R.string.crop_too_small)
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.crop_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.crop_back))
-                    }
-                },
-                actions = {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                previewing = true
-                                val preview = withContext(Dispatchers.IO) {
-                                    buildPreviewBitmap(
-                                        shown,
-                                        rect.rotatedQuarters(rotationQuarter),
-                                        strokes.map { it.rotated(rotationQuarter) },
-                                        brushWidthPx,
-                                        imageSize.width.toFloat()
-                                    )
-                                }
-                                previewBitmap = preview
-                                previewing = false
-                                if (preview == null) {
-                                    errorText = context.getString(R.string.crop_too_small)
-                                }
-                            }
-                        },
-                        enabled = !previewing
-                    ) {
-                        Text(
-                            text = stringResource(R.string.crop_preview),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black.copy(alpha = 0.5f),
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White
-                )
+            CropTopBar(
+                title = stringResource(R.string.crop_title),
+                progress = batchProgressLabel(batchCropped, batchTotal),
+                previewEnabled = !previewing,
+                onBack = onBack,
+                onPreview = { requestPreview() }
             )
         },
         bottomBar = {
@@ -632,8 +642,6 @@ fun CropScreen(
                     scope.launch { persistSession() }
                 },
                 enhanceStrength = enhanceStrength.coerceAtLeast(0),
-                enhancePanelOpen = enhancePanelOpen,
-                onEnhancePanelOpenChange = { enhancePanelOpen = it },
                 onEnhanceStrengthChange = { newStrength -> onEnhanceStrengthChange(newStrength) },
 
                 onConfirm = {

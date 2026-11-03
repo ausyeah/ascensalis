@@ -597,6 +597,8 @@
     <string name="print_pdf_hint">默认输出 A4 原生 PDF，答题区留白纯净无横线；也可选 HTML 文件在浏览器中打开。</string>
     <string name="crop_title">裁剪题目</string>
     <string name="crop_selection">框选</string>
+    <!-- 连拍接力时的批次进度（v0.0.95）：只在多于一张时显示 -->
+    <string name="crop_progress">第 %1$d / %2$d 张</string>
 
     <!-- ========== 双核主页与背单词模块 ========== -->
     <string name="portal_mistake_book">错题本</string>
