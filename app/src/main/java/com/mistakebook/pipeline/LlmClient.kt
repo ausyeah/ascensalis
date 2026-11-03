@@ -13,6 +13,7 @@ import com.mistakebook.net.llm.ChatRequest
 import com.mistakebook.net.llm.ImageUrl
 import com.mistakebook.net.llm.LlmApi
 import com.mistakebook.net.llm.isMaxTokensLimitError
+import com.mistakebook.net.llm.withKeyFailover
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -31,7 +32,9 @@ import java.io.File
  * - 可选把原图以 base64 data URL 一并送入（多模态模型），长边压到 [longEdgePx]；
  * - **区分「被 max_tokens 截断」和「返回垃圾」**：前者 JSON 必然残缺，
  *   原先两者都落到 BAD_RESPONSE，导致上层只能笼统报「整理失败」；
- * - 瞬时错误（网络/5xx）额外重试 1 次（2s 退避）；鉴权、限流、取消与截断不重试。
+ * - 瞬时错误（网络/5xx）额外重试 1 次（2s 退避）；鉴权、限流、取消与截断不重试；
+ * - **多 key 失败转移**：鉴权失败（401/403）或额度受限（429/503）时换下一把
+ *   key 重发同一个请求（[withKeyFailover]），不再让一把废 key 卡死整条流水线。
  */
 class LlmClient(
     private val api: LlmApi,
@@ -68,9 +71,30 @@ class LlmClient(
             null
         }
 
-        // 降级阶梯：每一级都有自己的一次机会。
-        // 之前的写法把这些降级塞进 repeat(2) 的重试里，阶梯第一步就把次数用光，
-        // 后面两级根本没机会执行，最终只会返回笼统的「大模型调用失败」。
+        // 换 key 在阶梯**外面**：一把新 key 值得把整条阶梯重新走一遍，
+        // 而阶梯里某一步失败（json_mode 不被认）换 key 原样再犯——
+        // 那种错误由 shouldTryNextLlmVariant 判，不该顺手烧掉别的 key。
+        withKeyFailover(profile) { key ->
+            runLadder(profile, key, systemPrompt, userPrompt, imagePart, maxTokens)
+        }
+    }
+
+    /**
+     * 降级阶梯主体：每一级都有自己的一次机会。
+     *
+     * 之前的写法把这些降级塞进 repeat(2) 的重试里，阶梯第一步就把次数用光，
+     * 后面两级根本没机会执行，最终只会返回笼统的「大模型调用失败」。
+     *
+     * @param key 这一轮用哪把 key（由 [withKeyFailover] 按候选链逐个给）。
+     */
+    private suspend fun runLadder(
+        profile: LlmProfile,
+        key: String,
+        systemPrompt: String,
+        userPrompt: String,
+        imagePart: ChatContentPart?,
+        maxTokens: Int
+    ): ApiResult<String> {
         val ladder = listOf(
             LadderStep(jsonMode = true, reminder = false),
             LadderStep(jsonMode = false, reminder = false),
@@ -81,7 +105,7 @@ class LlmClient(
 
         for ((index, step) in ladder.withIndex()) {
             val system = if (step.reminder) systemPrompt + JSON_ONLY_REMINDER else systemPrompt
-            val initial = sendOnce(profile, system, userPrompt, imagePart, step.jsonMode, maxTokens)
+            val initial = sendOnce(profile, key, system, userPrompt, imagePart, step.jsonMode, maxTokens)
 
             // T8：部分服务商的输出上限只有 8k，请求带的 16384 会每级阶梯都
             // 400 才失败，报错还是服务端英文原文。命中「HTTP 400 且错误体
@@ -96,7 +120,7 @@ class LlmClient(
                 maxTokens > MIN_MAX_TOKENS
             ) {
                 val halved = (maxTokens / 2).coerceAtLeast(MIN_MAX_TOKENS)
-                when (val retry = sendOnce(profile, system, userPrompt, imagePart, step.jsonMode, halved)) {
+                when (val retry = sendOnce(profile, key, system, userPrompt, imagePart, step.jsonMode, halved)) {
                     is ApiResult.Success -> retry
                     is ApiResult.Failure -> {
                         downgradeExhausted = true
@@ -110,17 +134,17 @@ class LlmClient(
             }
 
             when (result) {
-                is ApiResult.Success -> return@withContext result
+                is ApiResult.Success -> return result
                 is ApiResult.Failure -> {
                     if (result.error.serverMessage == TRUNCATED_MESSAGE) {
-                        return@withContext result
+                        return result
                     }
                     // 降档也救不回来：上限是模型属性，换 json_mode 救不了，
                     // 继续阶梯只会原样再 400——直接把中文结论交给用户
-                    if (downgradeExhausted) return@withContext result
+                    if (downgradeExhausted) return result
                     lastFailure = result
                     if (shouldTryNextLlmVariant(result.error) && index < ladder.lastIndex) continue
-                    if (!shouldRetryLlmCall(result.error.kind)) return@withContext result
+                    if (!shouldRetryLlmCall(result.error.kind)) return result
                     retryStep = step
                     break
                 }
@@ -128,17 +152,24 @@ class LlmClient(
         }
 
         val step = retryStep
-            ?: return@withContext lastFailure ?: fail(ApiErrorKind.UNKNOWN, "大模型调用失败")
+            ?: return lastFailure ?: fail(ApiErrorKind.UNKNOWN, "大模型调用失败")
         delay(RETRY_BACKOFF_MS)
         val retrySystem = if (step.reminder) systemPrompt + JSON_ONLY_REMINDER else systemPrompt
-        sendOnce(profile, retrySystem, userPrompt, imagePart, step.jsonMode, maxTokens)
-
+        return sendOnce(profile, key, retrySystem, userPrompt, imagePart, step.jsonMode, maxTokens)
     }
 
     private data class LadderStep(val jsonMode: Boolean, val reminder: Boolean)
 
+    /**
+     * 发一次请求。
+     *
+     * @param key 这一轮用哪把 key。**必须由调用方显式给出**（[withKeyFailover]
+     *   按候选链逐个给）：这里若自行 resolveKey，换 key 就失效了——
+     *   每次重发都拿回同一把废 key，候选链成了摆设。
+     */
     private suspend fun sendOnce(
         profile: LlmProfile,
+        key: String,
         systemPrompt: String,
         userPrompt: String,
         imagePart: ChatContentPart?,
@@ -173,7 +204,7 @@ class LlmClient(
         val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
-                authorization = "Bearer ${profile.resolveKey(profile.model)}",
+                authorization = "Bearer $key",
                 request = request
             )
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -263,6 +294,9 @@ class LlmClient(
      * 阶梯是为「结构化输出必须成功」设计的（错题整理），而这类调用
      * （生成生图 prompt、起标题这类）失败一次让用户重点即可，
      * 强行阶梯只会把 5 秒的失败拖成 15 秒。
+     *
+     * 但**换 key 照做**：一把废 key 不该让这类顺手调用也陪葬，
+     * 而换 key 的代价只是多一次往返。
      */
     suspend fun plainText(
         profile: LlmProfile,
@@ -271,7 +305,9 @@ class LlmClient(
         maxTokens: Int = DEFAULT_PLAIN_MAX_TOKENS
     ): ApiResult<String> = withContext(Dispatchers.IO) {
         if (!profile.isConfigured()) return@withContext fail(ApiErrorKind.NO_KEY)
-        sendOnce(profile, systemPrompt, userPrompt, imagePart = null, useJsonMode = false, maxTokens = maxTokens)
+        withKeyFailover(profile) { key ->
+            sendOnce(profile, key, systemPrompt, userPrompt, imagePart = null, useJsonMode = false, maxTokens = maxTokens)
+        }
     }
 
     /**
@@ -297,7 +333,9 @@ class LlmClient(
         } else {
             null
         }
-        sendOnce(profile, systemPrompt, userPrompt, imagePart, useJsonMode = false, maxTokens = maxTokens)
+        withKeyFailover(profile) { key ->
+            sendOnce(profile, key, systemPrompt, userPrompt, imagePart, useJsonMode = false, maxTokens = maxTokens)
+        }
     }
 
     /**
@@ -345,6 +383,9 @@ class LlmClient(
         // runCatching 会把 CancellationException 转成普通 Failure 返回，
         // 协程继续跑到结束——用户点「取消」却落一条「识别失败，请重试」，
         // 重试又烧一次 LLM 额度。为一个取消按钮供应事故更多额度。
+        //
+        // 这里**不换 key**：探活的目的是回答「首选那把 key 到底通不通」，
+        // 换一把成功了反而掩盖「你日常在用的那把已经废了」这个事实。
         val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),

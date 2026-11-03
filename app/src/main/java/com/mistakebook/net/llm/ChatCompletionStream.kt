@@ -160,6 +160,13 @@ object StreamFallback {
  * 早期版本把这些降级塞进 `repeat(n)` 的重试，n 不够就静默失效
  * （见 docs/DECISIONS.md 的 v0.1.13 事故）。这里是显式的 if，
  * 一次机会一次机会，走不走得清楚。
+ *
+ * ## 多 key 失败转移
+ *
+ * 一个中转站下配了多把 key 时，[LlmProfile.keyCandidates] 给出这个模型的
+ * 候选链。鉴权失败（401/403）或额度受限（429/503）且**一帧还没吐**时，
+ * 用同一把请求体换下一把 key 重发（[runStreamAttempts] 的 keyIndex 递归）；
+ * 吐过字的一律不换，否则用户会看到同一段话出现两遍。
  */
 class ChatCompletionStream(
     private val client: OkHttpClient,
@@ -212,17 +219,26 @@ class ChatCompletionStream(
      *   但输出上限只有 8k 的中转站会直接 400。一帧未吐且错误体明确是
      *   max_tokens 类 → 减半重试一次，自动适配低上限渠道，用户无需换模型。
      *   减半后仍失败就如实报错——盲降多次只会拖长失败时间。
+     * @param keyIndex 候选链下标（[LlmProfile.keyCandidates]）。失败转移用：
+     *   一帧未吐且错误是「这把 key 不行」（[isKeyFailure]）时，用同一把请求体
+     *   换下一把 key 重发。已经吐过字的一律不换——那会让用户看到重复输出。
      */
     private suspend fun FlowCollector<ChatStreamEvent>.runStreamAttempts(
         profile: LlmProfile,
         request: ChatRequest,
         effort: ReasoningEffort,
-        allowMaxTokensHalve: Boolean
+        allowMaxTokensHalve: Boolean,
+        keyIndex: Int = 0
     ) {
         var deltas = 0
         var thinkings = 0
         var failure: ApiError? = null
         var ended = false
+
+        // 这一轮用哪把 key：候选链的第 keyIndex 把。链为空（没配 key）时
+        // 只能用空串发出去，让服务端自己回 401——比在这里猜一把更诚实。
+        val keys = profile.keyCandidates(profile.model)
+        val key = keys.getOrNull(keyIndex)?.key.orEmpty()
 
         val attempts = ReasoningFallback.attempts(effort)
         try {
@@ -230,6 +246,7 @@ class ChatCompletionStream(
                 var attemptFailure: ApiError? = null
                 rawStream(
                     profile,
+                    key,
                     request.withReasoning(attempt?.first, attempt?.second)
                 ).collect { event ->
                     when (event) {
@@ -302,11 +319,29 @@ class ChatCompletionStream(
         }
 
         if (!StreamFallback.shouldFallback(reason, totalEmitted)) {
+            // 失败转移：一帧未吐 + 这把 key 本身不行（鉴权失败 / 额度用尽）
+            // → 同一把请求体换下一把 key 重发。降档（max_tokens）排在前面
+            // 已经先试过了，所以走到这里说明「不是请求体的问题」。
+            // 已经吐过字的一律不换：那会让用户看到同一段话出现两遍。
+            //
+            // 降档开关**恢复成 true**：新 key 可能指向另一条渠道，输出上限
+            // 与上一把完全不同，该给它一次「完整额度先试、不行再减半」的机会。
+            // 递归深度由 keyIndex 单调递增兜住（最多 keys.size 层），不会绕圈。
+            val nextKey = keyIndex + 1
+            if (totalEmitted == 0 && isKeyFailure(reason) && nextKey < keys.size) {
+                return runStreamAttempts(
+                    profile,
+                    request,
+                    effort,
+                    allowMaxTokensHalve = true,
+                    keyIndex = nextKey
+                )
+            }
             if (failure != null) emit(ChatStreamEvent.Failed(reason))
             return
         }
 
-        emitAll(nonStreaming(profile, request, totalEmitted, attempts.first()))
+        emitAll(nonStreaming(profile, key, request, totalEmitted, attempts.first()))
     }
 
     // ------------------------------------------------------------ 内部事件
@@ -342,12 +377,27 @@ class ChatCompletionStream(
      *   正常服务端第一次即成功，多试的代价只是多一次 400 往返。
      * @param onDone 成功时回调一次 usage。**内部调用也要记账**——
      *   压缩器的 LLM 调用不计入用量概览的话，「对话」一栏永远是 0。
+     *
+     * 多 key 时按候选链失败转移：见 [withKeyFailover]。
      */
     suspend fun completeOnce(
         profile: LlmProfile,
         request: ChatRequest,
         effort: ReasoningEffort = ReasoningEffort.OFF,
         onDone: (ChatStreamEvent.Done) -> Unit = {}
+    ): ApiResult<String> =
+        // 上下文压缩这类内部辅助调用同样换 key：一把废 key 会让压缩静默失败，
+        // 而它失败的症状是「长对话突然丢上下文」，极难猜到是 key 的事。
+        withKeyFailover(profile) { key ->
+            completeOnceWithKey(profile, key, request, effort, onDone)
+        }
+
+    private suspend fun completeOnceWithKey(
+        profile: LlmProfile,
+        key: String,
+        request: ChatRequest,
+        effort: ReasoningEffort,
+        onDone: (ChatStreamEvent.Done) -> Unit
     ): ApiResult<String> {
         val text = StringBuilder()
         val attempts = ReasoningFallback.attempts(effort)
@@ -359,6 +409,7 @@ class ChatCompletionStream(
             // attempt 为 (字段名, 取值)；nonStreaming 内部会 withReasoning 带上
             nonStreaming(
                 profile,
+                key,
                 request.copy(stream = false),
                 deltasAlreadyEmitted = 0,
                 attempt
@@ -381,9 +432,8 @@ class ChatCompletionStream(
     }
 
     // ------------------------------------------------------------ 流式
-
-    private fun rawStream(profile: LlmProfile, request: ChatRequest): Flow<RawEvent> = callbackFlow {
-        val call = streamingClient.newCall(buildRequest(profile, request, streaming = true))
+    private fun rawStream(profile: LlmProfile, key: String, request: ChatRequest): Flow<RawEvent> = callbackFlow {
+        val call = streamingClient.newCall(buildRequest(profile, key, request, streaming = true))
         var finished = false
 
         call.enqueue(object : Callback {
@@ -519,6 +569,7 @@ class ChatCompletionStream(
 
     private suspend fun nonStreaming(
         profile: LlmProfile,
+        key: String,
         request: ChatRequest,
         deltasAlreadyEmitted: Int,
         reasoning: Pair<String, String>? = null
@@ -531,7 +582,7 @@ class ChatCompletionStream(
         val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
-                authorization = "Bearer ${profile.resolveKey(profile.model)}",
+                authorization = "Bearer $key",
                 request = body
             )
         } catch (cancelled: CancellationException) {
@@ -584,7 +635,13 @@ class ChatCompletionStream(
 
     // ------------------------------------------------------------ 请求构造
 
-    private fun buildRequest(profile: LlmProfile, request: ChatRequest, streaming: Boolean): Request {
+    /**
+     * 构造请求。
+     *
+     * @param key 这一轮用哪把 key，**由调用方显式给出**（换 key 重发时只换它）。
+     *   这里若自行 resolveKey，失败转移就失效了——每次重发都拿回同一把废 key。
+     */
+    private fun buildRequest(profile: LlmProfile, key: String, request: ChatRequest, streaming: Boolean): Request {
         // 对话**绝不能开 json_object**：会把回复强行掰成 JSON，
         // 用户看到的是一堆花括号而不是讲解。
         val body = request.copy(
@@ -599,7 +656,7 @@ class ChatCompletionStream(
         val payload = json.encodeToString(ChatRequest.serializer(), body)
         return Request.Builder()
             .url(profile.chatCompletionsUrl())
-            .header("Authorization", "Bearer ${profile.resolveKey(profile.model)}")
+            .header("Authorization", "Bearer $key")
             .header("Accept", if (streaming) "text/event-stream" else "application/json")
             .header("Cache-Control", "no-cache")
             .post(payload.toRequestBody(JSON_MEDIA_TYPE))

@@ -276,12 +276,12 @@
     <string name="settings_model_hint">手动填写，或在下方模型列表点「设为主模型」</string>
     <!-- 多 Key：中转站场景，一个 URL 配多个 key，模型合并池 + 自动路由 -->
     <string name="settings_extra_keys">附加 Key（同一个 URL 下多 Key）</string>
-    <string name="settings_extra_keys_hint">中转站常用：一个 URL 下多个 Key，各自可用模型不同。每把 Key 都可独立查看、独立删除；拉取模型时会自动合并所有 Key 可见的模型并分配路由。</string>
+    <string name="settings_extra_keys_hint">中转站常用：一个 URL 下多个 Key，各自可用模型不同。每把 Key 都可独立查看、独立删除；拉取模型时会自动合并所有 Key 可见的模型并分配路由。同一模型配了多把 Key 时，若当前 Key 鉴权失败或额度用尽，会自动换下一把 Key 重试。</string>
     <string name="settings_add_key">添加 Key</string>
     <string name="settings_remove_key">删除该 Key</string>
     <!-- 模型获取与选择：一键拉取所有 Key 可见模型，勾选后进对话页选项 -->
     <string name="settings_models_fetch_title">模型获取与选择</string>
-    <string name="settings_models_fetch_hint">一键获取该 URL 下所有 Key 可见的模型并合并。勾选的模型才会出现在对话页的模型选项里，每个模型自动路由到能调用它的 Key。</string>
+    <string name="settings_models_fetch_hint">一键获取该 URL 下所有 Key 可见的模型并合并。勾选的模型才会出现在对话页的模型选项里，每个模型自动路由到能调用它的 Key；若那把 Key 鉴权失败或额度用尽，会自动换下一把 Key 重试。</string>
     <string name="settings_pick_provider_models_count">共 %1$d 个模型，勾选可用范围：</string>
     <string name="settings_fetching_models">获取中…</string>
     <string name="settings_set_as_main">设为主模型</string>

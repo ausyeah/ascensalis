@@ -538,19 +538,21 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
      * 其余 key 供应的模型一个都看不见——也就无从勾选，更谈不上调用。
      *
      * 所以逐把 key 探测一次，把结果**合并去重**成一个完整模型池；
-     * 同时生成两张表：
-     * - **路由表**（model -> keyId）：主 key 看得见的模型一律走主 key，
-     *   只有附加 key 看得见的才绑到那把 key。用户不填、也看不到这张表，
-     *   保存后 [LlmProfile.resolveKey] 按它找到正确的 key；
+     * 同时生成候选链和来源标注：
+     * - **候选链**（model -> 看得见它的全部 keyId，按 [LlmProfile.allKeys]
+     *   顺序，主 key 打头）：主 key 看得见的模型一律以主 key 为首选，
+     *   只有主 key 看不见的才以能看见它的附加 key 打头。链头就是
+     *   [LlmProfile.resolveKey] 的首选，整条链是失败转移的尝试顺序
+     *   （见 [com.mistakebook.net.llm.withKeyFailover]）；
      * - **来源标注**（model -> 「主 Key、Key 2」）：给用户看这个模型
      *   有几把钥匙能开。
      *
-     * 两张表合起来保证：**合并池里的每一个模型都一定有 key 能调它**——
+     * 两者合起来保证：**合并池里的每一个模型都一定有 key 能调它**——
      * 这正是「选好之后都能够调用」的承诺。
      */
     fun fetchModels(
         draft: LlmProfile,
-        onReady: (List<String>, Map<String, String>) -> Unit = { _, _ -> }
+        onReady: (List<String>, Map<String, List<String>>) -> Unit = { _, _ -> }
     ) {
         viewModelScope.launch {
             loadingModels.value = true
@@ -590,8 +592,6 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 return@launch
             }
 
-            val mainModels = seen[LlmProfile.MAIN_KEY_ID].orEmpty().toSet()
-
             // keyId -> 展示标签（「主 Key」/「Key 2」）
             val labelOfKey = keys.associate { entry ->
                 entry.id to if (entry.id == LlmProfile.MAIN_KEY_ID) "主 Key"
@@ -606,24 +606,22 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 if (labels.isNotEmpty()) sources[m] = labels.joinToString("、")
             }
 
-            // model -> keyId 路由表：主 key 优先，只有主 key 看不见的才绑附加 key
-            val bindings = mutableMapOf<String, String>()
+            // model -> 候选链：看得见它的每一把 key，主 key 打头。
+            // 链头即首选（与旧首选表口径完全一致：主 key 看得见的走主 key，
+            // 只有主 key 看不见的才以第一个看得见的附加 key 打头），
+            // 链尾是失败转移的兜底。合并池里的模型必然有人看得见，
+            // 空链只可能是 seen 与 merged 不同步的意外，兜底到主 key。
+            val chain = mutableMapOf<String, List<String>>()
             merged.forEach { m ->
-                if (m in mainModels) {
-                    bindings[m] = LlmProfile.MAIN_KEY_ID
-                } else {
-                    val extra = keys.firstOrNull {
-                        it.id != LlmProfile.MAIN_KEY_ID && seen[it.id]?.contains(m) == true
-                    }
-                    bindings[m] = extra?.id ?: LlmProfile.MAIN_KEY_ID
-                }
+                val ids = keys.filter { seen[it.id]?.contains(m) == true }.map { it.id }
+                chain[m] = ids.ifEmpty { listOf(LlmProfile.MAIN_KEY_ID) }
             }
 
             val list = merged.toList()
             fetchedModelsByProfile.value = fetchedModelsByProfile.value + (draft.id to list)
             modelSourcesByProfile.value = modelSourcesByProfile.value + (draft.id to sources)
             loadingModels.value = false
-            onReady(list, bindings)
+            onReady(list, chain)
         }
     }
 

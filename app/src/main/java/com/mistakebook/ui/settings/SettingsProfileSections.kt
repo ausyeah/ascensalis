@@ -118,10 +118,11 @@ internal fun ProfileRow(
      * 拉模型列表。传的是**当前输入框内容**，不是已保存的配置——
      * 否则「填了 URL 和 Key 但没按保存」时必然失败。
      *
-     * 回调带两样东西：合并后的模型池、以及**自动生成的路由表**
-     * （model -> keyId，哪个模型走哪把 key，由探测结果决定，不用用户手填）。
+     * 回调带两样东西：合并后的模型池、以及**自动生成的候选链**
+     * （model -> 能调它的全部 keyId，按尝试顺序；链头就是首选 Key，
+     * 剩下的留给失败转移，都不用手填）。
      */
-    onFetchModels: (LlmProfile, (List<String>, Map<String, String>) -> Unit) -> Unit,
+    onFetchModels: (LlmProfile, (List<String>, Map<String, List<String>>) -> Unit) -> Unit,
     /** 每个模型是从哪把 key 拉到的（「主 Key」/「Key 2」）。 */
     modelSources: Map<String, String> = emptyMap(),
     onTest: (LlmProfile) -> Unit,
@@ -196,7 +197,7 @@ internal fun ProfileRow(
     // **附加 Key 池**：同一个 baseUrl 下的其他 key。
     // 中转站（one-api / new-api）就是这个形态：一个 URL、多份 key，
     // 每份 key 的可用模型与额度都不同。哪把 key 调哪个模型由拉列表时
-    // 自动生成的路由表决定，不需要（也不再提供）手填绑定。
+    // 自动生成的候选链决定，不需要（也不再提供）手填绑定。
     var extraKeys by remember(profile.id) {
         mutableStateOf(profile.extraKeys.toList())
     }
@@ -206,9 +207,15 @@ internal fun ProfileRow(
         mutableStateOf(profile.models.toList())
     }
 
-    // **模型 -> keyId 路由表**：拉列表时自动生成，用户不填也看不到。
+    // **模型 -> keyId 首选表**：拉列表时自动生成，用户不填也看不到。
+    // 它只是候选链的链头（见 modelKeyChain），保存时两者一起落盘。
     var modelKeys by remember(profile.id) {
         mutableStateOf(profile.modelKeys)
+    }
+
+    // **模型 -> 候选 key 链**：链头即上面的路由表，链尾是失败转移的顺序。
+    var modelKeyChain by remember(profile.id) {
+        mutableStateOf(profile.modelKeyChain)
     }
 
     // 这个模型能不能直接看图。不识图的模型在对话里收到图片时，
@@ -224,7 +231,8 @@ internal fun ProfileRow(
         supportsVision = supportsVision,
         models = checkedModels,
         extraKeys = extraKeys,
-        modelKeys = modelKeys
+        modelKeys = modelKeys,
+        modelKeyChain = modelKeyChain
     )
 
     // 只有域名和 Key 齐了才能发请求；模型名**不**参与判断
@@ -301,7 +309,8 @@ internal fun ProfileRow(
                 //
                 // 做法：主 Key 之外可以再加若干 Key。**每把 Key 独立查看 / 独立删除**，
                 // 不再手填「该 Key 负责哪些模型」——拉模型列表时会逐把 Key 探测，
-                // 自动生成 model -> keyId 路由表，用户勾选模型即可调用。
+                // 自动生成「模型 -> 候选 Key 链」，用户勾选模型即可调用；
+                // 链头是首选 Key，后面是这把 Key 失败时自动接管的备选。
                 Text(
                     text = stringResource(R.string.settings_extra_keys),
                     style = MaterialTheme.typography.bodyMedium
@@ -348,8 +357,9 @@ internal fun ProfileRow(
                 //
                 // 一键获取该 URL 下**所有 Key**可见的模型，合并去重后勾选。
                 // 勾选的模型写进 profile.models——对话页的模型选项只从这里出，
-                // 没勾选的不出现。路由表（model -> keyId）在拉取时自动生成，
-                // 保存后 resolveKey 按它找到正确的 Key，选任何一个都调得动。
+                // 没勾选的不出现。候选链（模型 -> 能调它的 Key，按顺序）在拉取时
+                // 自动生成：保存后 resolveKey 取链头当首选，链尾留给失败转移，
+                // 选任何一个都调得动。
                 Text(
                     text = stringResource(R.string.settings_models_fetch_title),
                     style = MaterialTheme.typography.bodyMedium
@@ -362,10 +372,13 @@ internal fun ProfileRow(
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
-                        onFetchModels(draft()) { _, bindings ->
-                            // 探测出的路由表写回草稿：保存之后 resolveKey
-                            // 才能按模型名找到正确的 key，选了就能调。
-                            modelKeys = bindings
+                        onFetchModels(draft()) { _, chain ->
+                            // 探测出的候选链写回草稿：保存之后 resolveKey
+                            // 才能按模型名找到首选 key，选了就能调。
+                            // 首选表取链头——**同一个来源拆成两个字段**，
+                            // 不各算一份，否则「首选」和「备选顺序」迟早对不上。
+                            modelKeys = chain.mapValues { it.value.first() }
+                            modelKeyChain = chain
                             onDraftChanged()
                         }
                     },

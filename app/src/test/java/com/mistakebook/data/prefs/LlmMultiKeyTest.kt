@@ -16,9 +16,11 @@ import org.junit.Test
  * 中转站（one-api / new-api）的典型形态是**一个 baseUrl、多份 key**，
  * 每份 key 的可用模型和额度都不一样。所以：
  * - 主 key 之外可以有附加 key（`extraKeys`），每把独立查看、独立删除；
- * - 拉模型列表时逐把 key 探测，合并成模型池，并自动生成
- *   model -> keyId 路由表（`modelKeys`）；
- * - 请求时按模型名查路由表找出该用的 key（`resolveKey`）。
+ * - 拉模型列表时逐把 key 探测，合并成模型池，并自动生成两张表：
+ *   model -> keyId 路由表（`modelKeys`）与 model -> 候选链
+ *   （`modelKeyChain`）；
+ * - 请求时按模型名查候选链，链头就是那把该用的 key（`resolveKey`），
+ *   链头失败时由失败转移按链尾换下一把（见 KeyFailoverTest）。
  *
  * 用户**不再**为每把 key 手填「负责哪些模型」——那是探测的活。
  */
@@ -31,7 +33,8 @@ class LlmMultiKeyTest {
         model: String = "gpt-4o",
         extra: List<LlmKeyEntry> = emptyList(),
         models: List<String> = emptyList(),
-        modelKeys: Map<String, String> = emptyMap()
+        modelKeys: Map<String, String> = emptyMap(),
+        modelKeyChain: Map<String, List<String>> = emptyMap()
     ) = LlmProfile(
         id = "p1",
         name = "中转站",
@@ -40,7 +43,8 @@ class LlmMultiKeyTest {
         model = model,
         models = models,
         extraKeys = extra,
-        modelKeys = modelKeys
+        modelKeys = modelKeys,
+        modelKeyChain = modelKeyChain
     )
 
     @Test
@@ -240,12 +244,12 @@ class LlmMultiKeyTest {
         // 合并后的池子：勾选任意一个都能解析出非空 key
         pool.forEach { m ->
             assertTrue("模型 $m 应能解析出可用 key", p.resolveKey(m).isNotBlank())
-            assertTrue("模型 $m 应有 key 可服务", p.keysServing(m).isNotEmpty())
+            assertTrue("模型 $m 应有 key 可服务", p.keyCandidates(m).isNotEmpty())
         }
     }
 
     @Test
-    fun `keysServing 列出绑定 key 与主 key`() {
+    fun `keyCandidates 列出绑定 key 与主 key`() {
         val p = profile(
             extra = listOf(
                 LlmKeyEntry(id = "b", key = "sk-b"),
@@ -254,11 +258,132 @@ class LlmMultiKeyTest {
             modelKeys = mapOf("deepseek-chat" to "c")
         )
         // gpt-4o：没绑附加 key，只有主 key
-        assertEquals(1, p.keysServing("gpt-4o").size)
-        // deepseek-chat：主 key + 绑定的 key-c
-        assertEquals(2, p.keysServing("deepseek-chat").size)
+        assertEquals(1, p.keyCandidates("gpt-4o").size)
+        // deepseek-chat：绑定的 key-c + 主 key
+        assertEquals(2, p.keyCandidates("deepseek-chat").size)
         // 空模型名：无从判断，不给出任何 key
-        assertTrue(p.keysServing("  ").isEmpty())
+        assertTrue(p.keyCandidates("  ").isEmpty())
+    }
+
+    // ------------------------------------------------------------------
+    // 候选链：一个模型多把 key 时的自动路由
+    //
+    // 用户诉求：「一个 URL 下多个 key 都勾选了同一个模型，失败后应该自己
+    // 换一个 key 尝试」。
+    //
+    // 探测时把看得见该模型的每一把 key 按顺序存进 modelKeyChain；
+    // 请求时 keyCandidates 原样吐出，交给失败转移逐个试。
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `候选链按探测顺序给出全部 key`() {
+        val p = profile(
+            extra = listOf(
+                LlmKeyEntry(id = "b", key = "sk-b"),
+                LlmKeyEntry(id = "c", key = "sk-c")
+            ),
+            modelKeyChain = mapOf("deepseek-chat" to listOf(LlmProfile.MAIN_KEY_ID, "b", "c"))
+        )
+        assertEquals(
+            listOf("sk-main", "sk-b", "sk-c"),
+            p.keyCandidates("deepseek-chat").map { it.key }
+        )
+    }
+
+    @Test
+    fun `候选链链头就是 resolveKey 的首选`() {
+        // 链是唯一来源：两张表各记一份首选，迟早对不上
+        val p = profile(
+            extra = listOf(LlmKeyEntry(id = "b", key = "sk-b")),
+            modelKeys = mapOf("deepseek-chat" to "b"),
+            modelKeyChain = mapOf("deepseek-chat" to listOf("b", LlmProfile.MAIN_KEY_ID))
+        )
+        assertEquals("sk-b", p.resolveKey("deepseek-chat"))
+        assertEquals(
+            p.resolveKey("deepseek-chat"),
+            p.keyCandidates("deepseek-chat").first().key
+        )
+    }
+
+    @Test
+    fun `候选链里被删掉的 key 自动跳过`() {
+        // key-b 已从配置删掉，链还指着它 —— 不能因此少一把备选
+        val p = profile(
+            extra = listOf(LlmKeyEntry(id = "c", key = "sk-c")),
+            modelKeyChain = mapOf("deepseek-chat" to listOf("b", "c", LlmProfile.MAIN_KEY_ID))
+        )
+        assertEquals(listOf("sk-c", "sk-main"), p.keyCandidates("deepseek-chat").map { it.key })
+    }
+
+    @Test
+    fun `候选链整条都不可用时退回路由表与主 key`() {
+        // 链上的 key 全被删了：不能返回空（那就一次都不发了），
+        // 退回「路由表绑定的 + 主 key」这条老路
+        val p = profile(
+            extra = listOf(LlmKeyEntry(id = "d", key = "sk-d")),
+            modelKeys = mapOf("deepseek-chat" to "d"),
+            modelKeyChain = mapOf("deepseek-chat" to listOf("b", "c"))
+        )
+        assertEquals(listOf("sk-d", "sk-main"), p.keyCandidates("deepseek-chat").map { it.key })
+    }
+
+    @Test
+    fun `候选链里同一把 key 粘了两次只试一次`() {
+        val p = profile(
+            extra = listOf(LlmKeyEntry(id = "b", key = "sk-b")),
+            modelKeyChain = mapOf("deepseek-chat" to listOf("b", LlmProfile.MAIN_KEY_ID, "b"))
+        )
+        assertEquals(listOf("sk-b", "sk-main"), p.keyCandidates("deepseek-chat").map { it.key })
+    }
+
+    @Test
+    fun `候选链查表同样大小写不敏感`() {
+        val p = profile(
+            extra = listOf(LlmKeyEntry(id = "b", key = "sk-b")),
+            modelKeyChain = mapOf("DeepSeek-Chat" to listOf("b"))
+        )
+        assertEquals(listOf("sk-b"), p.keyCandidates("deepseek-chat").map { it.key })
+        assertEquals("sk-b", p.resolveKey("  DEEPSEEK-CHAT  "))
+    }
+
+    @Test
+    fun `没探测过的存量配置只有一把候选 key`() {
+        // 老配置没有 modelKeyChain：行为必须与只有一把 key 时一致
+        val p = profile(extra = listOf(LlmKeyEntry(id = "b", key = "sk-b")))
+        assertEquals(listOf("sk-main"), p.keyCandidates("gpt-4o").map { it.key })
+    }
+
+    @Test
+    fun `候选链往返序列化不丢`() {
+        val p = profile(
+            extra = listOf(
+                LlmKeyEntry(id = "b", key = "sk-b"),
+                LlmKeyEntry(id = "c", key = "sk-c")
+            ),
+            modelKeys = mapOf("deepseek-chat" to LlmProfile.MAIN_KEY_ID),
+            modelKeyChain = mapOf("deepseek-chat" to listOf(LlmProfile.MAIN_KEY_ID, "b", "c"))
+        )
+        val back = json.decodeFromString(
+            ListSerializer(LlmProfile.serializer()),
+            json.encodeToString(ListSerializer(LlmProfile.serializer()), listOf(p))
+        ).first()
+        assertEquals(
+            listOf(LlmProfile.MAIN_KEY_ID, "b", "c"),
+            back.modelKeyChain["deepseek-chat"]
+        )
+        assertEquals(
+            listOf("sk-main", "sk-b", "sk-c"),
+            back.keyCandidates("deepseek-chat").map { it.key }
+        )
+    }
+
+    @Test
+    fun `存量 JSON 没有候选链字段也能读出且不报错`() {
+        val legacy =
+            """[{"id":"a","name":"DeepSeek","baseUrl":"https://api.deepseek.com/v1","apiKey":"sk-x","model":"deepseek-chat"}]"""
+        val p = json.decodeFromString<List<LlmProfile>>(legacy).first()
+        assertTrue("缺字段时应为空链", p.modelKeyChain.isEmpty())
+        assertEquals(listOf("sk-x"), p.keyCandidates("deepseek-chat").map { it.key })
     }
 
     @Test

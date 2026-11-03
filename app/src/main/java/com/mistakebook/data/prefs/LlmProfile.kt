@@ -64,15 +64,50 @@ data class LlmProfile(
     val extraKeys: List<LlmKeyEntry> = emptyList(),
 
     /**
-     * 模型 -> keyId 的自动路由表。
+     * 模型 -> keyId 的自动路由表（**只存首选那把**）。
      *
      * 「一键获取所有模型」时逐把 key 探测生成：主 key 看得见的模型全部
      * 路由到主 key，只有附加 key 看得见的才绑到那把 key 上。
      * 用户不填这个表，也不该看到这个表——它是探测结果的落盘。
      *
+     * 它就是 [modelKeyChain] 每个模型的链头（探测时同一份数据同时落成两个字段）。
+     * 字段类型不能改成 List——见 [modelKeyChain] 里关于存量 JSON 的说明。
+     *
      * 路由表指向的 key 被删除时（[resolveKey]），自动回退主 key。
      */
     val modelKeys: Map<String, String> = emptyMap(),
+
+    /**
+     * 模型 -> **能调用它的全部 keyId**，按尝试顺序（首选在前）。
+     *
+     * ## 为什么要有它（[modelKeys] 每个模型只记得一把 key）
+     *
+     * 中转站一个 URL 下挂着多把 key 时，同一个模型常常好几把都调得动
+     * （用户诉求：「多个 key 都勾选了同一个模型」）。而 [modelKeys] 是
+     * `model -> keyId`，**一个模型只存一把**——于是「这把 key 额度用完
+     * 或被吊销」就只能是整次请求失败，明明旁边还有一把能调的 key 闲着。
+     *
+     * 这张表把探测时看得见该模型的**每一把 key** 按顺序记下来，
+     * 请求侧据此做失败转移：鉴权失败（401/403）或额度受限（429/503）时
+     * 自动换下一把 key 重发同一个请求，用户不用回设置页改配置。
+     *
+     * ## 为什么是新增字段，而不是把 [modelKeys] 的值改成 List
+     *
+     * [SettingsStore] 读配置是 `runCatching { decode }.getOrDefault(emptyList())`
+     * ——**坏数据按空列表处理**。把值的类型从 String 改成 List<String>，
+     * 老用户存的那份 JSON 会整体解析失败，整套接入配置（URL / Key / 模型）
+     * 静默变成空。所以只能加字段，老配置没有它时行为与只有一把 key 时一致。
+     *
+     * ## 为什么首选也写在链里
+     *
+     * 链是**唯一来源**：[resolveKey] 取链头，[keyCandidates] 取整条链。
+     * 两张表各记一份首选，迟早对不上。探测时由同一份数据同时生成两者
+     * （见 SettingsViewModel.fetchModels），不变量是
+     * `modelKeys[m] == modelKeyChain[m].first()`。
+     *
+     * 留空表示「没探测过 / 老配置」，此时按 [modelKeys] + 主 key 兜底。
+     */
+    val modelKeyChain: Map<String, List<String>> = emptyMap(),
 
     /**
      * 这个模型**能不能直接看图**。
@@ -118,16 +153,36 @@ data class LlmProfile(
         }
 
     /**
-     * 按模型名找出**所有**能调用它的 key。
+     * 这个模型下**所有能用的 key**，按尝试顺序（首选在前）。
      *
-     * 口径：路由表绑定的那把 + 主 key（主 key 是兜底，
-     * 任何模型都至少可以试着走它）。空模型名无从判断，返回空。
+     * 取代早先的 `keysServing`：那个名字只答「有哪几把」，答不上「先试哪把」，
+     * 而失败转移要的正是顺序。候选来自探测（[modelKeyChain]）——
+     * 探测时看得见这个模型的每一把 key 都在里面，顺序即优先级；
+     * 没探测过（老配置）就退回「路由表绑定的那把 + 主 key」。
+     *
+     * 查表**大小写不敏感**：/models 回来的模型名与用户手填/芯片上显示的名字
+     * 偶尔大小写不一致（DeepSeek-Chat vs deepseek-chat）。
+     *
+     * 空模型名无从判断，返回空列表。
      */
-    fun keysServing(model: String): List<LlmKeyEntry> {
+    fun keyCandidates(model: String): List<LlmKeyEntry> {
         val target = model.trim()
         if (target.isBlank()) return emptyList()
+        chainFor(target)?.let { ids ->
+            val chained = ids.mapNotNull { entryFor(it) }
+                .filter { it.isUsable() }
+                // 同一把 key 被用户粘了两次是常事，去重免得白试一遍
+                .distinctBy { it.key }
+            if (chained.isNotEmpty()) return chained
+        }
         val bound = bindingFor(target)
-        return allKeys().filter { it.isUsable() && (it.id == bound || it.id == MAIN_KEY_ID) }
+        val preferred = buildList {
+            if (bound != null) entryFor(bound)?.let { add(it) }
+            addAll(allKeys().filter { it.id == MAIN_KEY_ID })
+        }.filter { it.isUsable() }
+        // 绑定的 key 已删、主 key 也空：退回第一把能用的附加 key，
+        // 与 resolveKey 的老口径一致（见 LlmMultiKeyTest 的对应用例）
+        return preferred.ifEmpty { allKeys().filter { it.isUsable() } }
     }
 
     companion object {
@@ -145,30 +200,28 @@ data class LlmProfile(
     private fun bindingFor(model: String): String? =
         modelKeys.entries.firstOrNull { it.key.trim().equals(model.trim(), ignoreCase = true) }?.value
 
+    /** 候选链查找，与 [bindingFor] 同样大小写不敏感。 */
+    private fun chainFor(model: String): List<String>? =
+        modelKeyChain.entries.firstOrNull {
+            it.key.trim().equals(model.trim(), ignoreCase = true)
+        }?.value?.takeIf { it.isNotEmpty() }
+
+    /** keyId -> key 条目。主 key 用固定 id 现算（见 [allKeys]），附加 key 查配置。 */
+    private fun entryFor(id: String): LlmKeyEntry? = when (id) {
+        MAIN_KEY_ID -> allKeys().firstOrNull { it.id == MAIN_KEY_ID }
+        else -> extraKeys.firstOrNull { it.id == id }
+    }
+
     /**
-     * 按模型名解析出该用的 key。
+     * 按模型名解析出**首选** key。
      *
-     * 规则：
-     * 1. 路由表（[modelKeys]）绑定的 key 优先——那是拉列表时探测出的
-     *    「这把 key 真能调这个模型」的结论；
-     * 2. 绑定的 key 已被删除（配置里找不到）时，退回主 key；
-     * 3. 主 key 为空时，退回第一个可用的附加 key。
+     * 就是 [keyCandidates] 的链头——链是唯一来源，不再另写一套挑选规则，
+     * 免得「首选」和「失败转移时第二把」对不上。
      *
      * 解析不出来就返回空串——调用方要按「未配置」处理。
      */
-    fun resolveKey(model: String): String {
-        val target = model.trim()
-        bindingFor(target)?.let { id ->
-            val entry = if (id == MAIN_KEY_ID) {
-                allKeys().firstOrNull { it.id == MAIN_KEY_ID }
-            } else {
-                extraKeys.firstOrNull { it.id == id }
-            }
-            if (entry != null && entry.isUsable()) return entry.key
-        }
-        if (apiKey.isNotBlank()) return apiKey
-        return extraKeys.firstOrNull { it.isUsable() }?.key.orEmpty()
-    }
+    fun resolveKey(model: String): String =
+        keyCandidates(model).firstOrNull()?.key.orEmpty()
 
     /**
      * 这个配置下**对话页可见**的模型名（主模型 + 勾选的模型）。
