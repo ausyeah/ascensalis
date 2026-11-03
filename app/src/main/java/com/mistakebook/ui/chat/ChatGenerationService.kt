@@ -293,9 +293,14 @@ class ChatGenerationService : Service() {
 
         suspend fun publishPreview() {
             // 预览节流：每个 delta 都发一次 StateFlow 会让界面每个 token 重组一次。
-            // 与原实现同口径（PREVIEW_THROTTLE_MS）。
+            // 间隔随内容长度自适应（见 streamPublishIntervalMs）——固定 220ms
+            // 在短回答上慢得能数出「一跳一跳」，在长回答上又快得没必要。
             val now = System.currentTimeMillis()
-            if (now - lastPreviewAt < PREVIEW_THROTTLE_MS) return
+            if (now - lastPreviewAt <
+                streamPublishIntervalMs(rounds.answer.length + rounds.thinking.length)
+            ) {
+                return
+            }
             lastPreviewAt = now
             ChatGenerationBus.publish(
                 ChatGenerationBus.Snapshot(
@@ -1067,10 +1072,11 @@ class ChatGenerationService : Service() {
         private const val REQUEST_STOP = 4203
 
         /** 落库节流：与原实现一致，肉眼无差别但少几千次写。 */
-        private const val WRITE_THROTTLE_MS = 500L
+        
+
+private const val WRITE_THROTTLE_MS = 500L
 
         /** 预览节流：与原实现一致，避免每个 token 都让界面重组。 */
-        private const val PREVIEW_THROTTLE_MS = 220L
 
         private const val FINISH_REASON_LENGTH = "length"
 
@@ -1117,4 +1123,21 @@ class ChatGenerationService : Service() {
             runCatching { context.startService(intent) }
         }
     }
+}
+
+/**
+ * 流式发布的自适应节流（v0.0.96，曲线取自 NovelForge 的同款问题）。
+ *
+ * 取值的两个来源：
+ * - **下限 50ms**：短回答必须跟手，否则「模型秒回」看着像卡了一下；
+ * - **上限 150ms（≈6.7Hz）**：再慢，reverseLayout 列表每发布一次整体平移一次，
+ *   眼睛读到的就是离散跳变。长回答反正一次发布的开销由尾部那一块决定，
+ *   不随全文长度增长，所以长度只该轻微影响刷新率，不该主导它。
+ *
+ * 诚实地说：6.7Hz 仍是 6.7 次跳变，不是 60fps 的连续滚动——
+ * 这条曲线解决的是「一抽一抽」，不是「丝滑」。
+ */
+internal fun streamPublishIntervalMs(chars: Int): Long = when {
+    chars <= 400 -> 50L
+    else -> (50L + chars / 60L).coerceAtMost(150L)
 }

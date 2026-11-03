@@ -241,6 +241,13 @@ fun ChatScreen(
     val latestMessageKey = state.messages.lastOrNull()?.id
     val coordinator = rememberAutoScrollEffect(listState, latestMessageKey)
 
+    // 「翻上去别动」（v0.0.96，学习 NovelForge）：用户离开底部看历史时，
+    // 冻结流式预览——reverseLayout 下最后一条长高会把上面所有内容顶走，
+    // 用户没动，页面自己在抽。回到触底自动解冻并补上攒下的内容。
+    LaunchedEffect(coordinator.following) {
+        viewModel.setStreamFrozen(!coordinator.following)
+    }
+
     var showKeyGate by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var pendingDeleteId by remember { mutableStateOf(0L) }

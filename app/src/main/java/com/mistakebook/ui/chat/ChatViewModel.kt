@@ -284,7 +284,10 @@ sealed interface ChatEvent {
  *
  * ## 流式预览与持久化
  *
- * 当前助手消息保留一份内存预览，最多每 [PREVIEW_THROTTLE_MS] 更新一次；UI 只用它覆盖这一条消息。
+ * 当前助手消息保留一份内存预览，发布间隔随内容长度自适应
+ * （[streamPublishIntervalMs]，50~150ms）；用户翻离底部时整段冻结
+ * （[setStreamFrozen]，解冻补帧）。Room 仍按 [WRITE_THROTTLE_MS] 节流写入，
+ * 生成结束或取消时再强制落下剩余内容。
  * Room 仍按 [WRITE_THROTTLE_MS] 节流写入，生成结束或取消时再强制落下剩余内容。
  * 这样既能及时显示 token，也避免每个 delta 都触发数据库 Flow 与整列列表重组。
  */
@@ -561,15 +564,51 @@ class ChatViewModel(
                     if (!snap.failed) overflowCompressTriggered = false
                     snap.errorText?.let { _events.trySend(ChatEvent.Error(it)) }
                 } else {
-                    generationActive = true
-                    trackedStreamingId = snap.assistantId
-                    _state.value = current.copy(
-                        isStreaming = true,
-                        streamingMessageId = snap.assistantId,
-                        streamingContent = snap.content,
-                        generationStage = snap.stage
-                    )
+                    // 冻结闸只挡**进行中**的预览。终态快照（可重试/被截断/输入
+                    // token 数）必须照常应用——冻结那几行状态，用户回来看到的
+                    // 会话就缺一块，而且没有任何报错。
+                    if (streamFrozen) {
+                        heldStreamSnapshot = snap
+                        return@collect
+                    }
+                    applyStreamingSnapshot(snap)
                 }
+            }
+        }
+    }
+
+    /** 把一条「生成中」的快照盖到当前会话状态上。冻结/解冻两条路共用这一份。 */
+    private fun applyStreamingSnapshot(snap: ChatGenerationBus.Snapshot) {
+        generationActive = true
+        trackedStreamingId = snap.assistantId
+        _state.value = _state.value.copy(
+            isStreaming = true,
+            streamingMessageId = snap.assistantId,
+            streamingContent = snap.content,
+            generationStage = snap.stage
+        )
+    }
+
+    /**
+     * 「翻上去别动」冻结闸（v0.0.96，学习 NovelForge 的同款策略）。
+     *
+     * 用户翻离底部看历史时，流式内容照常在服务里攒着，但**一个字都不盖到
+     * 列表上**：reverseLayout 下最后一条长高会把上面所有内容顶走，
+     * 用户没动，页面自己在抽——这正是「查看思考内容时一抽一抽」的主因。
+     * 解冻时把攒下的最后一帧一次性补上。
+     */
+    private var streamFrozen = false
+    private var heldStreamSnapshot: ChatGenerationBus.Snapshot? = null
+
+    /** 界面根据「是否触底跟随」驱动；终态快照不受冻结影响（见收集器注释）。 */
+    fun setStreamFrozen(frozen: Boolean) {
+        if (streamFrozen == frozen) return
+        streamFrozen = frozen
+        if (!frozen) {
+            // 解冻必须补帧：否则冻结期攒下的内容要等下一个节流窗口才出现
+            heldStreamSnapshot?.let { held ->
+                heldStreamSnapshot = null
+                applyStreamingSnapshot(held)
             }
         }
     }
@@ -1504,7 +1543,6 @@ class ChatViewModel(
         /** 流式预览节流：220ms（约每秒 4~5 次）。
      *  原来是 120ms（每秒 8 次）——每刷新一次就要整篇重解析 markdown
      *  并重绘带公式的气泡，长回答下主线程吃不消，滑动明显掉帧。 */
-    const val PREVIEW_THROTTLE_MS = 220L
 
         const val FINISH_REASON_LENGTH = "length"
 
