@@ -23,7 +23,6 @@ import com.mistakebook.di.AppContainer
 import com.mistakebook.ui.capture.CaptureScreen
 import com.mistakebook.ui.chat.ChatListScreen
 import com.mistakebook.ui.chat.ChatScreen
-import com.mistakebook.ui.chat.newConversationTarget
 import com.mistakebook.ui.crop.CropScreen
 import com.mistakebook.ui.detail.DetailScreen
 import com.mistakebook.ui.edit.EditScreen
@@ -619,7 +618,20 @@ fun MistakeBookNavHost(
                 container = container,
                 questionId = raw.takeIf { it != Routes.CHAT_FREE },
                 sessionId = rawSession.takeIf { it != Routes.CHAT_FREE },
-                onBack = { navController.popBackStack() },
+                onBack = {
+                    // 临时对话退出即删（v0.0.96）。判断放在这里而不是 ChatScreen：
+                    // 删除是异步的，而 pop 之后 ChatScreen 的 rememberCoroutineScope
+                    // 立刻被取消——在这里删（NavHost 的组合作用域比它活得久）才删得完。
+                    val leaving = rawSession.takeIf { it != Routes.CHAT_FREE }
+                    if (leaving == null) {
+                        navController.popBackStack()
+                    } else {
+                        scope.launch {
+                            runCatching { container.chatRepository.discardIfTemporary(leaving) }
+                            navController.popBackStack()
+                        }
+                    }
+                },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenCamera = {
                     // v0.0.57：对话拍照复用 App 内置相机（与错题扫描同一套）。
@@ -629,23 +641,13 @@ fun MistakeBookNavHost(
                     container.captureBatch.clear()
                     navController.navigate(Routes.CAPTURE)
                 },
-                onNewConversation = {
-                    // 顶栏「新对话」：解析出落点会话再导航。
-                    //
-                    // 目标就是当前这条时**不导航**——那说明用户已经待在一条
-                    // 空白的自由会话里（`openFreeSession` 复用了它），
-                    // 此时 pop + push 同一个地址只会把返回栈翻一遍，界面毫无变化。
+                onOpenHistory = { navController.navigate(Routes.CHAT_LIST) },
+                onNewTemporaryConversation = {
+                    // 临时对话是**全新的一条**（不复用空会话）：退出时整条删掉，
+                    // 复用别人的会话会连同别人的记录一起删掉。
                     scope.launch {
-                        val target = newConversationTarget(
-                            currentSessionId = rawSession.takeIf { it != Routes.CHAT_FREE },
-                            resolvedSessionId = container.chatRepository.openFreeSession()
-                        )
-                        if (target != null) {
-                            navController.navigate(Routes.chat(null, target)) {
-                                // 连点多少次都只留一层会话页，不会叠出一长串返回栈
-                                popUpTo(Routes.CHAT) { inclusive = true }
-                            }
-                        }
+                        val id = container.chatRepository.openTemporarySession()
+                        navController.navigate(Routes.chat(null, id))
                     }
                 }
             )

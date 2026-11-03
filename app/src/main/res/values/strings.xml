@@ -527,6 +527,8 @@
     <string name="chat_rename_hint">对话名称</string>
     <string name="chat_rename_save">保存</string>
     <string name="chat_new_conversation">开启新对话</string>
+    <!-- 顶栏右上角（v0.0.96）：临时对话，退出会话即删除 -->
+    <string name="chat_temporary_new">临时对话</string>
     <!-- 应用签名（v0.0.96）：空会话中央标志下方那一行，就是本应用的名字 -->
     <string name="app_signature">Ascensalis</string>
     <string name="chat_cancel">取消</string>

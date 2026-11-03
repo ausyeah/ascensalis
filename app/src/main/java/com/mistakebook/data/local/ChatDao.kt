@@ -56,7 +56,7 @@ interface ChatDao {
      */
     @Query(
         """SELECT s.* FROM chat_sessions s
-           WHERE s.questionId IS NULL AND s.deletedAt IS NULL
+           WHERE s.questionId IS NULL AND s.deletedAt IS NULL AND s.temporary = 0
              AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.sessionId = s.id)
            ORDER BY s.updatedAt DESC LIMIT 1"""
     )
@@ -70,10 +70,31 @@ interface ChatDao {
      */
     @Query(
         """SELECT * FROM chat_sessions
-           WHERE deletedAt IS NULL
-           ORDER BY updatedAt DESC"""
+           WHERE deletedAt IS NULL AND temporary = 0
+           ORDER BY pinned DESC, updatedAt DESC"""
     )
     fun observeSessions(): Flow<List<ChatSession>>
+
+    @Query("UPDATE chat_sessions SET pinned = :pinned, updatedAt = :at WHERE id = :id")
+    suspend fun setPinned(id: Long, pinned: Boolean, at: Long)
+
+    /**
+     * 临时对话退出即删：**物理删除**，不是软删。
+     *
+     * 软删是留给历史会话的「可撤销」，而临时对话的全部意义就是
+     * 「不留痕迹」——留一行 deletedAt 在那儿，用户看不见却也算没删干净。
+     * 消息与附件行经外键 CASCADE 一并清掉。
+     */
+    @Query("DELETE FROM chat_sessions WHERE id = :id")
+    suspend fun deleteSession(id: Long)
+
+    /** 列出全部临时对话（清理附件文件前要先知道有哪些）。 */
+    @Query("SELECT * FROM chat_sessions WHERE temporary = 1")
+    suspend fun listTemporarySessions(): List<ChatSession>
+
+    /** 清掉上次进程被杀时残留的临时对话，返回清掉的行数。 */
+    @Query("DELETE FROM chat_sessions WHERE temporary = 1")
+    suspend fun deleteTemporarySessions(): Int
 
     /**
      * 一次性取出全部未删除会话。

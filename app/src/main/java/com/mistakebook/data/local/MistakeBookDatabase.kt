@@ -25,7 +25,7 @@ import com.mistakebook.data.local.entities.BadgeRecord
  * 高版本备份恢复进低版本 App，Room 下次启动会因找不到迁移而启动崩循环，
  * 只能清数据自救（v0.0.60 起在恢复入口直接拒绝）。
  */
-const val MISTAKE_BOOK_DB_VERSION = 7
+const val MISTAKE_BOOK_DB_VERSION = 8
 
 @Database(
     entities = [
@@ -329,6 +329,24 @@ abstract class MistakeBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 7 → 8（v0.0.96）：会话加「置顶」与「临时」两列。
+         *
+         * 两条 ALTER 都带 NOT NULL DEFAULT 0——老会话两种状态都是「否」，
+         * 升级后列表顺序和可见性与升级前逐行一致，不会有一条老对话
+         * 突然冒到最前面，也不会有哪条凭空消失。
+         */
+        val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `chat_sessions` ADD COLUMN `pinned` INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE `chat_sessions` ADD COLUMN `temporary` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
         fun build(context: Context): MistakeBookDatabase =
             Room.databaseBuilder(context, MistakeBookDatabase::class.java, DB_NAME)
                 // 两个都**必须**注册：漏一个，Room 就找不到那条升级路径，
@@ -347,7 +365,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                     MIGRATION_3_4,
                     MIGRATION_4_5,
                     MIGRATION_5_6,
-                    MIGRATION_6_7
+                    MIGRATION_6_7,
+                    MIGRATION_7_8
                 )
                 .build()
     }

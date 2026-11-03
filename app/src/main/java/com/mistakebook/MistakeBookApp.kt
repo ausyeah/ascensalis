@@ -31,6 +31,12 @@ class MistakeBookApp : Application() {
         container.appScope.launch {
             runCatching { container.chatRepository.purgeExpiredDeletedSessions() }
         }
+        // 临时对话的兜底清理（v0.0.96）：正常退出时当场就删了，
+        // 但进程被系统杀掉时那条退出路径根本不会跑——这里把残留的收拾干净，
+        // 否则「退出即删」这句话在崩溃之后就不成立了。
+        container.appScope.launch {
+            runCatching { container.chatRepository.purgeTemporarySessions() }
+        }
         // T10 徽章判定：启动时跑一轮轻量判定，把新解锁徽章持久化
         container.appScope.launch {
             runCatching { container.badgeRepository.evaluateAndStore() }

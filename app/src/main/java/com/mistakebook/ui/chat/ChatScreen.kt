@@ -14,6 +14,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.view.WindowManager
 import androidx.compose.ui.platform.LocalView
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,7 +49,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -62,7 +62,8 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -184,13 +185,10 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     /** 打开 App 内置相机（v0.0.57：替代系统相机；返回的图经容器交接）。 */
     onOpenCamera: () -> Unit = {},
-    /**
-     * 顶栏「新对话」：落到一条新的空自由会话。
-     *
-     * 由 NavHost 解析目标会话 id 后导航——「复用现成的空会话还是新建」
-     * 是数据层的事，界面只管把用户送到那儿。
-     */
-    onNewConversation: () -> Unit = {}
+    /** 左上角：进历史对话页（v0.0.96，照着 ChatGPT 手机端的布局）。 */
+    onOpenHistory: () -> Unit = {},
+    /** 右上角：开一条临时对话，退出即删（v0.0.96）。 */
+    onNewTemporaryConversation: () -> Unit = {}
 ) {
     val viewModel = containerViewModel(
         container = container,
@@ -417,6 +415,10 @@ fun ChatScreen(
         )
     }
 
+    // 退出会话统一走 onBack：NavHost 在那里判断「是不是临时对话」并决定删不删。
+    // 不接住系统返回键的话，系统自己 pop 栈，删临时对话的那一步就被跳过了。
+    BackHandler { onBack() }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -428,24 +430,22 @@ fun ChatScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    // 左上角进历史（v0.0.96，用户指定的 ChatGPT 手机端布局）。
+                    // 退出会话改由系统返回键/手势承担——顶栏这一格让给了更高频的「翻历史」。
+                    IconButton(onClick = onOpenHistory) {
                         Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.chat_cancel)
+                            Icons.Default.History,
+                            contentDescription = stringResource(R.string.chat_list_title)
                         )
                     }
                 },
                 actions = {
-                    // 顶栏只留一个动作：开新对话（用户反馈：模型入口下面输入栏里
-                    // 已经有了一份，顶栏再放一个纯属占地方；原来那颗重命名也换掉，
-                    // 「新开一局」比「改标题」常用得多）。
-                    //
-                    // 重命名没有丢：对话历史列表里左滑仍有重命名，标题也能在
-                    // 那儿改——顶栏这颗按钮让位给更高频的动作。
-                    IconButton(onClick = onNewConversation) {
+                    // 右上角：临时对话（v0.0.96）。退出就删，用来问那种
+                    // 「不想留在历史里」的问题。普通新对话的入口在首页与历史页。
+                    IconButton(onClick = onNewTemporaryConversation) {
                         Icon(
-                            Icons.Default.Add,
-                            contentDescription = stringResource(R.string.chat_new_conversation)
+                            Icons.Default.Bolt,
+                            contentDescription = stringResource(R.string.chat_temporary_new)
                         )
                     }
                 }
@@ -602,16 +602,6 @@ fun ChatScreen(
 }
 
 
-/**
- * 顶栏「新对话」该导航到哪儿，返回 null 表示「哪儿也不用去」。
- *
- * 纯函数（单测见 ChatNewConversationTest）：判定只有一条——解析出来的会话
- * 是不是当前这条。`openFreeSession` 会**复用**已有的空自由会话，所以用户
- * 已经待在一条空白的新对话里时，解析结果就是当前 id；这时若照常导航，
- * 不过是把同一个地址 pop 出来再 push 回去，返回栈白翻一层。
- */
-internal fun newConversationTarget(currentSessionId: Long?, resolvedSessionId: Long): Long? =
-    resolvedSessionId.takeIf { it != currentSessionId }
 
 
 /**

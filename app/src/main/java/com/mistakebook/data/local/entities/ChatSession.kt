@@ -46,6 +46,25 @@ data class ChatSession(
 
     /** 列表页展示的最后一条消息摘要。 */
     val lastPreview: String = "",
+
+    /**
+     * 置顶（v0.0.96）。
+     *
+     * 列表排序是「置顶在前、其余按最近更新」——只按更新时间排的话，
+     * 一条常翻的长期会话会被新会话反复冲走，用户每次都要往下找。
+     */
+    val pinned: Boolean = false,
+
+    /**
+     * 临时对话（v0.0.96）：退出会话就删掉，不进历史列表。
+     *
+     * 为什么要在库里留这个标记，而不是「退出时记住 id 再删」：
+     * 进程被系统杀掉时退出回调根本不会跑。有了标记，下次启动扫一遍
+     * `temporary = 1` 就能收拾干净；而列表查询直接滤掉它们，
+     * 用户永远不该看见一条本该消失的对话。
+     */
+    val temporary: Boolean = false,
+
     val createdAt: Long,
     val updatedAt: Long,
     val deletedAt: Long? = null

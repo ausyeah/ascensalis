@@ -110,6 +110,61 @@ class ChatRepository(
         )
     }
 
+    /**
+     * 临时对话（v0.0.96）：新建一条标记为 temporary 的会话。
+     *
+     * **不走 [openFreeSession]**——那是「复用最近的空会话」，
+     * 复用的可能是用户想留着的历史对话。临时对话必须是全新的一条，
+     * 这样退出时整条删掉才不会有任何牵连。
+     */
+    suspend fun openTemporarySession(): Long {
+        val now = System.currentTimeMillis()
+        return chatDao.insertSession(
+            ChatSession(
+                questionId = null,
+                title = "",
+                createdAt = now,
+                updatedAt = now,
+                temporary = true
+            )
+        )
+    }
+
+    /**
+     * 退出会话时调用：是临时对话就整条删掉。
+     *
+     * 先删附件目录再删行——行没了以后 `chatDir(id)` 就再也找不到归属，
+     * 那些图片会永远留在缓存里（与「清空全部」同一口径）。
+     * 非临时会话直接返回，历史对话不受影响。
+     */
+    suspend fun discardIfTemporary(id: Long) {
+        val session = chatDao.findSession(id) ?: return
+        if (!session.temporary) return
+        appFiles.deleteRecursively(appFiles.chatDir(id))
+        chatDao.deleteSession(id)
+    }
+
+    /**
+     * 启动时清理上次被杀进程留下的临时对话。
+     *
+     * 正常退出当场就删了，这条兜底只为「进程没了」这一种情况——
+     * 没有它，「退出即删」在闪退之后就成了一句空话。
+     *
+     * @return 清掉的会话数（日志用）。
+     */
+    suspend fun purgeTemporarySessions(): Int {
+        val leftovers = chatDao.listTemporarySessions()
+        if (leftovers.isEmpty()) return 0
+        leftovers.forEach { appFiles.deleteRecursively(appFiles.chatDir(it.id)) }
+        chatDao.deleteTemporarySessions()
+        return leftovers.size
+    }
+
+    /** 置顶/取消置顶（v0.0.96）。列表按 pinned DESC, updatedAt DESC 排。 */
+    suspend fun setPinned(id: Long, pinned: Boolean) {
+        chatDao.setPinned(id, pinned, System.currentTimeMillis())
+    }
+
     /** 重命名。改完**锁定自动标题**，否则下次进会话会被首条消息摘要冲掉。 */
     suspend fun renameSession(id: Long, title: String) {
         val session = chatDao.findSession(id) ?: return
