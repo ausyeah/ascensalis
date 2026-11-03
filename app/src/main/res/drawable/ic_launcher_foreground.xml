@@ -2,10 +2,11 @@
 <!--
   启动图标前景（v0.0.98）：与应用内标志同一枚「书峰」，白标黑底。
 
-  为什么是矢量替换掉那张 PNG：自适应图标在 API 26+ 只认这一个前景，
-  旧 PNG 是给 API 25 以下准备的，而 minSdk 就是 26——它早就没被用过了。
+  矢量替换掉那张 PNG：自适应图标在 API 26+ 只认这一个前景，
+  旧 PNG 是给 API 25 以下准备的，而 minSdk 就是 26——它从未被用过。
   缩放 0.62 是为了让 96 视口的标志整体落在自适应图标 66dp 的安全圆内，
-  否则圆形遮罩会把外环切掉一段。
+  否则圆形遮罩会把外环切掉一段。路径与 ic_app_mark.xml 严格同步——
+  改了应用内标志不同步这里，桌面上就是另一枚标志。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -24,9 +25,15 @@
             android:strokeWidth="2.5" />
         <path
             android:fillColor="#FFFFFFFF"
-            android:pathData="M48,26 L70,54 L70,66 L48,58 L26,66 L26,54 Z" />
+            android:pathData="M44.5,16.5 L48,21.5 L51.5,16.5 L51.5,30.5 L44.5,30.5 Z" />
         <path
             android:fillColor="#FFFFFFFF"
-            android:pathData="M48,17.5 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+            android:pathData="M48,31.5 L18,66 Q33,68.5 47,68 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M48,31.5 L78,66 Q63,68.5 49,68 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M24,68 Q48,74.5 72,68 L72,72 Q48,80.5 24,72 Z" />
     </group>
 </vector>
