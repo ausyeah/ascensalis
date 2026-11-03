@@ -359,16 +359,27 @@ fun CaptureScreen(
         )
     }
     Box(modifier = Modifier.fillMaxSize().background(CaptureScrim)) {
-        // 顶部操作栏（v0.0.80）：关闭（左侧）、闪光灯与前后摄（右侧），极简半透明磨砂
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        // 竖向流：顶部操作栏 / 取景器 / 底部操作区，三者是**兄弟节点**。
+        //
+        // 为什么不再是「各自 align + 硬编码 top」：v0.0.90 之前取景器卡片
+        // 用 `.align(TopCenter).fillMaxSize().padding(top = 68.dp)` 定位，
+        // 那个 68dp 是照着「状态栏 14dp + 顶栏 54dp」手算出来的，而状态栏
+        // 高度由系统说了算（带挖孔的机器实测能到 42dp）。用户手机上顶栏
+        // 底缘落在 96dp，卡片顶缘仍钉死在 68dp——三颗磨砂圆钮被不透明
+        // 的预览盖掉 28dp，只剩顶部一小截，看着就是「顶部 UI 被切一刀」。
+        //
+        // 改成 Column 后这种重叠在结构上不可能发生：卡片只拿 weight(1f)，
+        // 即顶栏与底栏剩下的高度，谁高谁矮都自动让位，不需要魔法数。
+        Column(modifier = Modifier.fillMaxSize()) {
+            // 顶部操作栏（v0.0.80）：关闭（左侧）、闪光灯与前后摄（右侧），极简半透明磨砂
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
             FrostyCircleButton(
                 onClick = {
                     if (batchActive) {
@@ -438,19 +449,14 @@ fun CaptureScreen(
             // 预览与网格都裁在卡片内——网格铺满全屏时，参考线会飘到
             // 底部控制区上方，视觉上散成一片；裁进卡片才像「一个取景框」。
             //
-            // 高度用「屏高 - 底部操作区预留」而不是 weight：底部控制区是
-            // 这个 Box 的**兄弟节点**（它要靠 align 贴在底边），weight 只
-            // 在 Column/Row 作用域里存在。控制区高度固定，预留一个常量即可。
+            // 高度走 weight(1f) 而不是「屏高减预留」：卡片此刻是 Column 的
+            // 子节点，顶栏和底栏都是它的兄弟，剩下的空间天然就是它的，
+            // 不可能压到任何一侧。
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxSize()
-                    .padding(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 68.dp,
-                        bottom = BottomAreaReserve
-                    )
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color.Black)
                     .border(1.dp, ViewfinderBorder, RoundedCornerShape(24.dp))
@@ -470,42 +476,19 @@ fun CaptureScreen(
                 ViewfinderCorners(modifier = Modifier.fillMaxSize())
             }
         } else {
-            CameraPermissionRequest(
-                onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) },
-                onOpenSettings = { openAppSettings(context) },
-                onBack = onBack
-            )
-        }
-
-        if (errorText != null) {
-            CapturePill(
-                modifier = Modifier.align(Alignment.Center),
-                container = MaterialTheme.colorScheme.errorContainer
-            ) {
-                Text(
-                    text = errorText.orEmpty(),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodySmall
+            // 没权限时占同一个格子：卡片多大这块就多大，底部操作区位置不变。
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                CameraPermissionRequest(
+                    onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                    onOpenSettings = { openAppSettings(context) },
+                    onBack = onBack
                 )
-            }
-        }
-
-        if (importing) {
-            CapturePill(modifier = Modifier.align(Alignment.Center)) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp
-                )
-                Spacer(Modifier.size(10.dp))
-                Text(stringResource(R.string.gallery_copying), color = Color.White)
             }
         }
 
         // ---------------------------------------------------------- 底部操作区（v0.0.80 极简重构）
         Column(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(horizontal = 24.dp)
@@ -513,7 +496,9 @@ fun CaptureScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = if (isChatPurpose) "拍摄题目或解题过程，支持连拍" else "对准题目，光线充足识别更准",
+                text = stringResource(
+                    if (isChatPurpose) R.string.capture_hint_chat else R.string.capture_hint_question
+                ),
                 color = Color.White.copy(alpha = 0.65f),
                 style = MaterialTheme.typography.labelMedium
             )
@@ -666,6 +651,35 @@ fun CaptureScreen(
                 }
             }
         }
+        }
+
+        // 悬浮提示：错误 / 相册导入中。必须是上面那个 Column 的**兄弟**而不是
+        // 子节点——它们是盖在取景器上的浮层，塞进 Column 会被当成普通一列
+        // 排下来，挤占取景器高度。放在 Column 之后声明，绘制次序也在其上。
+        if (errorText != null) {
+            CapturePill(
+                modifier = Modifier.align(Alignment.Center),
+                container = MaterialTheme.colorScheme.errorContainer
+            ) {
+                Text(
+                    text = errorText.orEmpty(),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+
+        if (importing) {
+            CapturePill(modifier = Modifier.align(Alignment.Center)) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.size(10.dp))
+                Text(stringResource(R.string.gallery_copying), color = Color.White)
+            }
+        }
     }
 }
 
@@ -715,14 +729,6 @@ private val CaptureScrim = Color(0xFF14151A)
 
 /** 取景器描边：白色 8% 不透明度，细到不抢内容，又足以勾出卡片边界。 */
 private val ViewfinderBorder = Color.White.copy(alpha = 0.08f)
-
-/**
- * 底部操作区的高度预留（dp）。
- *
- * 引导语 ~20 + 控制排 44 + 快门 76 + 间距 ~50 ≈ 190，取 210 留余量。
- * 取景器卡片高度 = 屏高 - 这个值，两者正好首尾相接不重叠。
- */
-private val BottomAreaReserve = 156.dp
 
 /**
  * 取景器四角的 L 形角标。

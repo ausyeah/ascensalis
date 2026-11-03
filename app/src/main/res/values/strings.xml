@@ -78,6 +78,8 @@
     <string name="capture_permission_grant">去授权</string>
     <string name="capture_permission_settings">打开系统设置</string>
     <string name="capture_failed">拍照失败，请重试</string>
+    <string name="capture_hint_question">对准题目，光线充足识别更准</string>
+    <string name="capture_hint_chat">拍摄题目或解题过程，支持连拍</string>
     <string name="capture_ocr_off">关闭</string>
     <string name="capture_ocr_light">轻度</string>
     <string name="capture_ocr_standard">标准</string>
