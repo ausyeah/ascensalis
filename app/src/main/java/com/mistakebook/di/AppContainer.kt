@@ -488,22 +488,17 @@ class AppContainer(context: Context) {
     var pendingChatAttachmentPath: String? by mutableStateOf(null)
 
     /**
-     * 功能入口带进会话的**隐藏指令**（v0.0.98）。
+     * 功能入口的交接包（v0.0.98）：目标会话 + 隐藏指令 + 拍照/自动发送意图。
      *
-     * 以 SYSTEM 消息写进会话（与题目上下文同一机制），模型看得见、界面不显示——
-     * 用户点「拍题讲解」，输入框里不该凭空多出一段他没写过的话。
-     * 会话首次装载时消费并置空。
+     * 绑定 [PendingTool.sessionId] 是审查修出来的：入口先建会话再写标志，
+     * 而屏幕上可能还挂着**上一条**（往往是空的）会话——不绑 id 的话，
+     * 旧屏的 LaunchedEffect 会抢先把指令注进旧会话并清掉标志，
+     * 新会话一条指令都没有。
+     *
+     * 生命周期：指令在会话装载时消费（置 null，但保留其余意图）；
+     * 自动发送完成或用户手动发送时整包清掉。
      */
-    var pendingChatInstruction: String? by mutableStateOf(null)
-
-    /**
-     * 拍题 / 作文批改这类「要先拍照」的入口置真：对话页装载后自动拉起相机，
-     * 拍完裁切回来、附件就绪后自动发送——中间不需要用户再点一次发送。
-     */
-    var pendingChatAutoSend: Boolean by mutableStateOf(false)
-
-    /** 作文批改的拍摄提示：两段式（先题目后作文），覆盖默认的对话拍摄提示。 */
-    var captureHintEssay: Boolean by mutableStateOf(false)
+    var pendingTool: PendingTool? by mutableStateOf(null)
 
     /**
      * 对话连拍（T2）已裁完成果的暂存队列。
@@ -568,3 +563,14 @@ class AppContainer(context: Context) {
         const val LLM_PLACEHOLDER_BASE_URL = "https://placeholder.invalid/"
     }
 }
+
+/** 功能入口的交接包，见 [AppContainer.pendingTool]。 */
+data class PendingTool(
+    val sessionId: Long,
+    /** 以 SYSTEM 消息注入的隐藏指令；装载后置 null，其余意图继续有效。 */
+    val instruction: String?,
+    /** 要先拍照：对话页就绪后自动拉起相机，拍完自动发送。 */
+    val autoSend: Boolean,
+    /** 作文批改的两段式拍摄提示（先题目后作文）。 */
+    val essay: Boolean
+)

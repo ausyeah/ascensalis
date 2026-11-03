@@ -217,7 +217,11 @@ internal fun MessageBubble(
     // 免得用户以为 AI 莫名其妙先说了一段，也免得整块原文铺在对话最前面
     // ——每次进会话都要先滑过几十行才看到自己的问题。
     if (isInjected) {
-        QuestionContextCard(content = message.content, mathRenderer = mathRenderer)
+        // 只有「题目上下文」渲染成卡片；功能入口的隐藏指令（【…模式】开头、
+        // 无元信息）不给用户看——它是发给模型的规则，展开读到的只会是困惑。
+        if (QuestionContext.parse(message.content).hasMeta) {
+            QuestionContextCard(content = message.content, mathRenderer = mathRenderer)
+        }
         return
     }
 

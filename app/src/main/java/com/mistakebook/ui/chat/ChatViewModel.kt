@@ -529,6 +529,10 @@ class ChatViewModel(
                 if (snap.finished) {
                     generationActive = false
                     trackedStreamingId = null
+                    // 冻结期间结束时，残留的「生成中」帧必须清掉：
+                    // 否则用户翻回底部，解冻补帧会把 isStreaming 重新置真、
+                    // 内容倒回旧帧，界面从此卡在「停止」上（审查发现）。
+                    heldStreamSnapshot = null
                     val overflow = isContextOverflowError(snap.errorText)
                     _state.value = current.copy(
                         isStreaming = false,
@@ -698,6 +702,11 @@ class ChatViewModel(
     fun installInstruction(text: String) {
         viewModelScope.launch {
             runCatching { repository.ensureToolInstruction(_state.value.sessionId, text) }
+                .onFailure {
+                    // 指令没落库，模型就永远收不到这个功能的规则——
+                    // 静默吞掉的话用户只会看到「AI 不按套路来」，无从排查
+                    Log.w(TAG, "功能指令写入失败", it)
+                }
         }
     }
 

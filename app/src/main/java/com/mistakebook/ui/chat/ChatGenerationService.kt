@@ -642,7 +642,7 @@ class ChatGenerationService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("正在生成回复…")
+            .setContentTitle(getString(R.string.chat_service_generating))
             .setContentText(getString(R.string.chat_service_background_hint))
             // 常驻、静默：它是用户主动发起的持续任务，不是一条「通知」
             .setOngoing(true)
@@ -654,7 +654,7 @@ class ChatGenerationService : Service() {
             .setOnlyAlertOnce(true)
             .addAction(
                 0,
-                "停止",
+                getString(R.string.chat_stop),
                 PendingIntent.getService(
                     this,
                     REQUEST_STOP,

@@ -110,8 +110,8 @@ class ChatToolsTest {
         listOf(
             "app_signature",
             "chat_history_title",
-            "chat_pin",
-            "chat_unpin",
+            "swipe_pin_action",
+            "swipe_unpin_action",
             "chat_pinned_badge",
             "chat_temporary_new"
         ).forEach { name ->

@@ -12,6 +12,9 @@
     <string name="swipe_delete_confirm">确认删除</string>
     <string name="edit_audit">检查</string>
     <string name="action_undo">撤销</string>
+    <string name="chat_session_deleted">会话已删除</string>
+    <!-- 前台服务通知（v0.0.98 收进资源）：标题与停止按钮 -->
+    <string name="chat_service_generating">正在生成回复…</string>
     <string name="swipe_delete_action">删除这道题</string>
     <string name="action_copy">复制</string>
     <string name="action_close">关闭</string>
@@ -540,12 +543,9 @@
     <string name="swipe_pin_action">置顶</string>
     <string name="swipe_unpin_action">取消置顶</string>
     <string name="capture_hint_essay">先拍题目要求，再拍作文，拍完点完成</string>
-    <string name="chat_tool_ready">可用</string>
     <string name="chat_tool_needs_llm">需配模型</string>
     <string name="chat_tool_needs_ocr">需配识别</string>
     <string name="chat_history_title">历史对话</string>
-    <string name="chat_pin">置顶</string>
-    <string name="chat_unpin">取消置顶</string>
     <string name="chat_pinned_badge">置顶</string>
     <!-- 应用签名（v0.0.96）：空会话中央标志下方那一行，就是本应用的名字 -->
     <string name="app_signature">Ascensalis</string>

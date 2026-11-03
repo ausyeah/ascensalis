@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.di.AppContainer
+import com.mistakebook.di.PendingTool
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.ui.common.SwipeRevealSpring
@@ -223,10 +224,13 @@ internal fun ChatHistorySheet(
                         scope.launch { drawerState.close() }
                         // 指令与「要不要先拍照」经容器交接（与相机拍照同一套惯例）；
                         // 需要拍照的入口由对话页自动拉起相机，拍完自动发送。
-                        container.pendingChatInstruction = tool.instruction
-                        container.pendingChatAutoSend = tool.needsCamera
-                        container.captureHintEssay = tool == ChatTool.ESSAY
                         viewModel.startFreeSession { sessionId ->
+                            container.pendingTool = PendingTool(
+                                sessionId = sessionId,
+                                instruction = tool.instruction,
+                                autoSend = tool.needsCamera,
+                                essay = tool == ChatTool.ESSAY
+                            )
                             onOpenSession(sessionId, null)
                         }
                     }
@@ -262,6 +266,9 @@ internal fun ChatHistorySheet(
             }
 
             items(state.items, key = { it.session.id }) { item ->
+                // 文案在组合期取好：showSnackbar 的回调不是组合上下文
+                val deletedText = stringResource(R.string.chat_session_deleted)
+                val undoText = stringResource(R.string.action_undo)
                 SwipeableChatRow(
                     item = item,
                     // 必须传 sessionId，不只是 questionId：
@@ -280,8 +287,8 @@ internal fun ChatHistorySheet(
                         viewModel.delete(sessionId)
                         scope.launch {
                             val result = snackbarHostState.showSnackbar(
-                                message = "会话已删除",
-                                actionLabel = "撤销",
+                                message = deletedText,
+                                actionLabel = undoText,
                                 duration = androidx.compose.material3.SnackbarDuration.Short
                             )
                             if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {

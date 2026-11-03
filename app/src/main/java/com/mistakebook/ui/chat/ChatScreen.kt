@@ -130,6 +130,7 @@ import com.mistakebook.data.chat.ChatSearchProvider
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.di.AppContainer
+import com.mistakebook.di.PendingTool
 import com.mistakebook.domain.ChatRole
 import com.mistakebook.domain.MessageStatus
 import com.mistakebook.ui.common.ApiKeyRequiredDialog
@@ -322,23 +323,24 @@ fun ChatScreen(
     //
     // 还要判 input 为空：恢复了历史草稿的会话不能再被预填覆盖，
     // 否则用户上次打的字照样会丢（只是丢的方式换了）。
-    // 功能入口的隐藏指令（v0.0.98）：会话就绪且一条消息都没有时落成 SYSTEM 消息。
-    // 只对全新会话生效——历史会话里点功能入口，不该悄悄改写那次对话的规则。
-    val pendingInstruction = container.pendingChatInstruction
-    LaunchedEffect(pendingInstruction, state.sessionId, state.loading) {
-        if (pendingInstruction == null) return@LaunchedEffect
-        if (state.sessionId == 0L || state.loading) return@LaunchedEffect
+    // 功能入口的交接包按 sessionId 认领（v0.0.98 审查修正）：屏幕上可能
+    // 还挂着上一条会话，不认 id 的话指令会注错地方。
+    val pendingTool = container.pendingTool
+    LaunchedEffect(pendingTool, state.sessionId, state.loading) {
+        val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
+        if (state.loading) return@LaunchedEffect
         if (state.messages.isNotEmpty()) return@LaunchedEffect
-        container.pendingChatInstruction = null
-        viewModel.installInstruction(pendingInstruction)
+        // 只消费指令本身；拍照/自动发送意图留到拍完回来再用
+        container.pendingTool = mine.copy(instruction = null)
+        viewModel.installInstruction(mine.instruction.orEmpty())
     }
 
     // 拍题 / 作文批改要先拍照：会话就绪后自动拉起相机，一次组合只拉一次。
-    val autoSendPending = container.pendingChatAutoSend
     var cameraAutoOpened by rememberSaveable(state.sessionId) { mutableStateOf(false) }
-    LaunchedEffect(autoSendPending, state.sessionId, state.loading) {
-        if (!autoSendPending || cameraAutoOpened) return@LaunchedEffect
-        if (state.sessionId == 0L || state.loading) return@LaunchedEffect
+    LaunchedEffect(pendingTool, state.sessionId, state.loading) {
+        val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
+        if (!mine.autoSend || cameraAutoOpened) return@LaunchedEffect
+        if (state.loading) return@LaunchedEffect
         if (state.pendingAttachments.isNotEmpty()) return@LaunchedEffect
         cameraAutoOpened = true
         onOpenCamera()
@@ -346,13 +348,22 @@ fun ChatScreen(
 
     // 拍完裁切回来、附件就绪即自动发送——「拍完直接发送」就该一步到位，
     // 再让用户按一次发送等于把刚才省掉的步骤又加回去。
-    LaunchedEffect(autoSendPending, state.pendingAttachments) {
-        if (!autoSendPending) return@LaunchedEffect
+    // 两个审查修出来的漏洞：
+    // - 有附件准备**失败**时 all{READY} 永不成立，发送意图必须撤防，
+    //   否则之后随手选一张图就会被静默发出去；
+    // - 用户手动按了发送，意图也应作废。
+    LaunchedEffect(pendingTool, state.pendingAttachments) {
+        val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
+        if (!mine.autoSend) return@LaunchedEffect
         val pending = state.pendingAttachments
         if (pending.isEmpty()) return@LaunchedEffect
-        if (pending.all { it.status == AttachmentStatus.READY }) {
-            container.pendingChatAutoSend = false
-            viewModel.send()
+        when {
+            pending.any { it.status == AttachmentStatus.FAILED } ->
+                container.pendingTool = null
+            pending.all { it.status == AttachmentStatus.READY } -> {
+                container.pendingTool = null
+                viewModel.send()
+            }
         }
     }
 
@@ -544,9 +555,12 @@ fun ChatScreen(
                     // 标志 + 签名把「这是哪儿」说清楚，比任何引导浮层都轻，也不占状态。
                     ChatEmptyState(
                         onSnapAsk = {
-                            container.pendingChatInstruction = ChatToolPrompts.ASK
-                            container.pendingChatAutoSend = true
-                            container.captureHintEssay = false
+                            container.pendingTool = PendingTool(
+                                sessionId = state.sessionId,
+                                instruction = ChatToolPrompts.ASK,
+                                autoSend = true,
+                                essay = false
+                            )
                         }
                     )
                 } else {
@@ -640,7 +654,11 @@ fun ChatScreen(
                 ) },
                 onRemoveLibraryInjection = viewModel::removeLibraryInjection,
                 onTextChange = viewModel::onInputChange,
-                onSend = viewModel::send,
+                onSend = {
+                    // 手动发送 = 自动发送意图作废（审查修正：否则稍后选图会被静默发出）
+                    container.pendingTool = null
+                    viewModel.send()
+                },
                 onStop = viewModel::stop,
                 // 流式中打了字才出现的「递上去」：停当前生成 + 发这一轮
                 onSteer = viewModel::steer,

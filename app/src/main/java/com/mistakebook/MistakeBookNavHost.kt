@@ -20,6 +20,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import android.util.Log
 import com.mistakebook.di.AppContainer
+import com.mistakebook.di.PendingTool
 import com.mistakebook.ui.capture.CaptureScreen
 import com.mistakebook.data.chat.ChatToolPrompts
 import com.mistakebook.ui.chat.ChatScreen
@@ -238,9 +239,12 @@ fun MistakeBookNavHost(
                         // 一个已经存在的会话来落地成果。指令进会话、自动开相机、
                         // 拍完自动发送，三件事都由对话页按容器标志接管。
                         val id = container.chatRepository.openFreeSession()
-                        container.pendingChatInstruction = ChatToolPrompts.ASK
-                        container.pendingChatAutoSend = true
-                        container.captureHintEssay = false
+                        container.pendingTool = PendingTool(
+                            sessionId = id,
+                            instruction = ChatToolPrompts.ASK,
+                            autoSend = true,
+                            essay = false
+                        )
                         navController.navigate(Routes.chat(null, id))
                     }
                 },
