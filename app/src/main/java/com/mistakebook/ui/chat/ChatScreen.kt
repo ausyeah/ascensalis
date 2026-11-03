@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,7 +61,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -139,6 +139,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.ui.platform.LocalContext
@@ -146,6 +147,7 @@ import androidx.core.content.FileProvider
 import java.io.File
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.ui.res.painterResource
 
 /**
  * 会话相册一次最多选几张（v0.0.52 多选）。
@@ -464,6 +466,16 @@ fun ChatScreen(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(stringResource(R.string.chat_loading), style = MaterialTheme.typography.bodyMedium)
                     }
+                } else if (showChatEmptyState(state.loading, state.messages.size)) {
+                    // 空会话中央原来是纯白一块：用户进来第一眼不知道这页能干嘛。
+                    // 图标 + 一句话把「这是哪儿、能做什么」说清楚，
+                    // 比任何引导浮层都轻，也不占状态。
+                    ChatEmptyState(
+                        greeting = stringResource(
+                            if (questionId != null) R.string.chat_empty_greeting_question
+                            else R.string.chat_empty_greeting_free
+                        )
+                    )
                 } else {
                     MessageList(
                         state = state,
@@ -603,6 +615,54 @@ fun ChatScreen(
  */
 internal fun newConversationTarget(currentSessionId: Long?, resolvedSessionId: Long): Long? =
     resolvedSessionId.takeIf { it != currentSessionId }
+
+
+/**
+ * 中央空状态什么时候出场：会话读完了，且一条消息都没有。
+ *
+ * 纯函数（单测见 ChatEmptyStateTest）。`loading` 必须挡在前面——
+ * 进会话要先读数据库，这几百毫秒里消息数也是 0，
+ * 不挡的话用户会先看见鲸鱼闪一下再跳回加载中。
+ */
+internal fun showChatEmptyState(loading: Boolean, messageCount: Int): Boolean =
+    !loading && messageCount == 0
+
+
+/**
+ * 空会话的中央状态：一张剪影插画 + 一句问候。
+ *
+ * 鲸鱼资源是**纯白填充 + alpha** 的单色剪影，颜色靠运行时 tint 上——
+ * 亮暗主题各取各的强调蓝，不必为两套主题各存一张图，
+ * 也不会往界面里写死色值（ThemeHardcodeContractTest 盯着呢）。
+ */
+@Composable
+private fun ChatEmptyState(greeting: String, modifier: Modifier = Modifier) {
+    val whale = painterResource(R.drawable.chat_empty_whale)
+    Column(
+        modifier = modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Image(
+            painter = whale,
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary),
+            modifier = Modifier
+                // 半屏宽封顶 240dp：图太大就成了海报，太小又撑不起空状态
+                .fillMaxWidth(0.5f)
+                .widthIn(max = 240.dp)
+                // 高度按素材自身比例反推，而不是写死一个 dp——以后换图，
+                // 它不会把新图压扁，也不会在图上留一条空白
+                .aspectRatio(whale.intrinsicSize.let { it.width / it.height })
+        )
+        Spacer(Modifier.height(20.dp))
+        Text(
+            text = greeting,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
 
 
 @Composable

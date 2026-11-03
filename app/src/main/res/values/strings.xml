@@ -497,6 +497,9 @@
     <string name="chat_rename_hint">对话名称</string>
     <string name="chat_rename_save">保存</string>
     <string name="chat_new_conversation">开启新对话</string>
+    <!-- 空会话中央状态：图标下面那一句问候 -->
+    <string name="chat_empty_greeting_free">欢迎回来，想从哪里开始？</string>
+    <string name="chat_empty_greeting_question">这道题哪里没懂？直接问</string>
     <string name="chat_cancel">取消</string>
     <string name="chat_confirm">确定</string>
     <string name="chat_untitled">未命名对话</string>
