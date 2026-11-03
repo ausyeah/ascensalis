@@ -22,7 +22,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,7 +40,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -111,9 +109,12 @@ import android.content.ClipData
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import com.mistakebook.R
@@ -468,14 +469,8 @@ fun ChatScreen(
                     }
                 } else if (showChatEmptyState(state.loading, state.messages.size)) {
                     // 空会话中央原来是纯白一块：用户进来第一眼不知道这页能干嘛。
-                    // 图标 + 一句话把「这是哪儿、能做什么」说清楚，
-                    // 比任何引导浮层都轻，也不占状态。
-                    ChatEmptyState(
-                        greeting = stringResource(
-                            if (questionId != null) R.string.chat_empty_greeting_question
-                            else R.string.chat_empty_greeting_free
-                        )
-                    )
+                    // 标志 + 签名把「这是哪儿」说清楚，比任何引导浮层都轻，也不占状态。
+                    ChatEmptyState()
                 } else {
                     MessageList(
                         state = state,
@@ -631,37 +626,45 @@ internal fun showChatEmptyState(loading: Boolean, messageCount: Int): Boolean =
 
 
 /**
- * 空会话的中央状态：一张剪影插画 + 一句问候。
+ * 空会话的中央状态：应用标志 + 签名。
  *
- * 鲸鱼资源是**纯白填充 + alpha** 的单色剪影，颜色靠运行时 tint 上——
- * 亮暗主题各取各的强调蓝，不必为两套主题各存一张图，
- * 也不会往界面里写死色值（ThemeHardcodeContractTest 盯着呢）。
+ * ## 为什么换掉那条蓝色金鱼（v0.0.96 用户拍板）
+ * 蓝色金鱼是「有颜色的插画」，而空状态是用户见到这个产品的第一眼：
+ * - 颜色跟强调色走，用户一换主题色（设置里有 8 档），首页标志也跟着变，
+ *   品牌就没了固定形象；
+ * - 深色主题下那条亮蓝尤其扎眼，和整页「中性锌灰」的克制完全不搭。
+ *
+ * 现在只做**黑白**：矢量标志 + 一行签名。颜色取 `onSurface`，
+ * 浅色主题下是墨黑、深色主题下是纸白——同一枚标志，两种纸。
+ *
+ * 签名用 Serif + Italic + 宽字距：系统自带字体里最接近「行楷英语字样」的
+ * 组合，而且不打包字体文件（仓库硬性规则：不加依赖、不涨包体）。
+ * 这里**刻意不跟随全局字体设置**——签名是品牌标识，不该被用户的正文偏好改写。
  */
 @Composable
-private fun ChatEmptyState(greeting: String, modifier: Modifier = Modifier) {
-    val whale = painterResource(R.drawable.chat_empty_whale)
+private fun ChatEmptyState(modifier: Modifier = Modifier) {
+    val ink = MaterialTheme.colorScheme.onSurface
     Column(
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Image(
-            painter = whale,
+            painter = painterResource(R.drawable.ic_app_mark),
             contentDescription = null,
-            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary),
-            modifier = Modifier
-                // 半屏宽封顶 240dp：图太大就成了海报，太小又撑不起空状态
-                .fillMaxWidth(0.5f)
-                .widthIn(max = 240.dp)
-                // 高度按素材自身比例反推，而不是写死一个 dp——以后换图，
-                // 它不会把新图压扁，也不会在图上留一条空白
-                .aspectRatio(whale.intrinsicSize.let { it.width / it.height })
+            colorFilter = ColorFilter.tint(ink),
+            modifier = Modifier.size(96.dp)
         )
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(18.dp))
         Text(
-            text = greeting,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface
+            text = stringResource(R.string.app_signature),
+            color = ink,
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontFamily = FontFamily.Serif,
+                fontStyle = FontStyle.Italic,
+                fontWeight = FontWeight.Normal,
+                letterSpacing = 2.5.sp
+            )
         )
     }
 }

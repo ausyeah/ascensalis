@@ -1,0 +1,128 @@
+package com.mistakebook.ui.chat
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+
+/**
+ * 空会话第一眼的品牌契约（v0.0.96）。
+ *
+ * 用户的原话：「用黑白为本应用制作一个 logo，替换掉当前对话页面没有说话时
+ * 中间那个蓝色的金鱼」「下方配上我英文名字的签名……这个签名就是这个应用的名字」。
+ *
+ * 这类改动没有可断言的运行时行为——它退化的方式极其安静：
+ * 有人把 tint 改回 `colorScheme.primary`（品牌色又跟着主题走）、
+ * 有人把签名写成普通正文样式（品牌标识变成一句普通的话）、
+ * 有人把底部提示改回「问点什么…」（用户要的那句话没了）。
+ * 所以钉源码 + 资源，三条一起守。
+ */
+class ChatEmptyBrandTest {
+
+    @Test
+    fun `标志必须是纯白矢量而不是位图`() {
+        val mark = readSource("src/main/res/drawable/ic_app_mark.xml")
+
+        assertTrue("标志必须是 <vector>：位图换主题色时发灰、放大就糊", mark.contains("<vector"))
+        assertFalse("标志不许再用位图", mark.contains("<bitmap"))
+
+        // 纯白填充 + 运行时 tint：颜色是界面给的，不是画在素材里的。
+        // 逐个取出来验，而不是「文件里出现过白」——后者就算混进一个红色也照样通过。
+        val colors = Regex("android:(?:fill|stroke)Color=\"(#[0-9A-Fa-f]{8})\"")
+            .findAll(mark)
+            .map { it.groupValues[1] }
+            .toList()
+        assertTrue("标志里必须有填充或描边", colors.isNotEmpty())
+        colors.forEach { color ->
+            assertTrue(
+                "标志必须是单色（纯白或全透明），实际出现 $color —— 混入任何别的颜色，tint 就染不干净了",
+                color == "#FFFFFFFF" || color == "#00000000"
+            )
+        }
+    }
+
+    @Test
+    fun `旧的鲸鱼位图已删除`() {
+        val candidates = listOf(
+            File("src/main/res/drawable-nodpi/chat_empty_whale.png"),
+            File("app/src/main/res/drawable-nodpi/chat_empty_whale.png")
+        )
+        assertTrue(
+            "chat_empty_whale.png 已不再被任何界面引用，留着就是白白占包体",
+            candidates.none { it.exists() }
+        )
+        assertFalse(
+            "源码里不许再有鲸鱼引用",
+            readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt").contains("chat_empty_whale")
+        )
+    }
+
+    @Test
+    fun `空状态用 onSurface 染色而不是强调色`() {
+        val screen = readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
+        val start = screen.indexOf("private fun ChatEmptyState(")
+        assertTrue("ChatEmptyState 必须存在", start >= 0)
+        val body = screen.substring(start, screen.indexOf("\n}", start))
+
+        assertTrue("必须渲染新的矢量标志", body.contains("R.drawable.ic_app_mark"))
+        assertTrue("标志必须取当前主题的墨色", body.contains("ColorFilter.tint(ink)"))
+        assertTrue("墨色必须来自 onSurface（黑白两套都成立）", body.contains("colorScheme.onSurface"))
+        assertFalse(
+            "不许再 tint 强调色——那会让品牌色跟着用户换的 8 档主题色一起变",
+            body.contains("ColorFilter.tint(MaterialTheme.colorScheme.primary)")
+        )
+    }
+
+    @Test
+    fun `签名就是这个应用的名字且用书法感的排版`() {
+        val strings = readSource("src/main/res/values/strings.xml")
+        assertTrue(
+            "签名文案必须在资源里",
+            strings.contains("<string name=\"app_signature\">Ascensalis</string>")
+        )
+
+        val screen = readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
+        val start = screen.indexOf("private fun ChatEmptyState(")
+        val body = screen.substring(start, screen.indexOf("\n}", start))
+        assertTrue("必须显示签名", body.contains("stringResource(R.string.app_signature)"))
+        // 系统自带字体里最接近行楷英语字样的组合；也保证不打包字体文件
+        assertTrue("签名用衬线体", body.contains("fontFamily = FontFamily.Serif"))
+        assertTrue("签名用斜体", body.contains("fontStyle = FontStyle.Italic"))
+        assertTrue("签名要有字距，否则衬线斜体挤在一起像正文", body.contains("letterSpacing = 2.5.sp"))
+    }
+
+    @Test
+    fun `底部提示是用户要的那句话`() {
+        val strings = readSource("src/main/res/values/strings.xml")
+        assertTrue(
+            "输入栏提示必须是「你想问我什么问题」",
+            strings.contains("<string name=\"chat_input_hint\">你想问我什么问题</string>")
+        )
+        // 原来的「问点什么…（可附图或文档）」已被用户点名替换
+        assertFalse(strings.contains("问点什么…"))
+    }
+
+    @Test
+    fun `空状态不再是一句问候`() {
+        val strings = readSource("src/main/res/values/strings.xml")
+        // 签名取代了问候语：两条问候文案已无用，留着只会让以后的译者以为还在用
+        assertFalse("chat_empty_greeting_free 应已删除", strings.contains("chat_empty_greeting_free"))
+        assertFalse("chat_empty_greeting_question 应已删除", strings.contains("chat_empty_greeting_question"))
+        assertFalse(
+            "源码里不许再引用问候文案",
+            readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt").contains("chat_empty_greeting")
+        )
+    }
+
+    private fun readSource(path: String): String {
+        val candidates = listOf(
+            File(path),
+            File("../$path"),
+            File(path.removePrefix("app/")),
+            File("../" + path.removePrefix("app/"))
+        )
+        val file = candidates.firstOrNull { it.exists() }
+            ?: throw IllegalArgumentException("Cannot find file: $path among $candidates")
+        return file.readText()
+    }
+}
