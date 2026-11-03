@@ -24,7 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -127,10 +127,12 @@ fun DetailScreen(
                 },
                 actions = {
                     if (question != null) {
-                        // AI 对话入口：放在最前面，因为它是对这道题最常用的后续动作
+                        // AI 对话入口：放在最前面，因为它是对这道题最常用的后续动作。
+                        // 图标用对话气泡而不是 AutoAwesome（星星）：入口要能让用户
+                        // 一眼认出「这是去聊天的」，魔法星星只表示「AI」这一个侧面。
                         IconButton(onClick = { onOpenChat(question.id) }) {
                             Icon(
-                                Icons.Default.AutoAwesome,
+                                Icons.Default.Chat,
                                 contentDescription = stringResource(R.string.chat_title_question)
                             )
                         }

@@ -526,6 +526,9 @@
     <string name="chat_jump_to_bottom">回到底部</string>
 
     <string name="chat_context_header">题目上下文</string>
+    <string name="chat_question_card_expand">查看完整题目</string>
+    <string name="chat_question_card_collapse">收起题目</string>
+    <string name="chat_question_card_knowledge">知识点：%1$s</string>
 
     <string name="chat_attach">添加附件</string>
     <string name="chat_pick_model">选择模型</string>

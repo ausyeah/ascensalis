@@ -1,5 +1,6 @@
 package com.mistakebook.data.chat
 
+import com.mistakebook.domain.ErrorReason
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,7 +53,7 @@ class ChatPromptsTest {
             subjectName = "数学",
             knowledgePoints = listOf("数列"),
             difficulty = 3,
-            errorReasonName = "概念混淆"
+            errorReasonLabel = "概念混淆"
         )
         assertTrue(text.contains("题干内容"))
         assertTrue(text.contains("我记录的答案"))
@@ -60,5 +61,56 @@ class ChatPromptsTest {
         assertTrue(text.contains("数列"))
         assertTrue(text.contains("概念混淆"))
         assertFalse(text.contains("【选项】"))
+    }
+
+    /**
+     * 错因必须是中文档位，不能是枚举名。
+     *
+     * 调用方曾经直接送 `question.errorReason.name`，于是「记录中的错因：
+     * CONCEPT」这句原样进了提示词、也原样进了界面的「题目上下文」——
+     * 用户截图里就能看到那一行。枚举名对模型是纯噪声，对用户是乱码。
+     */
+    @Test
+    fun questionContextTakesReasonLabelNotEnumName() {
+        val text = ChatPrompts.questionContext(
+            title = "标题",
+            stem = "题干",
+            options = emptyList(),
+            answer = "",
+            analysis = "",
+            subjectName = "数学",
+            knowledgePoints = emptyList(),
+            difficulty = 3,
+            errorReasonLabel = ErrorReason.CONCEPT.label
+        )
+        assertTrue(text.contains("记录中的错因：概念不清"))
+        assertFalse(text.contains("CONCEPT"))
+    }
+
+    /**
+     * 开头/结尾那两句只给模型看，界面卡片要把它们剔掉。
+     *
+     * 卡片靠 [ChatPrompts.HEAD_INTRO] / [ChatPrompts.QUESTION_TAIL] 认这两句，
+     * 所以这里钉住「questionContext 确实以它们作边界」——改了文案而没同步
+     * 卡片的话，用户就会在题目卡片里看到一句给模型的话。
+     */
+    @Test
+    fun questionContextIsBracketedBySharedIntroAndTail() {
+        val text = ChatPrompts.questionContext(
+            title = "标题",
+            stem = "题干",
+            options = emptyList(),
+            answer = "A",
+            analysis = "",
+            subjectName = "数学",
+            knowledgePoints = emptyList(),
+            difficulty = 3,
+            errorReasonLabel = "粗心遗漏"
+        )
+        assertTrue(text.startsWith(ChatPrompts.HEAD_INTRO))
+        assertTrue(text.endsWith(ChatPrompts.QUESTION_TAIL))
+        // 中间必须留下题目本体
+        assertTrue(text.contains("标题：标题"))
+        assertTrue(text.contains("【题干】"))
     }
 }

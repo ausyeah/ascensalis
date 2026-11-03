@@ -76,7 +76,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -214,24 +213,11 @@ internal fun MessageBubble(
         return
     }
 
-    // 题目上下文那条是给模型看的，用一条低调的分隔样式展示，
-    // 免得用户以为 AI 莫名其妙先说了一段。
+    // 题目上下文那条是给模型看的：渲染成独立的「题目卡片」，
+    // 免得用户以为 AI 莫名其妙先说了一段，也免得整块原文铺在对话最前面
+    // ——每次进会话都要先滑过几十行才看到自己的问题。
     if (isInjected) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = stringResource(R.string.chat_context_header),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            RichText(
-                text = message.content,
-                mathRenderer = mathRenderer,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(6.dp))
-        }
+        QuestionContextCard(content = message.content, mathRenderer = mathRenderer)
         return
     }
 

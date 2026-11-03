@@ -681,7 +681,10 @@ class ChatRepository(
             subjectName = subjectName,
             knowledgePoints = knowledgePoints,
             difficulty = question.difficulty,
-            errorReasonName = question.errorReason.name
+            // 错因必须送中文档位：枚举名（CONCEPT/CALCULATION…）对模型是噪声，
+            // 而且会原样漏到界面的「题目上下文」里（用户截图里那一行
+            // 「记录中的错因： CONCEPT」就是这么来的）。
+            errorReasonLabel = question.errorReason.label
         )
     }
 

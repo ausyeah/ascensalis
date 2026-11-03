@@ -10,6 +10,22 @@ import com.mistakebook.domain.labelFor
  */
 object ChatPrompts {
     /**
+     * 题目上下文的开头一句。
+     *
+     * 它是**给模型的定向说明**，不是题目内容，所以界面上的「题目卡片」
+     * （`com.mistakebook.ui.chat.QuestionContext`）不展示它。抽成常量是为了
+     * 渲染端与解析端认同一句话，不会各写各的。
+     */
+    const val HEAD_INTRO = "以下是用户正在复习的一道错题："
+
+    /**
+     * 题目上下文的结尾一句，同样只给模型看。
+     *
+     * 与 [HEAD_INTRO] 成对：卡片把这两句剔掉，剩下的才是题目本身。
+     */
+    const val QUESTION_TAIL = "请基于以上内容回答用户的问题。"
+
+    /**
      * 手写过程批改指令（T13）。
      *
      * 注入位置：题目上下文之后（[questionContext] 拼好的同一段），
@@ -146,9 +162,14 @@ object ChatPrompts {
      * **只注入一次**（首条助手消息，`injected = true`），后续轮次靠 [com.mistakebook.domain.ChatRole.SYSTEM]
      * 消息一直带在上下文头部。
      *
+     * 界面上的「题目卡片」直接把这段原文拆成头部元信息 + 题目全文展示
+     * （见 `com.mistakebook.ui.chat.QuestionContext`），所以这里的
+     * [HEAD_INTRO] 与 [QUESTION_TAIL] 两处文案由双方共用：
+     * 改文案时两处一起变，不会出现「卡片里多了句给模型的话」。
+     *
      * @param options 题干选项；填空/解答题为空。
      * @param difficulty 1..5，转成中文档位。
-     * @param errorReason 错因枚举名，转成中文。
+     * @param errorReasonLabel 错因中文档位（枚举名对模型是噪声）。
      */
     fun questionContext(
         title: String,
@@ -159,17 +180,17 @@ object ChatPrompts {
         subjectName: String,
         knowledgePoints: List<String>,
         difficulty: Int,
-        errorReasonName: String
+        errorReasonLabel: String
     ): String {
         val sb = StringBuilder()
-        sb.appendLine("以下是用户正在复习的一道错题：")
+        sb.appendLine(HEAD_INTRO)
         if (title.isNotBlank()) sb.appendLine("标题：$title")
         if (subjectName.isNotBlank()) sb.appendLine("学科：$subjectName")
         if (knowledgePoints.isNotEmpty()) {
             sb.appendLine("知识点：${knowledgePoints.joinToString("、")}")
         }
         sb.appendLine("难度：${difficultyLabel(difficulty)}")
-        if (errorReasonName.isNotBlank()) sb.appendLine("记录中的错因：$errorReasonName")
+        if (errorReasonLabel.isNotBlank()) sb.appendLine("记录中的错因：$errorReasonLabel")
         sb.appendLine()
         sb.appendLine("【题干】")
         sb.appendLine(stem.ifBlank { "（空）" })
@@ -191,7 +212,7 @@ object ChatPrompts {
             sb.appendLine(analysis)
         }
         sb.appendLine()
-        sb.append("请基于以上内容回答用户的问题。")
+        sb.append(QUESTION_TAIL)
         return sb.toString().trim()
     }
 
