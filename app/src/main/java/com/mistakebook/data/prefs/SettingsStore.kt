@@ -116,6 +116,11 @@ class SettingsStore(context: Context) {
             visionProfileId = prefs[KEY_VISION_PROFILE],
             themeMode = ThemeMode.fromKey(prefs[KEY_THEME_MODE]),
             accentTone = AccentTone.fromKey(prefs[KEY_ACCENT_TONE]),
+            // 三个外观旋钮都是新增键：老用户库里没有，fromKey 一律回默认，
+            // 升级后界面一个字、一个圆角都不变。
+            fontScale = FontScale.fromKey(prefs[KEY_FONT_SCALE]),
+            font = AppFont.fromKey(prefs[KEY_FONT]),
+            cornerStyle = CornerStyle.fromKey(prefs[KEY_CORNER_STYLE]),
             networkMode = NetworkMode.fromKey(prefs[KEY_NETWORK_MODE]),
             reasoningEffort = ReasoningEffort.fromKey(prefs[KEY_REASONING_EFFORT]),
             // mineruModelVersion / ocrLanguage / forceOcr 已固定，不再从 prefs 读。
@@ -652,6 +657,15 @@ class SettingsStore(context: Context) {
     /** 设置自选主题色（v0.0.76）。 */
     suspend fun setAccentTone(tone: AccentTone) = editString(KEY_ACCENT_TONE, tone.name)
 
+    /** 设置全局字号倍数（v0.0.94）。写入即生效（主题随 settings Flow 重组）。 */
+    suspend fun setFontScale(scale: FontScale) = editString(KEY_FONT_SCALE, scale.name)
+
+    /** 设置全局字体（v0.0.94）。写入即生效。 */
+    suspend fun setFont(font: AppFont) = editString(KEY_FONT, font.name)
+
+    /** 设置全局圆角倍数（v0.0.94）。写入即生效。 */
+    suspend fun setCornerStyle(corner: CornerStyle) = editString(KEY_CORNER_STYLE, corner.name)
+
     /** 设置网络出口模式。写入即生效（NetworkRouter 每次建连前读）。 */
     suspend fun setNetworkMode(mode: NetworkMode) {
         val value = when (mode) {
@@ -723,6 +737,15 @@ class SettingsStore(context: Context) {
 
         /** 自选主题色（v0.0.76）：存枚举名，认不出回默认。 */
         val KEY_ACCENT_TONE = stringPreferencesKey("accent_tone")
+
+        /** 全局字号倍数（v0.0.94）：存枚举名，认不出回默认。 */
+        val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+
+        /** 全局字体（v0.0.94）：存枚举名，认不出回默认。 */
+        val KEY_FONT = stringPreferencesKey("app_font")
+
+        /** 全局圆角倍数（v0.0.94）：存枚举名，认不出回默认。 */
+        val KEY_CORNER_STYLE = stringPreferencesKey("corner_style")
 
         // ===== OCR 配置（v0.0.78） =====
         val KEY_OCR_PROVIDER = stringPreferencesKey("ocr_provider")

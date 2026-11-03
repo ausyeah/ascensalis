@@ -4,6 +4,9 @@ import android.content.ContentResolver
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mistakebook.data.prefs.AppFont
+import com.mistakebook.data.prefs.CornerStyle
+import com.mistakebook.data.prefs.FontScale
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.NetworkMode
 import com.mistakebook.data.prefs.ReasoningEffort
@@ -342,6 +345,21 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     /** 设置自选主题色（v0.0.76）。 */
     fun setAccentTone(tone: com.mistakebook.data.prefs.AccentTone) = viewModelScope.launch {
         store.setAccentTone(tone)
+    }
+
+    /** 设置全局字号倍数（v0.0.94）。写入即生效，全 App 一起变。 */
+    fun setFontScale(scale: FontScale) = viewModelScope.launch {
+        store.setFontScale(scale)
+    }
+
+    /** 设置全局字体（v0.0.94）。写入即生效。 */
+    fun setFont(font: AppFont) = viewModelScope.launch {
+        store.setFont(font)
+    }
+
+    /** 设置全局圆角倍数（v0.0.94）。写入即生效。 */
+    fun setCornerStyle(corner: CornerStyle) = viewModelScope.launch {
+        store.setCornerStyle(corner)
     }
 
     // ===== OCR 配置（v0.0.78） =====

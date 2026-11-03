@@ -2,9 +2,7 @@ package com.mistakebook.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -17,7 +15,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
@@ -104,18 +101,6 @@ internal val ZincDark = darkColorScheme(
 )
 
 /**
- * 全局形状：三档圆角（8 小控件 / 14 卡片 / 28 大分组与 sheet）。
- * M3 组件默认取这里的值；界面里显式传形状的旧代码在逐屏重构时收敛。
- */
-private val ZincShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(18.dp),
-    extraLarge = RoundedCornerShape(28.dp)
-)
-
-/**
  * 排版。
  *
  * 两条硬规则：
@@ -128,8 +113,11 @@ private val ZincShapes = Shapes(
  * 档位补齐到 M3 全集：组件（TopAppBar/ListItem/Badge…）默认吃
  * headlineSmall/titleSmall/labelMedium 等槽，缺省会让没显式指定
  * style 的文字退回 M3 默认值，与主题脱节。
+ *
+ * 用户可整体缩放字号与换字体，见 [appTypography]——基准值写在这里，
+ * 倍数与字体在那边。这里只保留「设计口径」，不掺用户偏好。
  */
-private val ZincTypography = Typography(
+internal val ZincTypography = Typography(
     displayLarge = TextStyle(
         fontSize = 57.sp,
         lineHeight = 64.sp,
@@ -203,15 +191,21 @@ private val ZincTypography = Typography(
 val LocalDarkTheme = compositionLocalOf { false }
 
 /**
- * 全局主题（中性锌灰基调 + 单强调色 + 自选主题色）。
+ * 全局主题（中性锌灰基调 + 单强调色 + 自选字号/字体/圆角）。
  *
  * @param accent 自选主题色（v0.0.76）。只替换 primary 一组色槽，
  *   背景/卡片/文字走中性锌灰两套基调——强调色是「强调」不是换肤。
+ * @param fontScale 全局字号倍数（v0.0.94）。一处调，界面与对话正文一起变。
+ * @param font 全局字体（v0.0.94）。只用系统自带字体，不打包字体文件。
+ * @param corner 全局圆角倍数（v0.0.94）。M3 组件的默认形状全取自 shapes。
  */
 @Composable
 fun MistakeBookTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     accent: com.mistakebook.data.prefs.AccentTone = com.mistakebook.data.prefs.AccentTone.DEFAULT,
+    fontScale: com.mistakebook.data.prefs.FontScale = com.mistakebook.data.prefs.FontScale.DEFAULT,
+    font: com.mistakebook.data.prefs.AppFont = com.mistakebook.data.prefs.AppFont.DEFAULT,
+    corner: com.mistakebook.data.prefs.CornerStyle = com.mistakebook.data.prefs.CornerStyle.DEFAULT,
     content: @Composable () -> Unit
 ) {
     val activity = LocalContextActivity()
@@ -241,8 +235,8 @@ fun MistakeBookTheme(
     CompositionLocalProvider(LocalDarkTheme provides darkTheme) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = ZincTypography,
-            shapes = ZincShapes,
+            typography = appTypography(fontScale.scale, fontFamilyOf(font)),
+            shapes = zincShapes(corner),
             content = content
         )
     }

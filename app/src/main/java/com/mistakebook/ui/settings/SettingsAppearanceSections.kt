@@ -93,7 +93,11 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mistakebook.R
+import com.mistakebook.data.prefs.AppFont
+import com.mistakebook.data.prefs.CornerStyle
+import com.mistakebook.data.prefs.FontScale
 import com.mistakebook.data.prefs.LlmKeyEntry
 import com.mistakebook.data.prefs.MAX_DAILY_NEW_LIMIT
 import com.mistakebook.data.prefs.MIN_DAILY_NEW_LIMIT
@@ -103,6 +107,8 @@ import com.mistakebook.data.prefs.NetworkMode
 import com.mistakebook.data.prefs.ReasoningEffort
 import com.mistakebook.data.prefs.RecognitionMode
 import com.mistakebook.data.prefs.ThemeMode
+import com.mistakebook.ui.theme.fontFamilyOf
+import com.mistakebook.ui.theme.zincShapes
 import com.mistakebook.data.prefs.UsageSnapshot
 import com.mistakebook.data.prefs.formatCount
 import com.mistakebook.domain.ErrorReason
@@ -223,6 +229,241 @@ internal fun ThemeModeSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+
+/**
+ * 文字与形状（v0.0.94）：全局字号、字体、圆角。
+ *
+ * ## 为什么三个旋钮挤在一个分组里
+ *
+ * 它们改的是同一件事——「界面长什么样」，而且都集中在 Typography /
+ * Shapes 两层（见 ui/theme/Appearance.kt），一处生效。分成三个分组只会
+ * 让设置页多出两级折叠，用户找个字号要多点两次。
+ *
+ * ## 为什么每张选项卡自带预览
+ *
+ * 字号/字体/圆角的预览就是它本身：「A」按这一档的字号画，「永」按这
+ * 一种字体画，小方块按这一档的圆角画。用户点之前就已经看到效果，不用
+ * 退出设置页去对话里试——这也正是 shadcn/T3 主题定制器「改一下立刻
+ * 看见」的路子。
+ */
+@Composable
+internal fun TextStyleSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    val snapshot = state.snapshot
+    SettingsGroup(title = stringResource(R.string.settings_text_shape_title)) {
+        Text(
+            text = stringResource(R.string.settings_text_shape_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(14.dp))
+
+        Text(
+            text = stringResource(R.string.settings_font_size_label),
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FontScale.entries.forEach { scale ->
+                AppearanceOptionCard(
+                    label = fontScaleLabel(scale),
+                    selected = snapshot.fontScale == scale,
+                    onClick = { viewModel.setFontScale(scale) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    // 预览用「A」：它是判断字号最直观的字形，且不涉及具体语言
+                    Text(
+                        text = stringResource(R.string.settings_font_size_preview),
+                        fontSize = (18f * scale.scale).sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.settings_font_size_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(14.dp))
+        Text(
+            text = stringResource(R.string.settings_font_family_label),
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            AppFont.entries.forEach { font ->
+                AppearanceOptionCard(
+                    label = fontFamilyLabel(font),
+                    selected = snapshot.font == font,
+                    onClick = { viewModel.setFont(font) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    // 预览用「永」：衬线与无衬线在这一个字形上差别最明显
+                    Text(
+                        text = stringResource(R.string.settings_font_family_preview),
+                        fontFamily = fontFamilyOf(font),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.settings_font_family_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(14.dp))
+        Text(
+            text = stringResource(R.string.settings_corner_label),
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            CornerStyle.entries.forEach { corner ->
+                val selected = snapshot.cornerStyle == corner
+                AppearanceOptionCard(
+                    label = cornerLabel(corner),
+                    selected = selected,
+                    onClick = { viewModel.setCornerStyle(corner) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    // 预览直接取 zincShapes 的 medium 槽：预览与生效值同源，
+                    // 不会出现「设置页看着圆、界面上是方的」
+                    Box(
+                        modifier = Modifier
+                            .size(width = 34.dp, height = 22.dp)
+                            .background(
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outline
+                                },
+                                shape = zincShapes(corner).medium
+                            )
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.settings_corner_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+
+/**
+ * 外观旋钮的一张选项卡：上面是**这个选项自己的效果预览**，下面是名字。
+ *
+ * 与 [ThemeOptionCard] 的差别只在预览位：那个吃 ImageVector（图标），
+ * 这个吃任意 Composable。两者共用同一套选中/未选中的配色与描边口径，
+ * 所以三排选项卡看着是一家人。没有合并成一个组件，是因为图标位换成
+ * 任意 Composable 会牵动现有十几个调用点，为一个预览位付这个代价不值。
+ */
+@Composable
+private fun AppearanceOptionCard(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    preview: @Composable () -> Unit
+) {
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+    }
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = MaterialTheme.shapes.small,
+        color = containerColor,
+        border = BorderStroke(if (selected) 2.dp else 1.dp, borderColor)
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // 固定预览位高度：四张卡的字号差一倍，不钉住高度整排会被撑歪
+            Box(
+                modifier = Modifier.height(30.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.compose.material3.LocalContentColor provides contentColor
+                ) {
+                    preview()
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.onSurface else contentColor,
+                textAlign = TextAlign.Center,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/** 字号档位的名字。放 UI 层而不是枚举里——仓库规则：界面文案全部进 strings.xml。 */
+@Composable
+private fun fontScaleLabel(scale: FontScale): String = when (scale) {
+    FontScale.SMALL -> stringResource(R.string.settings_font_size_small)
+    FontScale.STANDARD -> stringResource(R.string.settings_font_size_standard)
+    FontScale.LARGE -> stringResource(R.string.settings_font_size_large)
+    FontScale.EXTRA_LARGE -> stringResource(R.string.settings_font_size_extra_large)
+}
+
+/** 字体样式的名字（同上：文案在 strings.xml，不在枚举里）。 */
+@Composable
+private fun fontFamilyLabel(font: AppFont): String = when (font) {
+    AppFont.SYSTEM -> stringResource(R.string.settings_font_family_system)
+    AppFont.SERIF -> stringResource(R.string.settings_font_family_serif)
+    AppFont.MONOSPACE -> stringResource(R.string.settings_font_family_monospace)
+}
+
+/** 圆角档位的名字（同上）。 */
+@Composable
+private fun cornerLabel(corner: CornerStyle): String = when (corner) {
+    CornerStyle.SHARP -> stringResource(R.string.settings_corner_sharp)
+    CornerStyle.STANDARD -> stringResource(R.string.settings_corner_standard)
+    CornerStyle.ROUNDED -> stringResource(R.string.settings_corner_rounded)
 }
 
 

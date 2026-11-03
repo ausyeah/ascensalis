@@ -230,6 +230,8 @@ fun SettingsScreen(
             ) {
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_appearance), nested = true) {
                     ThemeModeSection(state = state, viewModel = viewModel)
+                    Spacer(Modifier.height(12.dp))
+                    TextStyleSection(state = state, viewModel = viewModel)
                 }
 
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_usage), nested = true) {

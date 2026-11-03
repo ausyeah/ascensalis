@@ -113,6 +113,21 @@ data class SettingsSnapshot(
     val accentTone: AccentTone = AccentTone.DEFAULT,
 
     /**
+     * 全局字号倍数（v0.0.94）。界面与对话正文共用同一个倍数——
+     * 用户只该记「字号」这一个概念，不该记「哪个档管哪块」。
+     */
+    val fontScale: FontScale = FontScale.DEFAULT,
+
+    /** 全局字体（v0.0.94）。只用系统自带字体，不打包字体文件。 */
+    val font: AppFont = AppFont.DEFAULT,
+
+    /**
+     * 全局圆角倍数（v0.0.94）。M3 组件的默认形状全部取自
+     * `MaterialTheme.shapes`，所以这一个设置项能改遍全 App 的方圆气质。
+     */
+    val cornerStyle: CornerStyle = CornerStyle.DEFAULT,
+
+    /**
      * 网络出口模式。默认 [NetworkMode.AUTO]：MinerU 直连、其余走系统代理。
      */
     val networkMode: NetworkMode = NetworkMode.AUTO,

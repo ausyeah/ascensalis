@@ -306,6 +306,29 @@
     <string name="settings_theme_hint_light">已固定使用经典浅色暖纸护眼主题</string>
     <string name="settings_theme_hint_dark">已固定使用墨砚深色夜读主题</string>
 
+    <!-- 文字与形状（v0.0.94）：全局字号 / 字体 / 圆角 -->
+    <string name="settings_text_shape_title">文字与形状</string>
+    <string name="settings_text_shape_desc">调整全局字号、字体和圆角，切换即时生效，不用重启</string>
+    <string name="settings_font_size_label">字号</string>
+    <string name="settings_font_size_small">小</string>
+    <string name="settings_font_size_standard">标准</string>
+    <string name="settings_font_size_large">大</string>
+    <string name="settings_font_size_extra_large">特大</string>
+    <string name="settings_font_size_hint">字号对界面和对话正文同时生效：想看得更清楚就调大，想一屏多看几行就调小</string>
+    <string name="settings_font_family_label">字体</string>
+    <string name="settings_font_family_system">无衬线</string>
+    <string name="settings_font_family_serif">衬线</string>
+    <string name="settings_font_family_monospace">等宽</string>
+    <string name="settings_font_family_hint">长答案读起来像书选衬线，看代码和公式要对齐选等宽；只用系统自带字体，不占安装包体积</string>
+    <string name="settings_corner_label">圆角</string>
+    <string name="settings_corner_sharp">方正</string>
+    <string name="settings_corner_standard">标准</string>
+    <string name="settings_corner_rounded">圆润</string>
+    <string name="settings_corner_hint">圆角同时作用于按钮、卡片和对话气泡，改的是整个界面的方圆气质</string>
+    <!-- 预览 glyph：卡片上那一笔字就是效果本身，仍按界面文案统一进 strings.xml -->
+    <string name="settings_font_size_preview">A</string>
+    <string name="settings_font_family_preview">永</string>
+
     <!-- 网络代理：系统代理 / 直连 / 自动（MinerU 国内服务默认直连） -->
     <string name="settings_network_title">网络代理</string>
     <string name="settings_network_desc">选择 App 的网络请求怎么走。OCR 服务（如 MinerU 等）多为国内服务，走代理常常连不上。</string>
