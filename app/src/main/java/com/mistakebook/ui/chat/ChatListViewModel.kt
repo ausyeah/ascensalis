@@ -58,11 +58,13 @@ class ChatListViewModel(
      * 而且聊天页拿到的 id 事后才知道，没法用来做 ViewModel 的 key。
      *
      * 建好再带 id 过去，两件事都解决了：`sessionForQuestion` 只在没给 id 时才兜底创建。
+     *
+     * 「复用空会话还是新建」收在仓库的 [openFreeSession] 里，与会话页顶栏的
+     * 「新对话」同一条口径。
      */
     fun startFreeSession(onReady: (Long) -> Unit) {
         viewModelScope.launch {
-            val id = repository.findEmptyFreeSession()?.id ?: repository.createFreeSession()
-            onReady(id)
+            onReady(repository.openFreeSession())
         }
     }
 

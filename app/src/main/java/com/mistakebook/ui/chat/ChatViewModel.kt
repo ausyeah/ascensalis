@@ -1446,15 +1446,6 @@ class ChatViewModel(
         viewModelScope.launch { repository.deleteMessage(id) }
     }
 
-    fun renameSession(title: String) {
-        val sessionId = _state.value.sessionId
-        if (sessionId == 0L || title.isBlank()) return
-        viewModelScope.launch {
-            repository.renameSession(sessionId, title)
-            _state.value = _state.value.copy(title = title.trim())
-        }
-    }
-
     // ------------------------------------------------------------ 转换
 
     private fun OutgoingMessage.toLlm() = com.mistakebook.net.llm.ChatMessage(

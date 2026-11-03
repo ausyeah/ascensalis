@@ -88,14 +88,14 @@ class ChatRepository(
     }
 
     /**
-     * 已存在但一条消息都没有的自由会话。
+     * 「开一条新的自由会话」，返回落点的会话 id。
      *
-     * 「新对话」按钮要的就是它：复用而不是新建，否则点几次攒几条空会话。
+     * 有现成的空自由会话就复用，没有才新建——会话页顶栏的「新对话」与
+     * 首页的入口都必须走这一条：两边各写一遍「先查再建」的话，
+     * 任一处漏掉复用都会攒下一串空会话（孤儿数据，用户看得见也删不完）。
      */
-    suspend fun findEmptyFreeSession(): ChatSession? = chatDao.findEmptyFreeSession()
-
-    /** 强制新建一条空会话，返回 id。 */
-    suspend fun createFreeSession(): Long = newSession(null)
+    suspend fun openFreeSession(): Long =
+        chatDao.findEmptyFreeSession()?.id ?: newSession(null)
 
     /** 新建一条会话并返回 id。 */
     private suspend fun newSession(questionId: Long?): Long {

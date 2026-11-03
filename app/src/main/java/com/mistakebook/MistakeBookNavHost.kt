@@ -23,6 +23,7 @@ import com.mistakebook.di.AppContainer
 import com.mistakebook.ui.capture.CaptureScreen
 import com.mistakebook.ui.chat.ChatListScreen
 import com.mistakebook.ui.chat.ChatScreen
+import com.mistakebook.ui.chat.newConversationTarget
 import com.mistakebook.ui.crop.CropScreen
 import com.mistakebook.ui.detail.DetailScreen
 import com.mistakebook.ui.edit.EditScreen
@@ -619,6 +620,25 @@ fun MistakeBookNavHost(
                     container.cameraPurpose = AppContainer.CameraPurpose.CHAT
                     container.captureBatch.clear()
                     navController.navigate(Routes.CAPTURE)
+                },
+                onNewConversation = {
+                    // 顶栏「新对话」：解析出落点会话再导航。
+                    //
+                    // 目标就是当前这条时**不导航**——那说明用户已经待在一条
+                    // 空白的自由会话里（`openFreeSession` 复用了它），
+                    // 此时 pop + push 同一个地址只会把返回栈翻一遍，界面毫无变化。
+                    scope.launch {
+                        val target = newConversationTarget(
+                            currentSessionId = rawSession.takeIf { it != Routes.CHAT_FREE },
+                            resolvedSessionId = container.chatRepository.openFreeSession()
+                        )
+                        if (target != null) {
+                            navController.navigate(Routes.chat(null, target)) {
+                                // 连点多少次都只留一层会话页，不会叠出一长串返回栈
+                                popUpTo(Routes.CHAT) { inclusive = true }
+                            }
+                        }
+                    }
                 }
             )
         }

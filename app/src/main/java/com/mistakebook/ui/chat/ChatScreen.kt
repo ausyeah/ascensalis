@@ -52,14 +52,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
@@ -142,7 +140,6 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
@@ -183,7 +180,14 @@ fun ChatScreen(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     /** 打开 App 内置相机（v0.0.57：替代系统相机；返回的图经容器交接）。 */
-    onOpenCamera: () -> Unit = {}
+    onOpenCamera: () -> Unit = {},
+    /**
+     * 顶栏「新对话」：落到一条新的空自由会话。
+     *
+     * 由 NavHost 解析目标会话 id 后导航——「复用现成的空会话还是新建」
+     * 是数据层的事，界面只管把用户送到那儿。
+     */
+    onNewConversation: () -> Unit = {}
 ) {
     val viewModel = containerViewModel(
         container = container,
@@ -239,8 +243,6 @@ fun ChatScreen(
     var showKeyGate by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var pendingDeleteId by remember { mutableStateOf(0L) }
-    var showRenameDialog by remember { mutableStateOf(false) }
-    var renameText by remember { mutableStateOf("") }
     var previewImagePath by remember { mutableStateOf<String?>(null) }
 
     previewImagePath?.let { path ->
@@ -379,31 +381,6 @@ fun ChatScreen(
         )
     }
 
-    if (showRenameDialog) {        AlertDialog(
-            onDismissRequest = { showRenameDialog = false },
-            title = { Text(stringResource(R.string.chat_rename_title)) },
-            text = {
-                OutlinedTextField(
-                    value = renameText,
-                    onValueChange = { renameText = it },
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.chat_rename_hint)) }
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showRenameDialog = false
-                    viewModel.renameSession(renameText)
-                }) { Text(stringResource(R.string.chat_rename_save)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) {
-                    Text(stringResource(R.string.chat_cancel))
-                }
-            }
-        )
-    }
-
     // T6 降级：资料库文件选择弹层（列出 files/library/ 下的文本文件，多选注入）
     if (showLibraryPicker) {
         LibraryPickerDialog(
@@ -456,38 +433,17 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    // 模型入口提到顶栏：原先藏在输入栏底部的弱样式入口用户找不到
-                    //（用户反馈「对话时不能换模型」）。生成中也保持可点——
-                    // 弹层里 enabled=false 只禁改动项，入口本身不该装死。
-                    Row(
-                        modifier = Modifier
-                            .clip(MaterialTheme.shapes.large)
-                            .clickable { showModelSheet = true }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = state.currentModel.ifBlank { stringResource(R.string.chat_model_unset) },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 120.dp)
-                        )
+                    // 顶栏只留一个动作：开新对话（用户反馈：模型入口下面输入栏里
+                    // 已经有了一份，顶栏再放一个纯属占地方；原来那颗重命名也换掉，
+                    // 「新开一局」比「改标题」常用得多）。
+                    //
+                    // 重命名没有丢：对话历史列表里左滑仍有重命名，标题也能在
+                    // 那儿改——顶栏这颗按钮让位给更高频的动作。
+                    IconButton(onClick = onNewConversation) {
                         Icon(
-                            Icons.Default.ExpandMore,
-                            contentDescription = stringResource(R.string.chat_pick_model),
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            Icons.Default.Add,
+                            contentDescription = stringResource(R.string.chat_new_conversation)
                         )
-                    }
-                    IconButton(onClick = {
-                        renameText = state.title
-                        showRenameDialog = true
-                    }) {
-                        // ContentCopy 语义是「复制」，重命名该用 Edit——
-                        // 早先用复制图标纯属选错，用户盯着不知道这颗按钮是干嘛的。
-                        Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.chat_rename))
                     }
                 }
             )
@@ -635,6 +591,18 @@ fun ChatScreen(
         )
     }
 }
+
+
+/**
+ * 顶栏「新对话」该导航到哪儿，返回 null 表示「哪儿也不用去」。
+ *
+ * 纯函数（单测见 ChatNewConversationTest）：判定只有一条——解析出来的会话
+ * 是不是当前这条。`openFreeSession` 会**复用**已有的空自由会话，所以用户
+ * 已经待在一条空白的新对话里时，解析结果就是当前 id；这时若照常导航，
+ * 不过是把同一个地址 pop 出来再 push 回去，返回栈白翻一层。
+ */
+internal fun newConversationTarget(currentSessionId: Long?, resolvedSessionId: Long): Long? =
+    resolvedSessionId.takeIf { it != currentSessionId }
 
 
 @Composable

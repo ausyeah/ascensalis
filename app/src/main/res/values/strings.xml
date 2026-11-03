@@ -496,6 +496,7 @@
     <string name="chat_rename_title">重命名对话</string>
     <string name="chat_rename_hint">对话名称</string>
     <string name="chat_rename_save">保存</string>
+    <string name="chat_new_conversation">开启新对话</string>
     <string name="chat_cancel">取消</string>
     <string name="chat_confirm">确定</string>
     <string name="chat_untitled">未命名对话</string>
