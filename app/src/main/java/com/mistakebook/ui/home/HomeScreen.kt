@@ -804,29 +804,30 @@ private fun SwipeableQuestionCard(
 
         // 上层：卡片，跟随手势位移。
         //
-        // 横向手势 v0.0.84 重写（修「左右滑动卡在一半」）：
-        // Compose 的 Main 指针分发是**子先于父**，早先 `Modifier.draggable` 在越过
-        // 触发阈值那一刻就消费事件——手指落在卡片上的翻页手势全被卡片吃掉，
-        // 页面纹丝不动、卡片却被拖出一截卡在那（松手才回弹）。
-        // 现在按「越过阈值时的速度」让道，判定抽在 shouldYieldToPager 纯函数
-        // （单测见 HomeScreenYieldTest）：快速甩动 → 翻页意图，不消费不认领——
-        // 门户 Pager 的同轴检测器在**同一事件稍后**处理，自然接手翻页；
-        // 慢速拖拽 → 认领为「展开删除」，消费后续移动；纵向占优 → 交给列表滚动。
-        // 认领过一次就不再反悔（yielded 锁存）；但让道后 Pager 始终没接手
-        //（如已在页边界）且横向累计超过展开宽度 1.5 倍时回收认领，避免死手势。
+        // 横向手势（v0.0.89 修回）：**横向占优就由卡片认领**，纵向占优才交给
+        // 列表滚动。规则只有这一条，没有速度分叉。
+        //
+        // v0.0.84~0.0.88 曾按「落指到越过 slop 的用时」给门户 Pager 让道
+        // （阈值 slop/90ms ≈ 270 px/s）。那条线画在了一个不可能成立的位置：
+        // 常人一次明确的左滑删除速度普遍在 500 px/s 以上，于是**每一次左滑都
+        // 被判成翻页**，卡片再也不认领——用户连红色色块都没见过，等于
+        // 「左滑删除没了」。这比「卡片上翻不了页」严重得多：翻页有 Tab 行，
+        // 删除没有第二入口。
+        //
+        // Compose 的 Main 指针分发是子先于父：卡片一旦消费移动事件，
+        // 门户 Pager 的同轴检测器就收不到，自然不会翻页。翻页请从 Tab 行
+        // 或卡片以外的空白处起手。
         Box(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                 .pointerInput(revealWidthPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        val startTime = down.uptimeMillis
                         var lastX = down.position.x
                         var lastY = down.position.y
                         var accX = 0f
                         var accY = 0f
                         var claimed = false
-                        var yielded = false
                         val slop = viewConfiguration.touchSlop
                         // 本手势累计到的位移。snapTo 经 scope.launch 异步落盘，
                         // 松手判定不能读 offsetX.value（可能还是上一帧的旧值），
@@ -839,7 +840,7 @@ private fun SwipeableQuestionCard(
                                 val pressed = event.changes.filter { it.pressed }
                                 if (pressed.isEmpty()) break
 
-                                // Pager 翻页 / 列表滚动已接手：立即让位
+                                // 列表滚动已接手：立即让位
                                 if (event.changes.any { it.isConsumed }) break
 
                                 val change = pressed.first()
@@ -850,23 +851,16 @@ private fun SwipeableQuestionCard(
                                 accX += dx
                                 accY += dy
 
-                                if (!claimed && !yielded &&
-                                    (abs(accX) > slop || abs(accY) > slop)
-                                ) {
-                                    val elapsedMs = change.uptimeMillis - startTime
-                                    if (shouldYieldToPager(accX, accY, elapsedMs, slop)) {
-                                        yielded = true
-                                    } else {
+                                // 首次越过 slop 时定向：横向占优 → 认领为展开删除；
+                                // 纵向占优 → 直接退出，让位给 LazyColumn 的滚动。
+                                // 让位后不再反悔认领——半路抢回来会把列表的滚动
+                                // 拽停，是最难查的一类抖动。
+                                if (!claimed && (abs(accX) > slop || abs(accY) > slop)) {
+                                    if (shouldClaimCardSwipe(accX, accY)) {
                                         claimed = true
+                                    } else {
+                                        break
                                     }
-                                    if (!claimed) continue
-                                }
-                                // 兜底回收（v0.0.85）：让道后若 Pager 始终没接手
-                                //（例如已在页边界），横向累计超过展开宽度的 1.5 倍
-                                // 仍无人消费，就回收认领权，避免手势既不翻页也不
-                                // 展开、彻底死掉。能走到这里说明本事件未被消费。
-                                if (yielded && !claimed && abs(accX) > revealWidthPx * 1.5f) {
-                                    claimed = true
                                 }
 
                                 if (claimed) {
@@ -1050,32 +1044,17 @@ private fun FilterRow(
 private val SwipeDeleteRevealWidth = 88.dp
 
 /**
- * 甩动判定窗口（毫秒）：横向位移在越过触摸 slop 时，用时短于它视为翻页意图。
- * 来源：v0.0.84 旧实现的 SWIPE_FLING_YIELD_MS = 90ms；v0.0.85 折算成速度
- * （slop 距离 / 该窗口）后密度差异由 slop 参数自然吸收，不再绑定具体像素。
- */
-internal const val SWIPE_FLING_WINDOW_MS = 90L
-
-/**
- * 判定超时上限（毫秒）：超过它的横向手势无论速度算出来多少都视作展开删除，
- * 防止极端输入（位移远大于 slop 的重判定）把慢拖误判成甩动。
- */
-internal const val SWIPE_DECISION_MAX_ELAPSED_MS = 400L
-
-/**
- * 横滑让道判定（v0.0.85 抽成纯函数便于单测，见 HomeScreenYieldTest）。
+ * 横向手势定向判定（v0.0.89 重写；单测见 HomeScreenSwipeClaimTest）。
  *
- * 输入是手指从落指到「首次越过触摸 slop」那一刻的累计位移与用时：
- * - 纵向优先：竖向位移不小于横向 → 让给列表滚动；
- * - 横向按**速度**（位移/用时）判甩动：达到 slop/SWIPE_FLING_WINDOW_MS
- *   即视为翻页意图，让给门户 Pager；
- * - 未越 slop 与超时上限做保守保护。
- * 返回 true = 让道（不认领），false = 卡片认领为「展开删除」。
+ * 输入是手指从落指到「首次越过触摸 slop」那一刻的累计位移：
+ * **只看方向，不看速度**。横向占优 → 卡片认领为「展开删除」；
+ * 纵向占优 → 交给列表滚动。竖横相等时算纵向（取等号让给滚动）。
+ *
+ * 为什么去掉 v0.0.84~0.0.88 的速度分叉：那条规则的阈值是 slop/90ms
+ * ≈ 270 px/s，低于常人一次明确左滑的速度，于是删除永远划不出来。
+ * 翻页与删除在同一根轴上抢同一根手指，只能有一个赢家——而删除没有
+ * 第二入口（翻页有 Tab 行），所以赢的必须是删除。
  */
-internal fun shouldYieldToPager(accX: Float, accY: Float, elapsedMs: Long, touchSlop: Float): Boolean {
-    if (abs(accY) >= abs(accX)) return true
-    if (abs(accX) < touchSlop) return true
-    if (elapsedMs > SWIPE_DECISION_MAX_ELAPSED_MS) return false
-    val velocity = abs(accX) / elapsedMs.coerceAtLeast(1L)
-    return velocity >= touchSlop.toFloat() / SWIPE_FLING_WINDOW_MS
+internal fun shouldClaimCardSwipe(accX: Float, accY: Float): Boolean {
+    return abs(accX) > abs(accY)
 }
