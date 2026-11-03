@@ -992,6 +992,20 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 流式中插入新指令（steer）：停掉当前生成，把输入框里这一轮发出去。
+     *
+     * 用户原话——「如果我输入了，就应该有发送按钮，用来 steer 控制当前输出」。
+     * 旧行为是流式中发送键直接 return：想改方向只能先点停止、再打字、再发送。
+     *
+     * 顺序不能反：stop() 会**同步**清掉本地在途守卫（服务那边取消是异步的），
+     * 先停后发，send() 才不会被「还在生成中」的守卫吞掉。
+     */
+    fun steer() {
+        stop()
+        send()
+    }
+
     private suspend fun runOnce(
         profile: LlmProfile,
         text: String,

@@ -52,8 +52,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
@@ -172,6 +172,13 @@ internal fun ChatInputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    /**
+     * 流式中插入新指令（steer）：停掉当前生成，把输入框里这一轮发出去。
+     *
+     * 与 [onStop] 分开而不是让调用方自己拼：什么时候算 steer、
+     * 什么时候算停止，是输入栏自己最清楚的一件事（见 [chatPrimaryAction]）。
+     */
+    onSteer: () -> Unit = {},
     onAttach: () -> Unit,
     onPickModel: () -> Unit,
     onRemoveAttachment: (Long) -> Unit,
@@ -202,7 +209,7 @@ internal fun ChatInputBar(
                 // 含导航栏区域，再叠一层 navigationBarsPadding 会让输入栏
                 // 浮在键盘上方一条导航栏的高度。
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             if (libraryInjectionNames.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -330,21 +337,82 @@ internal fun ChatInputBar(
                     )
                 }
 
+                // 主按钮的角色由「在不在流式中 + 输入框空不空」定（见 chatPrimaryAction）：
+                // 生成中且没打字 = 停止；生成中打了字 = 把这一轮发出去 steer 当前输出；
+                // 没在生成 = 普通发送。图标跟着角色换，用户点下去前就知道会发生什么。
+                val action = chatPrimaryAction(streaming = streaming, hasInput = text.isNotBlank())
                 FilledIconButton(
-                    onClick = { if (streaming) onStop() else onSend() },
-                    enabled = streaming ||
-                        text.isNotBlank() ||
-                        attachments.any { it.status == com.mistakebook.domain.AttachmentStatus.READY },
-                    modifier = Modifier.size(44.dp)
+                    onClick = {
+                        when (action) {
+                            ChatPrimaryAction.SEND -> onSend()
+                            ChatPrimaryAction.STOP -> onStop()
+                            ChatPrimaryAction.STEER -> onSteer()
+                        }
+                    },
+                    enabled = chatPrimaryEnabled(
+                        action = action,
+                        hasInput = text.isNotBlank(),
+                        hasReadyAttachment = attachments.any {
+                            it.status == com.mistakebook.domain.AttachmentStatus.READY
+                        }
+                    ),
+                    // 44dp 的实心圆贴着最右下角显得顶格，缩到 40dp：视觉轻一档，
+                    // 右边距也由输入栏自身的 16dp 让出来，不再顶到屏幕边。
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
-                        imageVector = if (streaming) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
-                        contentDescription = stringResource(if (streaming) R.string.chat_stop else R.string.chat_send)
+                        imageVector = if (streaming && action != ChatPrimaryAction.STEER) {
+                            Icons.Default.Stop
+                        } else {
+                            // 发送改成向上箭头：横向的 Send 箭头在窄栏里像「转发」，
+                            // 向上的箭头才像「把这一句递上去」
+                            Icons.Filled.ArrowUpward
+                        },
+                        contentDescription = stringResource(
+                            when (action) {
+                                ChatPrimaryAction.SEND -> R.string.chat_send
+                                ChatPrimaryAction.STOP -> R.string.chat_stop
+                                ChatPrimaryAction.STEER -> R.string.chat_steer
+                            }
+                        )
                     )
                 }
             }
         }
     }
+}
+
+
+/** 输入栏主按钮此刻的角色（纯函数，单测见 ChatPrimaryActionTest）。 */
+internal enum class ChatPrimaryAction { SEND, STOP, STEER }
+
+/**
+ * 主按钮该扮演哪个角色。
+ *
+ * 只有两条输入：在不在流式中、输入框空不空。用户要的是「生成中我打了字，
+ * 这颗按钮就该把话递上去 steer 当前输出；没打字才是停止」——
+ * 旧实现只看 streaming，于是想插话只能先停止再发送，多一步且思路被打断。
+ */
+internal fun chatPrimaryAction(streaming: Boolean, hasInput: Boolean): ChatPrimaryAction =
+    when {
+        !streaming -> ChatPrimaryAction.SEND
+        hasInput -> ChatPrimaryAction.STEER
+        else -> ChatPrimaryAction.STOP
+    }
+
+/**
+ * 主按钮能不能点。
+ *
+ * 停止与 steer 永远可点（用户随时想收手/改方向）；普通发送必须有内容——
+ * 空着也让它可点的话，用户会以为「点了没反应」是卡住了。
+ */
+internal fun chatPrimaryEnabled(
+    action: ChatPrimaryAction,
+    hasInput: Boolean,
+    hasReadyAttachment: Boolean
+): Boolean = when (action) {
+    ChatPrimaryAction.STOP, ChatPrimaryAction.STEER -> true
+    ChatPrimaryAction.SEND -> hasInput || hasReadyAttachment
 }
 
 

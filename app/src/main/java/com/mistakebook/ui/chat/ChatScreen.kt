@@ -569,6 +569,8 @@ fun ChatScreen(
                 onTextChange = viewModel::onInputChange,
                 onSend = viewModel::send,
                 onStop = viewModel::stop,
+                // 流式中打了字才出现的「递上去」：停当前生成 + 发这一轮
+                onSteer = viewModel::steer,
                 onAttach = { showAttachSheet = true },
                 onPickModel = { showModelSheet = true },
                 onRemoveAttachment = viewModel::removePendingAttachment,
