@@ -615,6 +615,8 @@
     <string name="chat_thinking_header">思考过程</string>
     <string name="chat_thinking_expand">展开思考过程</string>
     <string name="chat_thinking_collapse">收起思考过程</string>
+    <!-- 复制思考过程的提示（v0.0.96）：原来是硬编码在 Kotlin 里的 -->
+    <string name="chat_thinking_copied">思考过程已复制</string>
     <string name="chat_thinking_ongoing">正在思考…</string>
     <string name="chat_thinking_chars">%1$d 字</string>
 

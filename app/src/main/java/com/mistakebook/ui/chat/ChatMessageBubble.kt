@@ -103,6 +103,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -135,7 +136,6 @@ import kotlin.math.sin
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.ExpandLess
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -683,20 +683,8 @@ internal fun ThinkingBlock(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .then(
-                // 生成中（思考中/作答中）点击无效：思考中必须保持展开让人看到
-                // 「在想什么」，作答中保持收起把位置留给正文——用户要求
-                // 「只有不输出的时候才可以折叠展开」。
-                if (!locked) {
-                    Modifier.clickable {
-                        val next = !expanded
-                        expanded = next
-                        onToggle(next)
-                    }
-                } else {
-                    Modifier
-                }
-            )
+            // 整块不再可点（v0.0.96）：折叠收在一颗固定按钮里。
+            // 之前整块都能点，用户想选中/复制思考里的文字却总是把块折叠了。
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -723,33 +711,36 @@ internal fun ThinkingBlock(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.width(4.dp))
-            if (expanded && text.isNotBlank()) {
-                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-                val context = androidx.compose.ui.platform.LocalContext.current
-                androidx.compose.material3.IconButton(
-                    onClick = {
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
-                        android.widget.Toast.makeText(context, "思考过程已复制", android.widget.Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        Icons.Default.ContentCopy,
-                        contentDescription = stringResource(R.string.chat_cd_copy_thinking),
-                        modifier = Modifier.size(13.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Spacer(Modifier.width(2.dp))
+
+            // 折叠/展开是一颗**固定位置**的按钮（v0.0.96 用户要求）：
+            // - 两种状态下它都在行末同一个位置，不再因为「复制键出现/消失」而挪动；
+            // - 箭头恒指向下——展开时内容本来就在按钮下方长出来，
+            //   「向下」说的正是这个动作，翻上去反而让人多想一步；
+            // - 复制键挪到了内容末尾，与折叠键隔开整段思考，不再误触。
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(
+                        enabled = !locked,
+                        role = Role.Button,
+                        onClick = {
+                            val next = !expanded
+                            expanded = next
+                            onToggle(next)
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ExpandMore,
+                    contentDescription = stringResource(
+                        if (expanded) R.string.chat_thinking_collapse else R.string.chat_thinking_expand
+                    ),
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (locked) 0.4f else 1f)
+                )
             }
-            Icon(
-                imageVector = if (expanded && !locked) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = stringResource(
-                    if (expanded && !locked) R.string.chat_thinking_collapse else R.string.chat_thinking_expand
-                ),
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
         if (expanded && displayText.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
@@ -762,6 +753,34 @@ internal fun ThinkingBlock(
                 streaming = streaming,
                 showFailedMathSource = false
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                val context = androidx.compose.ui.platform.LocalContext.current
+                // 复制放在内容**末尾**而不是标题行：标题行那颗是折叠键，
+                // 两颗小图标挨在一起，想折叠的时候按到的总是复制。
+                // 顺带把原来硬编码的「思考过程已复制」收进了 strings.xml。
+                androidx.compose.material3.IconButton(
+                    onClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(R.string.chat_thinking_copied),
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = stringResource(R.string.chat_cd_copy_thinking),
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
