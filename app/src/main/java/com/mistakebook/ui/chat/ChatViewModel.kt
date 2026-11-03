@@ -688,6 +688,19 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 把功能入口的隐藏指令落成 SYSTEM 消息（v0.0.98）。
+     *
+     * 为什么不塞进输入框：用户点「英语翻译」，输入框里凭空多出一段
+     * 他没写过的话，他会以为是自己打的。放进注入消息，模型每轮都看得到，
+     * 界面一个字都不显示——与题目上下文同一机制。
+     */
+    fun installInstruction(text: String) {
+        viewModelScope.launch {
+            runCatching { repository.ensureToolInstruction(_state.value.sessionId, text) }
+        }
+    }
+
     fun onInputChange(text: String) {
         _state.value = _state.value.copy(input = text)
         // 落草稿：退出再进来时能恢复。

@@ -488,12 +488,22 @@ class AppContainer(context: Context) {
     var pendingChatAttachmentPath: String? by mutableStateOf(null)
 
     /**
-     * 从历史页的功能入口带进对话页的一句草稿（v0.0.96）。
+     * 功能入口带进会话的**隐藏指令**（v0.0.98）。
      *
-     * 用容器标志而不是导航参数：提示词里有换行和冒号，塞进路由要来回编码，
-     * 而这条数据本来就是「一次性交接」——ChatScreen 取走后立刻置空。
+     * 以 SYSTEM 消息写进会话（与题目上下文同一机制），模型看得见、界面不显示——
+     * 用户点「拍题讲解」，输入框里不该凭空多出一段他没写过的话。
+     * 会话首次装载时消费并置空。
      */
-    var pendingChatDraft: String? by mutableStateOf(null)
+    var pendingChatInstruction: String? by mutableStateOf(null)
+
+    /**
+     * 拍题 / 作文批改这类「要先拍照」的入口置真：对话页装载后自动拉起相机，
+     * 拍完裁切回来、附件就绪后自动发送——中间不需要用户再点一次发送。
+     */
+    var pendingChatAutoSend: Boolean by mutableStateOf(false)
+
+    /** 作文批改的拍摄提示：两段式（先题目后作文），覆盖默认的对话拍摄提示。 */
+    var captureHintEssay: Boolean by mutableStateOf(false)
 
     /**
      * 对话连拍（T2）已裁完成果的暂存队列。

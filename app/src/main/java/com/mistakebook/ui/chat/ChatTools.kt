@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RateReview
@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
+import com.mistakebook.data.chat.ChatToolPrompts
 
 /**
  * 对话里已经能调用的能力清单（v0.0.96），摆在历史页顶部。
@@ -43,52 +44,52 @@ import com.mistakebook.R
 internal enum class ChatTool(
     val labelRes: Int,
     val icon: ImageVector,
-    /** 点开后预填进输入框的第一句话；null = 走别的入口（拍题直接开相机）。 */
-    val promptRes: Int?,
+    /** 发给模型的隐藏指令（[ChatToolPrompts]），以 SYSTEM 消息注入会话，不进输入框。 */
+    val instruction: String,
+    /** 拍题 / 作文批改要先拍照：进对话页后自动拉起相机，拍完裁切自动发送。 */
+    val needsCamera: Boolean,
     val needsLlm: Boolean,
     val needsOcr: Boolean
 ) {
     PHOTO(
         labelRes = R.string.chat_tool_photo,
         icon = Icons.Default.PhotoCamera,
-        promptRes = null,
+        instruction = ChatToolPrompts.ASK,
+        needsCamera = true,
         needsLlm = true,
         needsOcr = true
     ),
     TRANSLATE(
         labelRes = R.string.chat_tool_translate,
         icon = Icons.Default.Translate,
-        promptRes = R.string.chat_tool_translate_prompt,
+        instruction = ChatToolPrompts.TRANSLATE,
+        needsCamera = false,
         needsLlm = true,
         needsOcr = false
     ),
     ESSAY(
         labelRes = R.string.chat_tool_essay,
         icon = Icons.Default.RateReview,
-        promptRes = R.string.chat_tool_essay_prompt,
+        instruction = ChatToolPrompts.ESSAY,
+        needsCamera = true,
         needsLlm = true,
         needsOcr = false
     ),
     DIAGRAM(
         labelRes = R.string.chat_tool_diagram,
         icon = Icons.Default.Insights,
-        promptRes = R.string.chat_tool_diagram_prompt,
+        instruction = ChatToolPrompts.DIAGRAM,
+        needsCamera = false,
         needsLlm = true,
         needsOcr = false
     ),
-    EXPLAIN(
-        labelRes = R.string.chat_tool_explain,
-        icon = Icons.Default.School,
-        promptRes = R.string.chat_tool_explain_prompt,
+    DIAGNOSE(
+        labelRes = R.string.chat_tool_diagnose,
+        icon = Icons.Default.BugReport,
+        instruction = ChatToolPrompts.DIAGNOSE,
+        needsCamera = true,
         needsLlm = true,
-        needsOcr = false
-    ),
-    IMAGE(
-        labelRes = R.string.chat_tool_image,
-        icon = Icons.Default.Image,
-        promptRes = R.string.chat_tool_image_prompt,
-        needsLlm = true,
-        needsOcr = false
+        needsOcr = true
     )
 }
 

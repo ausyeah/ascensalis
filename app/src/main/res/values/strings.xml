@@ -58,6 +58,7 @@
     <string name="detail_notebook">错题本</string>
     <string name="home_filter_subject">学科</string>
     <string name="home_filter_mastery">掌握</string>
+    <string name="home_search_hint">搜索</string>
     <string name="home_search_clear">清空搜索</string>
     <string name="print_item_index">#%1$d</string>
     <string name="print_unclassified">未分类</string>
@@ -530,25 +531,18 @@
     <!-- 顶栏右上角（v0.0.96）：临时对话，退出会话即删除 -->
     <string name="chat_temporary_new">临时对话</string>
     <!-- 历史对话页的功能入口（v0.0.96）：都是对话能力的不同起手式 -->
-    <string name="chat_tool_photo">拍题</string>
+    <string name="chat_tool_photo">拍题讲解</string>
     <string name="chat_tool_translate">英语翻译</string>
     <string name="chat_tool_essay">作文批改</string>
-    <string name="chat_tool_diagram">绘图</string>
-    <string name="chat_tool_explain">讲解</string>
-    <string name="chat_tool_image">生成图片</string>
+    <string name="chat_tool_diagram">绘图生图</string>
+    <string name="chat_tool_diagnose">错因诊断</string>
+    <string name="home_snap_ask">拍题讲解</string>
+    <string name="swipe_pin_action">置顶</string>
+    <string name="swipe_unpin_action">取消置顶</string>
+    <string name="capture_hint_essay">先拍题目要求，再拍作文，拍完点完成</string>
     <string name="chat_tool_ready">可用</string>
     <string name="chat_tool_needs_llm">需配模型</string>
     <string name="chat_tool_needs_ocr">需配识别</string>
-    <!-- 预填进输入框的第一句话，不自动发送 -->
-    <string name="chat_tool_translate_prompt">把下面的英文翻译成中文，并解释关键短语：
-</string>
-    <string name="chat_tool_essay_prompt">请批改这篇英语作文：指出语法错误、用词问题和提升建议，最后给一个估分。
-</string>
-    <string name="chat_tool_diagram_prompt">把下面的内容画成一张示意图，用 mermaid 代码输出：
-</string>
-    <string name="chat_tool_explain_prompt">请逐步讲解这道题：先讲思路，再给答案，最后指出最容易错的一步。
-</string>
-    <string name="chat_tool_image_prompt">帮我生成一张图片，画面是：</string>
     <string name="chat_history_title">历史对话</string>
     <string name="chat_pin">置顶</string>
     <string name="chat_unpin">取消置顶</string>

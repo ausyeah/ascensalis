@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  应用标志（v0.0.96）：细环 + 书签。
+  应用标志（v0.0.98 重做）：细环 + 一座「书峰」+ 峰顶一点。
 
-  为什么是这两样：
-  - 书签是「把一页留住」的动作，正是错题本在做的事（把错题留下来反复看）；
-  - 环把它框成一枚印章，小尺寸下不至于散成几个不相干的笔画。
+  ## 这一版改了什么、为什么
+  上一版是「环 + 书签」——书签表达的是「留住一页」，但形状太家常，
+  缩到 24dp 时和系统里成百上千个书签图标难以区分。
+  这一版把书签立起来变成一座峰：
+  - 左右两条斜边是**书页翻开的角度**，中缝的 V 口是书脊；
+  - 整体轮廓又是**一座山**——应用叫「登临」， Ascensalis 词根就是上升；
+  - 峰顶那一点是登顶的记号，也把「山」与「书」两个比喻钉在一枚标志里。
 
-  为什么是纯单色、不留任何固定颜色：
-  空状态是用户见到这个 App 的第一眼，之前那条蓝色金鱼在深色主题下发亮、
-  在浅色主题下发闷，两种主题下像两个不同的产品。这里只填白色/描白环，
-  实际颜色由界面按当前主题的 onSurface 染色（见 ChatEmptyState），
-  所以永远是「黑白」——浅色主题下是墨黑，深色主题下是纸白。
+  ## 为什么仍是纯单色
+  空状态的标志颜色由界面按主题的 onSurface 染（浅色墨黑、深色纸白），
+  启动图标则白标黑底。素材只留白色，谁用谁染——染不干净的标志不是好标志。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="96dp"
@@ -18,15 +20,20 @@
     android:viewportWidth="96"
     android:viewportHeight="96">
 
-    <!-- 外环：半径 38、线宽 3，离边留 10，缩到 24dp 时也不会糊成一坨 -->
+    <!-- 外环：半径 38、线宽 2.5（上一版 3，减半像素多一分轻） -->
     <path
         android:pathData="M48,48 m-38,0 a38,38 0 1,0 76,0 a38,38 0 1,0 -76,0"
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="3" />
+        android:strokeWidth="2.5" />
 
-    <!-- 书签：顶部两角 6 圆角，底部 45° 剪角，整体 28×44 -->
+    <!-- 书峰：峰顶 26，两肩 54，底 66，中缝收口 58 -->
     <path
-        android:pathData="M40,26 H56 A6,6 0 0 1 62,32 V70 L48,61 L34,70 V32 A6,6 0 0 1 40,26 Z"
-        android:fillColor="#FFFFFFFF" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M48,26 L70,54 L70,66 L48,58 L26,66 L26,54 Z" />
+
+    <!-- 峰顶记号 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M48,17.5 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
 </vector>

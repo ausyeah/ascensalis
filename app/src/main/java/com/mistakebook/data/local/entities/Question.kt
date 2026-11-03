@@ -64,6 +64,11 @@ data class Question(
      * 关联只是展示信息，不值得为它承担级联行为的复杂度。
      */
     val relatedQuestionId: Long? = null,
+    /**
+     * 置顶（v0.0.98）。列表按「置顶在前、其余按最近更新」排——
+     * 与对话会话的置顶同一套口径，常翻的题不该被新题冲走。
+     */
+    val pinned: Boolean = false,
     val createdAt: Long,
     val updatedAt: Long,
     val deletedAt: Long? = null

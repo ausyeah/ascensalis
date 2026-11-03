@@ -75,6 +75,11 @@ internal fun millisUntilNextLocalDay(now: ZonedDateTime): Long {
 class HomeViewModel(private val container: AppContainer) : ViewModel() {
 
     private val repository: QuestionRepository = container.questionRepository
+
+    /** 置顶 / 取消置顶（v0.0.98）。与对话会话的置顶同一套交互与排序口径。 */
+    fun setPinned(id: Long, pinned: Boolean) {
+        viewModelScope.launch { repository.setPinned(id, pinned) }
+    }
     private val statusFilter = MutableStateFlow<MasteryStatus?>(null)
     private val subjectFilter = MutableStateFlow<Long?>(null)
     private val notebookFilter = MutableStateFlow<Long?>(null)

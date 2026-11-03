@@ -181,6 +181,17 @@ class QuestionRepository(
     }
 
     /** 单独改难度。大模型给的星级只是初值，用户有最终判断权。 */
+    /** 置顶 / 取消置顶（v0.0.98）。列表按 pinned DESC, updatedAt DESC 自动重排。 */
+    suspend fun setPinned(id: Long, pinned: Boolean) {
+        val question = questionDao.findById(id) ?: return
+        questionDao.update(
+            question.copy(
+                pinned = pinned,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
     suspend fun setDifficulty(id: Long, difficulty: Int) {
         val question = questionDao.findById(id) ?: return
         questionDao.update(

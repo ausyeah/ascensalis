@@ -2,9 +2,7 @@ package com.mistakebook.ui.chat
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -89,9 +87,7 @@ internal fun ChatHistorySheet(
     drawerState: androidx.compose.material3.DrawerState,
     /** 复用对话页的 Snackbar：删除撤销的提示直接落在对话页底部。 */
     snackbarHostState: androidx.compose.material3.SnackbarHostState,
-    onOpenSession: (sessionId: Long, questionId: Long?) -> Unit,
-    /** 对话拍照入口（v0.0.57）：拍题工具直接进相机，不走「预填提示词」那条路。 */
-    onOpenCamera: () -> Unit
+    onOpenSession: (sessionId: Long, questionId: Long?) -> Unit
 ) {
     val viewModel = containerViewModel(container) { c ->
         ChatListViewModel(c.chatRepository, c.database.questionDao())
@@ -116,7 +112,6 @@ internal fun ChatHistorySheet(
 
     // 删除撤销（v0.0.66）：软删不再删附件，恢复即完整还原。
     val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     if (showClearConfirm) {
         AlertDialog(
@@ -226,18 +221,13 @@ internal fun ChatHistorySheet(
                         // 先合抽屉再干活：不关的话新会话已经在底下加载，
                         // 抽屉还盖在上面，用户会以为点了没反应。
                         scope.launch { drawerState.close() }
-                        when (tool) {
-                            ChatTool.PHOTO -> onOpenCamera()
-                            else -> {
-                                // 提示词经容器交接（与相机拍照同一套惯例），
-                                // 会话建好再导航——传 0 会被当成「没指定」。
-                                tool.promptRes?.let {
-                                    container.pendingChatDraft = context.getString(it)
-                                }
-                                viewModel.startFreeSession { sessionId ->
-                                    onOpenSession(sessionId, null)
-                                }
-                            }
+                        // 指令与「要不要先拍照」经容器交接（与相机拍照同一套惯例）；
+                        // 需要拍照的入口由对话页自动拉起相机，拍完自动发送。
+                        container.pendingChatInstruction = tool.instruction
+                        container.pendingChatAutoSend = tool.needsCamera
+                        container.captureHintEssay = tool == ChatTool.ESSAY
+                        viewModel.startFreeSession { sessionId ->
+                            onOpenSession(sessionId, null)
                         }
                     }
                 )
@@ -413,6 +403,22 @@ private fun SwipeableChatRow(
                 },
             horizontalArrangement = Arrangement.End
         ) {
+            // v0.0.98 用户拍板：置顶从长按菜单挪进左滑，三个动作一排。
+            // 最左是最温和的动作，越往右越破坏性——删除永远在最外面。
+            SwipeActionBlock(
+                width = SwipeActionBlockWidth,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                icon = Icons.Default.PushPin,
+                label = stringResource(
+                    if (item.session.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
+                ),
+                enabled = revealed,
+                onClick = {
+                    close()
+                    onTogglePin()
+                }
+            )
             SwipeActionBlock(
                 width = SwipeActionBlockWidth,
                 color = MaterialTheme.colorScheme.primary,
@@ -524,7 +530,6 @@ private fun SwipeActionBlock(
 }
 
 /** 对话记录一行的内容（标题 + 预览 + 时间）。 */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatRowContent(
     item: ChatListItemUi,
@@ -540,17 +545,12 @@ private fun ChatRowContent(
     val time = timeLabel(item.session.updatedAt)
 
     Surface(color = MaterialTheme.colorScheme.surface) {
-        var menuOpen by remember { mutableStateOf(false) }
-        Box {
+        // v0.0.98 用户拍板：去掉长按菜单，三个动作全部走左滑——
+        // 长按和左滑是同一组动作的两套入口，留一套才不会让人想「该用哪个」。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // 长按出菜单（v0.0.96 用户要求）：置顶 / 重命名 / 删除。
-                // 左滑仍然保留——两种手势各管一路，老习惯不用改。
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = { menuOpen = true }
-                )
+                .clickable(onClick = onClick)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -606,36 +606,6 @@ private fun ChatRowContent(
                 )
             }
         }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        stringResource(
-                            if (item.session.pinned) R.string.chat_unpin else R.string.chat_pin
-                        )
-                    )
-                },
-                onClick = {
-                    menuOpen = false
-                    onTogglePin()
-                }
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.chat_rename)) },
-                onClick = {
-                    menuOpen = false
-                    onRename()
-                }
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.swipe_delete_hint)) },
-                onClick = {
-                    menuOpen = false
-                    onDelete()
-                }
-            )
-        }
-        }
     }
 }
 
@@ -645,7 +615,7 @@ private fun ChatRowContent(
  * 块宽与错题卡的删除块取同一个公共值（ui/common/SwipeReveal.kt）：
  * 两个列表的删除块必须一样大，用户才不会觉得「一边顺手一边别扭」。
  */
-private val SwipeActionRevealWidth = SwipeActionBlockWidth * 2
+private val SwipeActionRevealWidth = SwipeActionBlockWidth * 3
 
 @Composable
 private fun QuestionTag(title: String) {

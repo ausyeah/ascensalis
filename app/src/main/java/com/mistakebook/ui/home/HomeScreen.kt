@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.BarChart
@@ -147,6 +149,8 @@ fun HomeScreen(
     onOpenQuestion: (Long) -> Unit,
     /** AI 对话：直接开一条新对话（v0.0.96）。历史会话改从对话页左上角进。 */
     onNewChat: () -> Unit = {},
+    /** 拍题讲解（v0.0.98）：拍照 → 裁切 → 直接进对话开讲，不走错题收集。 */
+    onSnapAsk: () -> Unit = {},
     /** 今日有到期题时横幅点击 → 进独立复习页（T1）。 */
     onStartReview: () -> Unit = {}
 ) {
@@ -309,9 +313,15 @@ fun HomeScreen(
                     value = state.keyword,
                     onValueChange = viewModel::setKeyword,
                     modifier = Modifier.weight(1f),
-                    // 不放灰色提示字（v0.0.84 用户反馈）：「搜题干、标题、答案、解析」
-                    // 在让出右侧三个入口按钮后的剩余宽度里显示不全，被裁掉一截
-                    // 反而影响观感；搜索图标本身已足够表达语义。
+                    // v0.0.84 曾以「提示字会被裁掉」为由去掉；v0.0.98 用户点名要回
+                    // 「搜索」二字。这次只放两个字，远比原来那句短，不存在裁切问题。
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.home_search_hint),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
                     leadingIcon = {
                         Icon(
                             Icons.Default.Search,
@@ -344,6 +354,16 @@ fun HomeScreen(
                         unfocusedBorderColor = Color.Transparent
                     )
                 )
+                // 拍题讲解（v0.0.98）：紧挨搜索框——「看不懂一道题」和「搜一道题」
+                // 是同一个动作的两个分支，入口就该并排。
+                IconButton(onClick = onSnapAsk, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoCamera,
+                        contentDescription = stringResource(R.string.home_snap_ask),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
                 IconButton(onClick = onOpenPrint, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Default.Print,
@@ -487,6 +507,7 @@ fun HomeScreen(
                             onReorder = ::updateQuestionDrag,
                             onReorderEnd = ::finishQuestionDrag,
                             onClick = { onOpenQuestion(question.id) },
+                            onPin = { viewModel.setPinned(question.id, !question.pinned) },
                             onDelete = {
                                 viewModel.delete(question)
                                 scope.launch {
@@ -741,6 +762,7 @@ private fun SwipeableQuestionCard(
     onReorder: (Float) -> Unit,
     onReorderEnd: () -> Unit,
     onClick: () -> Unit,
+    onPin: () -> Unit,
     onDelete: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -763,11 +785,8 @@ private fun SwipeableQuestionCard(
     Box(
         modifier = modifier
             .clip(MaterialTheme.shapes.medium)
-            // 露出区用 errorContainer / onErrorContainer 这对语义槽位，
-            // 不再写死 #D32F2F：亮色是浅粉、暗色是深红，随主题走，
-            // 图标文字也自动换成能读的前景（写死 Color.White 在浅粉底上
-            // 会直接看不见）。
-            .background(MaterialTheme.colorScheme.errorContainer)
+            // 底层背景由各操作块自己铺（置顶 primaryContainer、删除 errorContainer），
+            // 外层保持透明——两块颜色不同，铺在同一层就分不开了。
     ) {
         // 底层：删除区。
         //
@@ -776,10 +795,9 @@ private fun SwipeableQuestionCard(
         // 图标被放在**整张卡的正中**——而滑开只露出最右边一条，
         // 于是图标压根没露出来，用户看到「一片红、什么都没有」，
         // 自然也没有东西可点。这是 v0.0.5 的实际回归。
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(SwipeDeleteRevealWidth)
                 .align(Alignment.CenterEnd)
                 // 透明度跟着露出进度走，且只在绘制期读 offsetX（graphicsLayer 的
                 // lambda 是 draw 阶段，不重组）：图标像被手指带出来，而不是
@@ -788,33 +806,71 @@ private fun SwipeableQuestionCard(
                     val progress = swipeRevealProgress(offsetX.value, revealWidthPx)
                     alpha = swipeRevealContentAlpha(progress)
                 }
-                .clickable(
-                    // 滑开前点不到这里（被卡片挡住），但显式禁用更保险：
-                    // 万一将来层级调整，也不会变成「随手一点就删」。
-                    enabled = revealed,
-                    onClick = {
-                        close()
-                        onDelete()
-                    }
-                ),
-            contentAlignment = Alignment.Center
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+            // 置顶：与对话历史的左滑三选项同一套语义。常翻的题不该被新题冲走。
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(SwipeActionBlockWidth)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .clickable(enabled = revealed, onClick = { close(); onPin() }),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = stringResource(R.string.swipe_delete_action),
-                    tint = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.size(26.dp)
-                )
-                Text(
-                    text = stringResource(R.string.swipe_delete_hint),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = stringResource(
+                            if (question.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
+                        ),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Text(
+                        text = stringResource(
+                            if (question.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
+                        ),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(SwipeActionBlockWidth)
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .clickable(
+                        // 滑开前点不到这里（被卡片挡住），但显式禁用更保险：
+                        // 万一将来层级调整，也不会变成「随手一点就删」。
+                        enabled = revealed,
+                        onClick = {
+                            close()
+                            onDelete()
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = stringResource(R.string.swipe_delete_action),
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.swipe_delete_hint),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1
+                    )
+                }
             }
         }
 
@@ -1054,7 +1110,7 @@ private fun FilterRow(
  * 要放得下垃圾桶图标（24dp）+ 一行小字 + 左右留白，88dp 是个舒服的值：
  * 拇指能点中，又不至于把整张卡都推走（推太多用户会失去「这是同一张卡」的感觉）。
  */
-private val SwipeDeleteRevealWidth = SwipeActionBlockWidth
+private val SwipeDeleteRevealWidth = SwipeActionBlockWidth * 2
 
 /**
  * 横向手势定向判定（v0.0.89 重写；单测见 HomeScreenSwipeClaimTest）。

@@ -68,7 +68,7 @@ interface QuestionDao {
             OR optionsJson LIKE '%' || :keyword || '%' ESCAPE '\'
             OR note LIKE '%' || :keyword || '%' ESCAPE '\'
           )
-        ORDER BY updatedAt DESC
+        ORDER BY pinned DESC, updatedAt DESC
         """
     )
     fun observeFiltered(
@@ -206,6 +206,9 @@ interface QuestionDao {
     suspend fun difficultyDistribution(): List<NameCount>
 
     /** Anki 导出（F7）：全部未删除的题。导出场景一次性拉全量，不分页。 */
+    @Query("UPDATE questions SET pinned = :pinned, updatedAt = :at WHERE id = :id")
+    suspend fun setPinned(id: Long, pinned: Boolean, at: Long)
+
     @Query("SELECT * FROM questions WHERE deletedAt IS NULL ORDER BY createdAt DESC")
     suspend fun allActive(): List<Question>
 

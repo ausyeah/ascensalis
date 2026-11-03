@@ -1,25 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  启动图标前景（v0.0.98）：与应用内标志同一枚「书峰」，白标黑底。
+
+  为什么是矢量替换掉那张 PNG：自适应图标在 API 26+ 只认这一个前景，
+  旧 PNG 是给 API 25 以下准备的，而 minSdk 就是 26——它早就没被用过了。
+  缩放 0.62 是为了让 96 视口的标志整体落在自适应图标 66dp 的安全圆内，
+  否则圆形遮罩会把外环切掉一段。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M55,32 C48,28 40,27 31,28 L31,70 C40,69 48,70 55,74 C62,70 70,69 79,70 L79,28 C70,27 62,28 55,32 Z" />
-    <path
-        android:fillColor="#FF2F5FD0"
-        android:pathData="M54.2,34 L54.2,73.6 L56,73.6 L56,34 Z" />
-    <path
-        android:fillColor="#FF2F5FD0"
-        android:pathData="M36,38 L48,37 L48,40 L36,41 Z" />
-    <path
-        android:fillColor="#FF2F5FD0"
-        android:pathData="M36,45 L48,44 L48,47 L36,48 Z" />
-    <path
-        android:fillColor="#FF2F5FD0"
-        android:pathData="M62,37 L74,38 L74,41 L62,40 Z" />
-    <path
-        android:fillColor="#FF2F5FD0"
-        android:pathData="M62,44 L74,45 L74,48 L62,47 Z" />
+    <group
+        android:scaleX="0.62"
+        android:scaleY="0.62"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:pathData="M48,48 m-38,0 a38,38 0 1,0 76,0 a38,38 0 1,0 -76,0"
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M48,26 L70,54 L70,66 L48,58 L26,66 L26,54 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M48,17.5 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+    </group>
 </vector>

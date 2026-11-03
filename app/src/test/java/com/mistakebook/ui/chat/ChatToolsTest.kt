@@ -20,16 +20,15 @@ import com.mistakebook.R
 class ChatToolsTest {
 
     @Test
-    fun `六个入口一个不多一个不少`() {
-        assertEquals(6, ChatTool.entries.size)
+    fun `五个入口一个不多一个不少`() {
+        assertEquals(5, ChatTool.entries.size)
         // 用户点名的六个
         listOf(
             R.string.chat_tool_photo,
             R.string.chat_tool_translate,
             R.string.chat_tool_essay,
             R.string.chat_tool_diagram,
-            R.string.chat_tool_explain,
-            R.string.chat_tool_image
+            R.string.chat_tool_diagnose
         ).forEach { res ->
             assertTrue(
                 "入口文案必须在清单里（res=$res）",
@@ -39,18 +38,37 @@ class ChatToolsTest {
     }
 
     @Test
-    fun `只有拍题走相机其余都是预填提示词`() {
-        assertEquals(
-            "拍题是「拍一张」不是「说一句话」",
-            null,
-            ChatTool.PHOTO.promptRes
-        )
-        ChatTool.entries.filter { it != ChatTool.PHOTO }.forEach { tool ->
+    fun `每个入口都有隐藏指令且不为空`() {
+        ChatTool.entries.forEach { tool ->
             assertTrue(
-                "${tool.name} 必须带一句预填提示词，否则点进去是一片空白",
-                tool.promptRes != null
+                "${tool.name} 的隐藏指令不能为空——空指令等于功能没接上",
+                tool.instruction.isNotBlank()
             )
         }
+    }
+
+    @Test
+    fun `指令里不许出现输入框回显的措辞`() {
+        // 指令以 SYSTEM 消息注入，用户永远看不见；若有人把它当界面文案
+        // 写上「请把下面的内容…」以外的 UI 措辞，也轮不到这里管——
+        // 这里钉的是更实际的回归：指令被误改成以用户口吻开头，
+        // 发出去就成了用户「说过」的话。
+        ChatTool.entries.forEach { tool ->
+            assertFalse(
+                "${tool.name} 的指令必须以模式声明开头（【…模式】），不能像用户说的话",
+                !tool.instruction.trimStart().startsWith("【")
+            )
+        }
+    }
+
+    @Test
+    fun `要拍照的入口就三个`() {
+        // 拍题讲解 / 作文批改 / 错因诊断都从一张照片开始；
+        // 翻译和绘图生图是纯文字/纯生成，不该拉起相机
+        assertEquals(
+            setOf(ChatTool.PHOTO, ChatTool.ESSAY, ChatTool.DIAGNOSE),
+            ChatTool.entries.filter { it.needsCamera }.toSet()
+        )
     }
 
     @Test
@@ -62,11 +80,14 @@ class ChatToolsTest {
 
     @Test
     fun `配了模型没配识别时只有拍题受影响`() {
-        // 翻译 / 批改 / 绘图 / 讲解 / 生成图片都不依赖 OCR，识别没配不该连坐
-        ChatTool.entries.filter { it != ChatTool.PHOTO }.forEach { tool ->
+        // 翻译 / 批改 / 绘图生图都不依赖 OCR，识别没配不该连坐；
+        // 拍题讲解与错因诊断都要读照片，识别没配就是真的用不了
+        ChatTool.entries.filter { !it.needsOcr }.forEach { tool ->
             assertEquals(ChatToolBlock.READY, tool.blockReason(llmConfigured = true, ocrConfigured = false))
         }
-        assertEquals(ChatToolBlock.NEEDS_OCR, ChatTool.PHOTO.blockReason(llmConfigured = true, ocrConfigured = false))
+        ChatTool.entries.filter { it.needsOcr }.forEach { tool ->
+            assertEquals(ChatToolBlock.NEEDS_OCR, tool.blockReason(llmConfigured = true, ocrConfigured = false))
+        }
     }
 
     @Test
@@ -92,8 +113,6 @@ class ChatToolsTest {
             "chat_pin",
             "chat_unpin",
             "chat_pinned_badge",
-            "chat_tool_translate_prompt",
-            "chat_tool_image_prompt",
             "chat_temporary_new"
         ).forEach { name ->
             assertTrue("strings.xml 少了 $name", strings.contains("name=\"$name\""))
@@ -120,17 +139,15 @@ class ChatToolsTest {
     }
 
     @Test
-    fun `长按菜单必须有三项且带置顶`() {
+    fun `历史行左滑露出三个动作`() {
         val sheet = readSource("src/main/java/com/mistakebook/ui/chat/ChatHistorySheet.kt")
-        assertTrue("长按出菜单", sheet.contains("onLongClick = { menuOpen = true }"))
-        // 抽屉里有两个 menuOpen 菜单：头部的「清空全部」、行内的长按菜单。
-        // 长按菜单是后写的那个，从后往前找才不会拿错。
-        val menu = sheet.lastIndexOf("DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {")
-        assertTrue(menu > 0)
-        val block = sheet.substring(menu, sheet.indexOf("\n        }", menu))
-        assertTrue("菜单里要有置顶", block.contains("R.string.chat_unpin") || block.contains("R.string.chat_pin"))
-        assertTrue("菜单里要有重命名", block.contains("R.string.chat_rename"))
-        assertTrue("菜单里要有删除", block.contains("R.string.swipe_delete_hint"))
+        // v0.0.98 用户拍板：去掉长按菜单，置顶进左滑
+        assertFalse("长按菜单必须删掉", sheet.contains("onLongClick"))
+        assertTrue("左滑露出宽度必须是三块", sheet.contains("SwipeActionRevealWidth = SwipeActionBlockWidth * 3"))
+        val blocks = sheet.substring(sheet.indexOf("SwipeActionBlock("), sheet.indexOf("// 上层：卡片内容"))
+        assertTrue("第一块是置顶", blocks.contains("R.string.swipe_unpin_action") && blocks.contains("R.string.swipe_pin_action"))
+        assertTrue("第二块是重命名", blocks.contains("R.string.chat_rename"))
+        assertTrue("最后一块才是删除", blocks.lastIndexOf("R.string.swipe_delete_hint") > blocks.lastIndexOf("R.string.chat_rename"))
     }
 
     @Test

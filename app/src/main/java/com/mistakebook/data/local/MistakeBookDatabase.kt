@@ -25,7 +25,7 @@ import com.mistakebook.data.local.entities.BadgeRecord
  * 高版本备份恢复进低版本 App，Room 下次启动会因找不到迁移而启动崩循环，
  * 只能清数据自救（v0.0.60 起在恢复入口直接拒绝）。
  */
-const val MISTAKE_BOOK_DB_VERSION = 8
+const val MISTAKE_BOOK_DB_VERSION = 9
 
 @Database(
     entities = [
@@ -336,6 +336,18 @@ abstract class MistakeBookDatabase : RoomDatabase() {
          * 升级后列表顺序和可见性与升级前逐行一致，不会有一条老对话
          * 突然冒到最前面，也不会有哪条凭空消失。
          */
+        /**
+         * 8 → 9（v0.0.98）：错题加「置顶」列。同 7→8 的口径：
+         * NOT NULL DEFAULT 0，老题升级后顺序逐行不变。
+         */
+        val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `questions` ADD COLUMN `pinned` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
         val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL(
@@ -366,7 +378,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                     MIGRATION_4_5,
                     MIGRATION_5_6,
                     MIGRATION_6_7,
-                    MIGRATION_7_8
+                    MIGRATION_7_8,
+                    MIGRATION_8_9
                 )
                 .build()
     }

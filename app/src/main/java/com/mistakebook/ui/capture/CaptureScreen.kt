@@ -591,7 +591,12 @@ fun CaptureScreen(
         ) {
             Text(
                 text = stringResource(
-                    if (isChatPurpose) R.string.capture_hint_chat else R.string.capture_hint_question
+                    when {
+                        // 作文批改是两段式：先题目要求再作文，不提示用户会只拍一张
+                        container.captureHintEssay -> R.string.capture_hint_essay
+                        isChatPurpose -> R.string.capture_hint_chat
+                        else -> R.string.capture_hint_question
+                    }
                 ),
                 color = Color.White.copy(alpha = 0.65f),
                 style = MaterialTheme.typography.labelMedium

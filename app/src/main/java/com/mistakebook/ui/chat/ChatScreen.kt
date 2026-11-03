@@ -62,7 +62,6 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
@@ -100,6 +99,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -111,6 +111,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import android.content.ClipData
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontFamily
@@ -122,6 +123,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import com.mistakebook.R
+import com.mistakebook.data.chat.ChatToolPrompts
+import com.mistakebook.domain.AttachmentStatus
 import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.chat.ChatSearchProvider
 import com.mistakebook.data.local.entities.ChatMessage
@@ -319,13 +322,37 @@ fun ChatScreen(
     //
     // 还要判 input 为空：恢复了历史草稿的会话不能再被预填覆盖，
     // 否则用户上次打的字照样会丢（只是丢的方式换了）。
-    // 功能入口带过来的草稿（v0.0.96）：只在「刚开的新会话」里填，且不覆盖
-    // 用户已经打的字。取走即置空——放在容器里就是等着被消费一次。
-    LaunchedEffect(state.sessionId, state.loading) {
-        val draft = container.pendingChatDraft ?: return@LaunchedEffect
-        if (!state.loading && state.messages.isEmpty() && state.input.isBlank()) {
-            container.pendingChatDraft = null
-            viewModel.onInputChange(draft)
+    // 功能入口的隐藏指令（v0.0.98）：会话就绪且一条消息都没有时落成 SYSTEM 消息。
+    // 只对全新会话生效——历史会话里点功能入口，不该悄悄改写那次对话的规则。
+    val pendingInstruction = container.pendingChatInstruction
+    LaunchedEffect(pendingInstruction, state.sessionId, state.loading) {
+        if (pendingInstruction == null) return@LaunchedEffect
+        if (state.sessionId == 0L || state.loading) return@LaunchedEffect
+        if (state.messages.isNotEmpty()) return@LaunchedEffect
+        container.pendingChatInstruction = null
+        viewModel.installInstruction(pendingInstruction)
+    }
+
+    // 拍题 / 作文批改要先拍照：会话就绪后自动拉起相机，一次组合只拉一次。
+    val autoSendPending = container.pendingChatAutoSend
+    var cameraAutoOpened by rememberSaveable(state.sessionId) { mutableStateOf(false) }
+    LaunchedEffect(autoSendPending, state.sessionId, state.loading) {
+        if (!autoSendPending || cameraAutoOpened) return@LaunchedEffect
+        if (state.sessionId == 0L || state.loading) return@LaunchedEffect
+        if (state.pendingAttachments.isNotEmpty()) return@LaunchedEffect
+        cameraAutoOpened = true
+        onOpenCamera()
+    }
+
+    // 拍完裁切回来、附件就绪即自动发送——「拍完直接发送」就该一步到位，
+    // 再让用户按一次发送等于把刚才省掉的步骤又加回去。
+    LaunchedEffect(autoSendPending, state.pendingAttachments) {
+        if (!autoSendPending) return@LaunchedEffect
+        val pending = state.pendingAttachments
+        if (pending.isEmpty()) return@LaunchedEffect
+        if (pending.all { it.status == AttachmentStatus.READY }) {
+            container.pendingChatAutoSend = false
+            viewModel.send()
         }
     }
 
@@ -456,8 +483,7 @@ fun ChatScreen(
                     container = container,
                     drawerState = drawerState,
                     snackbarHostState = snackbarHost,
-                    onOpenSession = onOpenSession,
-                    onOpenCamera = onOpenCamera
+                    onOpenSession = onOpenSession
                 )
             }
         }
@@ -487,8 +513,11 @@ fun ChatScreen(
                     // 「不想留在历史里」的问题。普通新对话的入口在首页与历史页。
                     IconButton(onClick = onNewTemporaryConversation) {
                         Icon(
-                            Icons.Default.Bolt,
-                            contentDescription = stringResource(R.string.chat_temporary_new)
+                            painter = painterResource(R.drawable.ic_temp_chat),
+                            contentDescription = stringResource(R.string.chat_temporary_new),
+                            // 灰：临时对话是「次要动作」，用色重了会和正式对话抢
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -513,7 +542,13 @@ fun ChatScreen(
                 } else if (showChatEmptyState(state.loading, state.messages.size)) {
                     // 空会话中央原来是纯白一块：用户进来第一眼不知道这页能干嘛。
                     // 标志 + 签名把「这是哪儿」说清楚，比任何引导浮层都轻，也不占状态。
-                    ChatEmptyState()
+                    ChatEmptyState(
+                        onSnapAsk = {
+                            container.pendingChatInstruction = ChatToolPrompts.ASK
+                            container.pendingChatAutoSend = true
+                            container.captureHintEssay = false
+                        }
+                    )
                 } else {
                     MessageList(
                         state = state,
@@ -676,19 +711,29 @@ internal fun showChatEmptyState(loading: Boolean, messageCount: Int): Boolean =
  * 这里**刻意不跟随全局字体设置**——签名是品牌标识，不该被用户的正文偏好改写。
  */
 @Composable
-private fun ChatEmptyState(modifier: Modifier = Modifier) {
+private fun ChatEmptyState(onSnapAsk: () -> Unit, modifier: Modifier = Modifier) {
     val ink = MaterialTheme.colorScheme.onSurface
     Column(
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Image(
-            painter = painterResource(R.drawable.ic_app_mark),
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(ink),
-            modifier = Modifier.size(96.dp)
-        )
+        // 点标志直接进拍题（v0.0.98）：空会话里唯一能干的事就是开始一问，
+        // 而这一页最常见的问法就是「拍一道题」。标志本身就是最大的可点区域。
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .clip(CircleShape)
+                .clickable(role = Role.Button, onClick = onSnapAsk),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_app_mark),
+                contentDescription = stringResource(R.string.home_snap_ask),
+                colorFilter = ColorFilter.tint(ink),
+                modifier = Modifier.size(96.dp)
+            )
+        }
         Spacer(Modifier.height(18.dp))
         Text(
             text = stringResource(R.string.app_signature),

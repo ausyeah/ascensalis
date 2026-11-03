@@ -296,6 +296,31 @@ class ChatRepository(
         return true
     }
 
+    /**
+     * 功能入口的隐藏指令（v0.0.98）：以 SYSTEM 消息落进会话。
+     *
+     * 复用题目上下文那套机制——`injected = true` 的消息不进气泡，
+     * 模型却在每轮请求里都看得到。一条会话只允许一条注入消息
+     * （与 [ensureQuestionContext] 同一守卫），所以功能会话不能同时挂题目上下文。
+     */
+    suspend fun ensureToolInstruction(sessionId: Long, text: String): Boolean {
+        if (text.isBlank()) return false
+        if (chatDao.findInjectedMessage(sessionId) != null) return false
+        val now = System.currentTimeMillis()
+        chatDao.insertMessage(
+            ChatMessage(
+                sessionId = sessionId,
+                role = ChatRole.SYSTEM,
+                content = text.trim(),
+                status = MessageStatus.DONE,
+                injected = true,
+                createdAt = now,
+                updatedAt = now
+            )
+        )
+        return true
+    }
+
     /** 新建一条空的 STREAMING 助手消息，边收边往里写。 */
     suspend fun insertStreamingAssistantMessage(sessionId: Long, model: String): Long {
         val now = System.currentTimeMillis()

@@ -21,6 +21,7 @@ import androidx.navigation.navArgument
 import android.util.Log
 import com.mistakebook.di.AppContainer
 import com.mistakebook.ui.capture.CaptureScreen
+import com.mistakebook.data.chat.ChatToolPrompts
 import com.mistakebook.ui.chat.ChatScreen
 import com.mistakebook.ui.crop.CropScreen
 import com.mistakebook.ui.detail.DetailScreen
@@ -101,6 +102,18 @@ fun MistakeBookNavHost(
     // 筛选状态本来就归 HomeViewModel 管，多带一层参数只会让两边状态不同步。
     var homeNotebookPick by remember { mutableStateOf<Long?>(null) }
     val scope = rememberCoroutineScope()
+
+    /**
+     * 回主页（v0.0.98）：从任何对话返回都直接落地主页，而不是按进来的顺序
+     * 逐层退。从题目详情进对话再返回，按栈退会落在详情页——用户的意图
+     * 是「聊完了，回去」，不是「回到我看过的那道题」。
+     * HOME 不在栈里（进程恢复的极端情况）就退一层兜底，至少不会没反应。
+     */
+    fun popToHome() {
+        if (!navController.popBackStack(Routes.HOME, inclusive = false)) {
+            navController.popBackStack()
+        }
+    }
 
     /**
      * F6：提交整批连拍成果。drainCropped 取走文件后**不能**再清空批次
@@ -217,6 +230,18 @@ fun MistakeBookNavHost(
                         navController.navigate(
                             Routes.chat(null, container.chatRepository.openFreeSession())
                         )
+                    }
+                },
+                onSnapAsk = {
+                    scope.launch {
+                        // 拍题讲解（v0.0.98）：先建会话再拍照——裁切接力需要
+                        // 一个已经存在的会话来落地成果。指令进会话、自动开相机、
+                        // 拍完自动发送，三件事都由对话页按容器标志接管。
+                        val id = container.chatRepository.openFreeSession()
+                        container.pendingChatInstruction = ChatToolPrompts.ASK
+                        container.pendingChatAutoSend = true
+                        container.captureHintEssay = false
+                        navController.navigate(Routes.chat(null, id))
                     }
                 },
                 onOpenQuestion = { id -> navController.navigate(Routes.detail(id)) },
@@ -622,11 +647,11 @@ fun MistakeBookNavHost(
                     // 立刻被取消——在这里删（NavHost 的组合作用域比它活得久）才删得完。
                     val leaving = rawSession.takeIf { it != Routes.CHAT_FREE }
                     if (leaving == null) {
-                        navController.popBackStack()
+                        popToHome()
                     } else {
                         scope.launch {
                             runCatching { container.chatRepository.discardIfTemporary(leaving) }
-                            navController.popBackStack()
+                            popToHome()
                         }
                     }
                 },
