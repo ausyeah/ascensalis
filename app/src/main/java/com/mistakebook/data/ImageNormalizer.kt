@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.media.ExifInterface
 import android.util.Log
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * 图片归一化：把「来源各异的原始照片」统一成「方向正确、适合 OCR 的平铺 JPEG」。
@@ -28,7 +29,8 @@ import java.io.File
  * ## 为什么保留彩色像素
  * 老师用红笔批注是错题本里信息量最大的部分。全转黑白会把红笔批注一起抹掉。
  * 所以策略是：**近灰像素**（纸面、铅笔、黑字）走强对比拉伸；
- * **彩色像素**（红笔、蓝笔）保留色相，只做温和的亮度对比增强。
+ * **彩色像素**（红笔、蓝笔）保留色相，只做光照校正不做灰度陡坡
+ * （陡坡会把同一种颜色在明暗两处压出两种深浅，见 [mapPixel]）。
  */
 object ImageNormalizer {
 
@@ -41,11 +43,37 @@ object ImageNormalizer {
     /** 饱和度低于此值视为「近灰」，走强对比通道。 */
     private const val GRAY_SATURATION = 0.18f
 
-    /** 超过此饱和度视为「彩色笔迹」，走保色通道。 */
-    private const val COLOR_SATURATION = 0.30f
-
     /** [steepen] 的中点。映射围绕这里双向展开。 */
     private const val MID = 128f
+
+    /**
+     * 光照均一化的参数（v0.0.95）。
+     *
+     * 背景网格长边最多 [BG_GRID_MAX] 格：够细能跟上阴影的渐变，
+     * 又粗到每格塞得下几十个笔画——分位统计要有足够样本才有意义。
+     */
+    private const val BG_GRID_MAX = 32
+
+    /**
+     * 每格取多少分位当「这一格的纸面亮度」。
+     *
+     * 为什么不是最大值：纸上有一小块高光（反光、铜版纸的镜面反射）
+     * 就会把整格背景拉到 255，同格的纸面全被除成灰。
+     * 为什么不是中位数：中文密排时一格里字迹能占到三成，中位数会落到字上。
+     * 0.90 分位对「不超过一成的高光 + 三成的字迹」都稳。
+     */
+    private const val BG_PERCENTILE = 0.90
+
+    /**
+     * 背景亮度下限。低于它的区域一律按它算。
+     *
+     * 没有这道下限，纯黑区域（桌边、屏幕边框）的背景会被估成个位数，
+     * 除以它之后噪点被放大成灰白一片——「去死黑」反而变成「把黑洗成灰」。
+     */
+    private const val BG_FLOOR = 32
+
+    /** 轻度档只做一半光照校正：那是「稍作灰化」，不是「去除背光」。 */
+    private const val BLEND_LIGHT = 0.5f
 
     /**
      * 阈值以下的过渡跨度占阈值的比例。
@@ -159,12 +187,23 @@ object ImageNormalizer {
     /**
      * OCR 友好的对比度增强。
      *
-     * 分两路：
-     * - 近灰像素：走「自适应阈值 + 陡坡」曲线，纸面压到接近纯白、字迹压到接近纯黑；
-     * - 彩色像素：保留色相，只按同一套曲线提亮/压暗，避免红笔批注被抹成灰。
+     * 三步，顺序不能换：
+     * 1. **光照均一化**（[flattenIllumination]）：把背光/阴影压低的那部分纸面
+     *    按局部背景除回白纸水平；
+     * 2. **Otsu 求阈值**：在均一化之后的灰度上求，阴影不再把分界拉偏；
+     * 3. **分段陡坡**（[steepen]）：纸面推向纯白、字迹压向纯黑。
      *
-     * 阈值不是固定的 128，而是按整图直方图取 Otsu 值——
-     * 偏灰的照片和偏亮的照片需要不同的分界，固定阈值会把浅铅笔字吃掉。
+     * ## 为什么第 1 步必须存在（v0.0.95 用户反馈）
+     * 旧实现只有第 2、3 步，是**全局阈值 + 逐像素映射**：
+     * 一张桌上拍的作业照，左半边靠窗、右半边在阴影里，两边纸面亮度能差 60 级。
+     * 全局阈值只有一个，落在两者之间——靠窗的白纸被推到 255，
+     * 阴影里的白纸被推到暗部，整片阴影成了「一片死黑」。
+     * 用户说的「非常失调、非常黑的一片片」就是它。
+     *
+     * 这不是调参能解决的：任何单一阈值都必然把其中一半判错。
+     * 必须先把亮度场抹平，让「阴影里的白纸」和「亮处的白纸」变成同一个数量级。
+     *
+     * 彩色像素仍然保留色相，只按同一套曲线提亮/压暗，避免红笔批注被抹成灰。
      */
     fun enhanceForOcr(bitmap: Bitmap, strength: Int): Bitmap {
         if (strength <= 0) return bitmap
@@ -174,42 +213,243 @@ object ImageNormalizer {
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        val threshold = otsuThreshold(pixels)
-
+        // 灰度单独提出来：背景估计、阈值、逐像素映射都要用。
+        // 旧版在 Otsu 和映射里各算一次 luma，等于每像素算两遍。
+        val gray = IntArray(pixels.size)
         for (i in pixels.indices) {
             val pixel = pixels[i]
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            val maxC = maxOf(r, g, b)
-            val minC = minOf(r, g, b)
-            val saturation = if (maxC == 0) 0f else (maxC - minC).toFloat() / maxC
+            gray[i] = luma((pixel shr 16) and 0xFF, (pixel shr 8) and 0xFF, pixel and 0xFF)
+        }
 
-            val target = steepen(luma(r, g, b), threshold, strength)
-            pixels[i] = if (saturation >= COLOR_SATURATION) {
-                // 彩色笔迹：按比例缩放 RGB，保住色相
-                val scale = if (maxC == 0) 0f else target / maxC.toFloat()
-                val nr = (r * scale).toInt().coerceIn(0, 255)
-                val ng = (g * scale).toInt().coerceIn(0, 255)
-                val nb = (b * scale).toInt().coerceIn(0, 255)
-                (0xFF shl 24) or (nr shl 16) or (ng shl 8) or nb
-            } else {
-                // 近灰像素（含铅笔字、纸面）：直接映射到增强后的灰阶
-                val v = if (saturation >= GRAY_SATURATION) {
-                    // 轻微带色但不算彩色：折中处理，仍保一点色相
-                    val scale = if (maxC == 0) 0f else target / maxC.toFloat()
-                    ((r * scale).toInt().coerceIn(0, 255) shl 16) or
-                        ((g * scale).toInt().coerceIn(0, 255) shl 8) or
-                        (b * scale).toInt().coerceIn(0, 255)
-                } else {
-                    (0xFF shl 24) or (target shl 16) or (target shl 8) or target
-                }
-                v
+        // 就地改写：gray 从此是「均一化后的灰度」，后续都用它。
+        // 返回的网格留给彩色像素算亮度缩放——它们不走灰度陡坡，只除光照。
+        val blend = illuminationBlend(strength)
+        val grid = flattenIllumination(gray, width, height, blend)
+
+        val threshold = otsuThresholdOfGray(gray)
+
+        for (y in 0 until height) {
+            val rowBase = y * width
+            for (x in 0 until width) {
+                val index = rowBase + x
+                val pixel = pixels[index]
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+                val maxC = maxOf(r, g, b)
+                val background = grid.sample(x, y)
+                pixels[index] = mapPixel(
+                    r = r,
+                    g = g,
+                    b = b,
+                    target = steepen(gray[index], threshold, strength),
+                    colorScale = if (maxC == 0) {
+                        0f
+                    } else {
+                        flattenExposure(maxC, background, blend) / maxC.toFloat()
+                    }
+                )
             }
         }
 
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         out.setPixels(pixels, 0, width, 0, 0, width, height)
+        return out
+    }
+
+    /**
+     * 单像素映射：彩色走「按比例缩放」保住色相，近灰走灰度陡坡。
+     *
+     * ## 为什么彩色不再跟灰度共用 [steepen]
+     * 陡坡是为「纸 vs 墨」设计的曲线。压到彩色上会把它压成暗红/暗蓝，
+     * 更糟的是**同一种颜色在亮处和阴影处会被压出两种深浅**——
+     * 阴影里的 luma 低，陡坡给的目标值也低，用户看到的就是「红笔一半深一半浅」。
+     * 彩色只要做光照校正（除一次局部背景），亮处阴影处的同一支笔才会一样红。
+     *
+     * ## 为什么 alpha 必须显式补上
+     * v0.0.95 之前，饱和度落在 0.18~0.30 那一档（浅蓝铅笔、淡红批注）
+     * 的合成代码漏了最高字节，alpha 恒为 0——那些像素在增强图上直接是**透明洞**。
+     * 这里统一走 `0xFF shl 24`，两条分支都不再有机会漏。
+     *
+     * @param target 近灰像素的目标灰度（[steepen] 的结果，已含光照均一化）
+     * @param colorScale 彩色像素的亮度缩放（光照均一化后的 maxC / 原 maxC）
+     */
+    internal fun mapPixel(
+        r: Int,
+        g: Int,
+        b: Int,
+        target: Int,
+        colorScale: Float
+    ): Int {
+        val maxC = maxOf(r, g, b)
+        val minC = minOf(r, g, b)
+        val saturation = if (maxC == 0) 0f else (maxC - minC).toFloat() / maxC
+        return if (saturation >= GRAY_SATURATION) {
+            val nr = (r * colorScale).toInt().coerceIn(0, 255)
+            val ng = (g * colorScale).toInt().coerceIn(0, 255)
+            val nb = (b * colorScale).toInt().coerceIn(0, 255)
+            (0xFF shl 24) or (nr shl 16) or (ng shl 8) or nb
+        } else {
+            (0xFF shl 24) or (target shl 16) or (target shl 8) or target
+        }
+    }
+
+    /** 光照校正的强度：轻度只做一半，标准与强力做满。 */
+    internal fun illuminationBlend(strength: Int): Float = when (strength) {
+        1 -> BLEND_LIGHT
+        else -> 1f
+    }
+
+    /**
+     * 把 [gray] 就地改写为「光照均一化后的灰度」。
+     *
+     * 做法是**平场校正**：估计每个小块的纸面亮度，再把每个像素除回去。
+     * 背光只是乘在纸面上的一个低频系数，除掉它，阴影里的白纸就回到白纸的亮度。
+     *
+     * @param blend 0 = 原样返回（轻度档只做一半），1 = 完全校正。
+     * @return 估计出来的背景网格。彩色像素要拿它算亮度缩放（见 [mapPixel]），
+     *   所以不另算一遍——网格的采样是整个增强里最贵的部分之一。
+     *
+     * 前置条件（由 [enhanceForOcr] 保证）：[width]、[height] 为正，且
+     * [gray] 至少 [width]×[height] 个元素。
+     */
+    internal fun flattenIllumination(
+        gray: IntArray,
+        width: Int,
+        height: Int,
+        blend: Float
+    ): BackgroundGrid {
+        val grid = estimateBackgroundGrid(gray, width, height)
+        if (blend <= 0f) return grid
+        for (y in 0 until height) {
+            val rowBase = y * width
+            for (x in 0 until width) {
+                val index = rowBase + x
+                gray[index] = flattenExposure(gray[index], grid.sample(x, y), blend)
+            }
+        }
+        return grid
+    }
+
+    /**
+     * 单个像素的平场校正：`value / background * 255`。
+     *
+     * 为什么除法而不是减一个固定偏移：阴影是**乘法性**的（照度低 → 整片按比例变暗），
+     * 减去固定值只会让亮处和暗处的差距原样保留。
+     *
+     * [BG_FLOOR] 兜住分母：背景估得极低时（纯黑桌边），除法会把噪点放大成灰白一片。
+     */
+    internal fun flattenExposure(value: Int, background: Int, blend: Float): Int {
+        val bg = background.coerceAtLeast(BG_FLOOR)
+        val flattened = (value.toLong() * 255 / bg).toInt().coerceIn(0, 255)
+        val b = blend.coerceIn(0f, 1f)
+        if (b <= 0f) return value
+        if (b >= 1f) return flattened
+        return (value + (flattened - value) * b).roundToInt().coerceIn(0, 255)
+    }
+
+    /**
+     * 局部背景网格：把整幅画面压成 [cols]×[rows] 个「纸面亮度」。
+     *
+     * 独立成类是为了让「估计」与「采样」能分开测：前者关心分位统计对不对，
+     * 后者关心双线性取出来的值在格与格之间有没有跳变。
+     */
+    internal class BackgroundGrid(
+        val width: Int,
+        val height: Int,
+        val cols: Int,
+        val rows: Int,
+        private val cells: IntArray
+    ) {
+        /**
+         * 双线性取 [x],[y] 处的背景亮度。
+         *
+         * 不能取最近邻：32×32 的网格铺在 1600px 宽的图上，每格 50px，
+         * 最近邻会在阴影的渐变里留下一条条 50px 宽的台阶——那正是要消灭的
+         * 「一片片」的另一种形态。
+         */
+        fun sample(x: Int, y: Int): Int {
+            if (cols <= 0 || rows <= 0 || width <= 0 || height <= 0) return BG_FLOOR
+            if (cols == 1 && rows == 1) return cells[0]
+            // 像素中心映射到网格坐标（-0.5 让格心的采样点落在像素中心）
+            val gx = ((x + 0.5f) * cols / width - 0.5f).coerceIn(0f, (cols - 1).toFloat())
+            val gy = ((y + 0.5f) * rows / height - 0.5f).coerceIn(0f, (rows - 1).toFloat())
+            val x0 = gx.toInt()
+            val y0 = gy.toInt()
+            val x1 = (x0 + 1).coerceAtMost(cols - 1)
+            val y1 = (y0 + 1).coerceAtMost(rows - 1)
+            val fx = gx - x0
+            val fy = gy - y0
+            val top = cells[y0 * cols + x0] * (1 - fx) + cells[y0 * cols + x1] * fx
+            val bottom = cells[y1 * cols + x0] * (1 - fx) + cells[y1 * cols + x1] * fx
+            return (top * (1 - fy) + bottom * fy).roundToInt().coerceIn(0, 255)
+        }
+    }
+
+    /**
+     * 估计局部纸面亮度（v0.0.95）。
+     *
+     * 分三步：
+     * 1. 每格取 [BG_PERCENTILE] 分位——字迹是少数、纸面是多数，分位落回纸面；
+     * 2. 3×3 均值平滑——去掉格子边界上的硬折角，避免「一格一亮」的补丁感；
+     * 3. 全图黑区兜底——背景不许低于「全图中位亮度的一半」，也不许低于 [BG_FLOOR]。
+     *    没有这道兜底，桌面、屏幕边框这类纯黑区域会把背景估成个位数，
+     *    除以它之后整片被提亮成灰白噪点，「去死黑」变成「把黑洗成灰」。
+     */
+    internal fun estimateBackgroundGrid(gray: IntArray, width: Int, height: Int): BackgroundGrid {
+        val cols = width.coerceIn(1, BG_GRID_MAX)
+        val rows = height.coerceIn(1, BG_GRID_MAX)
+        val cellCount = cols * rows
+        val histograms = Array(cellCount) { IntArray(256) }
+        val global = IntArray(256)
+
+        for (y in 0 until height) {
+            val cellY = (y.toLong() * rows / height).toInt().coerceIn(0, rows - 1)
+            val cellRowBase = cellY * cols
+            val srcRowBase = y * width
+            for (x in 0 until width) {
+                val value = gray[srcRowBase + x].coerceIn(0, 255)
+                val cellX = (x.toLong() * cols / width).toInt().coerceIn(0, cols - 1)
+                histograms[cellRowBase + cellX][value]++
+                global[value]++
+            }
+        }
+
+        val cells = IntArray(cellCount) { index ->
+            val histogram = histograms[index]
+            quantileOfHistogram(histogram, histogram.sum(), BG_PERCENTILE)
+        }
+        val smoothed = smoothGrid(cells, cols, rows)
+
+        // 兜底：中位数代表「这幅画整体的亮度水平」，一半作为黑区的下限
+        val median = quantileOfHistogram(global, width * height, 0.5)
+        val floor = maxOf(BG_FLOOR, median / 2)
+        for (index in smoothed.indices) {
+            if (smoothed[index] < floor) smoothed[index] = floor
+        }
+        return BackgroundGrid(width, height, cols, rows, smoothed)
+    }
+
+    /** 网格的 3×3 均值平滑，边界按实际邻居数取平均（不改中心值之外的结构）。 */
+    private fun smoothGrid(cells: IntArray, cols: Int, rows: Int): IntArray {
+        val out = IntArray(cells.size)
+        for (cy in 0 until rows) {
+            for (cx in 0 until cols) {
+                var sum = 0
+                var count = 0
+                for (dy in -1..1) {
+                    val yy = cy + dy
+                    if (yy < 0 || yy >= rows) continue
+                    for (dx in -1..1) {
+                        val xx = cx + dx
+                        if (xx < 0 || xx >= cols) continue
+                        sum += cells[yy * cols + xx]
+                        count++
+                    }
+                }
+                out[cy * cols + cx] = sum / count
+            }
+        }
         return out
     }
 
@@ -289,12 +529,13 @@ object ImageNormalizer {
      *
      * 回退时留 `Log.w`：下次用户再遇到，凭这条日志就能定位是不是这条路径。
      *
-     * internal 而非 private 是为了让单测能直接构造极端直方图验证守卫
-     * （与 [steepen]、[calculateSampleSize] 同一约定）。
-     *
      * [onFallback] 可注入是为了 JVM 单测：Paparazzi 带来的 layoutlib jar 里
      * `android.util.Log` 是真身（native 调用），且排在 mockable android.jar
      * 之前，单测里打 Log 会 UnsatisfiedLinkError。生产走默认值 = 真 Log.w。
+     *
+     * 为了单测能直接构造极端直方图验证守卫，入口保持 internal（与 [steepen]、
+     * [calculateSampleSize] 同一约定）；真正的算法核心 [otsuFromHistogram]
+     * 由「整包 ARGB」和「一维灰度」两个入口共用，两道 sanity 只有一份实现。
      */
     internal fun otsuThreshold(
         pixels: IntArray,
@@ -306,6 +547,28 @@ object ImageNormalizer {
             if (alpha < 16) return@forEach
             histogram[luma((pixel shr 16) and 0xFF, (pixel shr 8) and 0xFF, pixel and 0xFF)]++
         }
+        return otsuFromHistogram(histogram, onFallback)
+    }
+
+    /**
+     * 对一维灰度（0..255）求 Otsu 阈值。
+     *
+     * 光照均一化之后的图走这条（见 [enhanceForOcr]）：那时灰度已经被就地改写，
+     * 没必要再塞回 ARGB 里让下一个函数重新拆一遍通道。
+     */
+    internal fun otsuThresholdOfGray(
+        gray: IntArray,
+        onFallback: (String) -> Unit = { msg -> Log.w("ImageNormalizer", msg) }
+    ): Int {
+        val histogram = IntArray(256)
+        gray.forEach { histogram[it.coerceIn(0, 255)]++ }
+        return otsuFromHistogram(histogram, onFallback)
+    }
+
+    private fun otsuFromHistogram(
+        histogram: IntArray,
+        onFallback: (String) -> Unit
+    ): Int {
         val total = histogram.sum()
         if (total == 0) return 128
 
