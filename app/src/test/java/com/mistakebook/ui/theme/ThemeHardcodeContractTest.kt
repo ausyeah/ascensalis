@@ -15,12 +15,17 @@ import java.io.File
  * - 任何新增裸色值（新界面、新功能）都会让测试变红——新增颜色必须
  *   先进色板槽位，再在界面里引用。
  *
+ * v0.0.89 又迁走一处：对话历史删除的「确认态」固定深红 #8B0000 换成
+ * colorScheme 的 error / errorContainer 两档（深浅语义在亮暗主题下
+ * 方向一致，且删除块底色同步从裸 #D32F2F 迁到 errorContainer），
+ * 基线 92 → 91。
+ *
  * SubjectPalette（学科色表）刻意豁免：学科色相是固定语义（数学=蓝、
  * 语文=红…），不随主题变化。theme 包自身是色板的定义处，不在此列。
  */
 class ThemeHardcodeContractTest {
 
-    private val hardcodedColorLimit = 92
+    private val hardcodedColorLimit = 91
 
     @Test
     fun `界面层裸色值存量只减不增`() {

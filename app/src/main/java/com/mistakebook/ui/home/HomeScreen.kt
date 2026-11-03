@@ -21,12 +21,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
@@ -35,7 +34,6 @@ import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.BarChart
 import kotlin.math.abs
 import kotlin.math.roundToInt
-import com.mistakebook.ui.theme.DeleteReveal
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -115,6 +113,10 @@ import com.mistakebook.ui.common.ReorderDragHandle
 import com.mistakebook.ui.common.moveItem
 import com.mistakebook.ui.common.orderByIds
 import com.mistakebook.ui.common.containerViewModel
+import com.mistakebook.ui.common.SwipeActionBlockWidth
+import com.mistakebook.ui.common.SwipeRevealSpring
+import com.mistakebook.ui.common.swipeRevealContentAlpha
+import com.mistakebook.ui.common.swipeRevealProgress
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -758,13 +760,17 @@ private fun SwipeableQuestionCard(
     Box(
         modifier = modifier
             .clip(MaterialTheme.shapes.medium)
-            .background(DeleteReveal)
+            // 露出区用 errorContainer / onErrorContainer 这对语义槽位，
+            // 不再写死 #D32F2F：亮色是浅粉、暗色是深红，随主题走，
+            // 图标文字也自动换成能读的前景（写死 Color.White 在浅粉底上
+            // 会直接看不见）。
+            .background(MaterialTheme.colorScheme.errorContainer)
     ) {
         // 底层：删除区。
         //
         // **必须限定在露出来的那一条宽度内、并靠右对齐。**
         // v0.0.5 用的是 `fillMaxSize()` + `Alignment.Center`，
-        // 图标被放在**整张卡的正中**——而滑开只露出最右边 88dp，
+        // 图标被放在**整张卡的正中**——而滑开只露出最右边一条，
         // 于是图标压根没露出来，用户看到「一片红、什么都没有」，
         // 自然也没有东西可点。这是 v0.0.5 的实际回归。
         Box(
@@ -772,6 +778,13 @@ private fun SwipeableQuestionCard(
                 .fillMaxHeight()
                 .width(SwipeDeleteRevealWidth)
                 .align(Alignment.CenterEnd)
+                // 透明度跟着露出进度走，且只在绘制期读 offsetX（graphicsLayer 的
+                // lambda 是 draw 阶段，不重组）：图标像被手指带出来，而不是
+                // 一开始就静止贴在底层、被卡片切成一半。
+                .graphicsLayer {
+                    val progress = swipeRevealProgress(offsetX.value, revealWidthPx)
+                    alpha = swipeRevealContentAlpha(progress)
+                }
                 .clickable(
                     // 滑开前点不到这里（被卡片挡住），但显式禁用更保险：
                     // 万一将来层级调整，也不会变成「随手一点就删」。
@@ -790,12 +803,12 @@ private fun SwipeableQuestionCard(
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = stringResource(R.string.swipe_delete_action),
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.size(26.dp)
                 )
                 Text(
                     text = stringResource(R.string.swipe_delete_hint),
-                    color = Color.White.copy(alpha = 0.9f),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1
                 )
@@ -879,10 +892,7 @@ private fun SwipeableQuestionCard(
                                 scope.launch {
                                     offsetX.animateTo(
                                         targetValue = if (opened) -revealWidthPx else 0f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        )
+                                        animationSpec = SwipeRevealSpring
                                     )
                                 }
                             }
@@ -1036,12 +1046,12 @@ private fun FilterRow(
 }
 
 /**
- * 划开删除时露出的宽度。
+ * 划开删除时露出的宽度：错题卡只有一块操作区，就是公共块宽。
  *
  * 要放得下垃圾桶图标（24dp）+ 一行小字 + 左右留白，88dp 是个舒服的值：
  * 拇指能点中，又不至于把整张卡都推走（推太多用户会失去「这是同一张卡」的感觉）。
  */
-private val SwipeDeleteRevealWidth = 88.dp
+private val SwipeDeleteRevealWidth = SwipeActionBlockWidth
 
 /**
  * 横向手势定向判定（v0.0.89 重写；单测见 HomeScreenSwipeClaimTest）。

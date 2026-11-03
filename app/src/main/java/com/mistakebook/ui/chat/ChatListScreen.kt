@@ -1,8 +1,6 @@
 package com.mistakebook.ui.chat
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -53,7 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -65,6 +63,10 @@ import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.di.AppContainer
 import com.mistakebook.ui.common.containerViewModel
+import com.mistakebook.ui.common.SwipeActionBlockWidth
+import com.mistakebook.ui.common.SwipeRevealSpring
+import com.mistakebook.ui.common.swipeRevealContentAlpha
+import com.mistakebook.ui.common.swipeRevealProgress
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -320,12 +322,19 @@ private fun SwipeableChatRow(
         // 底层：操作区。左滑后从右侧露出，**靠右对齐**——
         // 卡片往左移，露出的正是最右边这两块。
         Row(
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier
+                .matchParentSize()
+                // 与错题卡同一口径：露出内容随进度淡入，绘制期读 offsetX 不重组
+                .graphicsLayer {
+                    val progress = swipeRevealProgress(offsetX.value, revealWidthPx)
+                    alpha = swipeRevealContentAlpha(progress)
+                },
             horizontalArrangement = Arrangement.End
         ) {
             SwipeActionBlock(
-                width = SwipeActionWidth,
+                width = SwipeActionBlockWidth,
                 color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
                 icon = Icons.Default.Edit,
                 label = stringResource(R.string.chat_rename),
                 enabled = revealed,
@@ -335,11 +344,15 @@ private fun SwipeableChatRow(
                 }
             )
             SwipeActionBlock(
-                width = SwipeActionWidth,
-                // 确认态换成更深的一档红：不用弹窗、不挪位置，
-                // 「在原来位置再点一次」的语义全在这块颜色里
-                color = if (confirmingDelete) SwipeDeleteConfirmRed
-                else MaterialTheme.colorScheme.error,
+                width = SwipeActionBlockWidth,
+                // 两步确认全在这块颜色里：第一击是浅一档的 errorContainer，
+                // 第二击换成饱和的 error。不弹窗、不挪位置，「再点一次」
+                // 的语义靠对比度表达——深浅两档都从 colorScheme 取，
+                // 亮暗主题下方向一致（亮色：浅粉→深红；暗色：深红→亮红）。
+                color = if (confirmingDelete) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.errorContainer,
+                contentColor = if (confirmingDelete) MaterialTheme.colorScheme.onError
+                else MaterialTheme.colorScheme.onErrorContainer,
                 icon = Icons.Default.Delete,
                 label = if (confirmingDelete) stringResource(R.string.swipe_delete_confirm)
                 else stringResource(R.string.swipe_delete_hint),
@@ -369,10 +382,7 @@ private fun SwipeableChatRow(
                         scope.launch {
                             offsetX.animateTo(
                                 targetValue = if (opened) -revealWidthPx else 0f,
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness = Spring.StiffnessMediumLow
-                                )
+                                animationSpec = SwipeRevealSpring
                             )
                         }
                     }
@@ -393,6 +403,7 @@ private fun SwipeableChatRow(
 private fun SwipeActionBlock(
     width: androidx.compose.ui.unit.Dp,
     color: androidx.compose.ui.graphics.Color,
+    contentColor: androidx.compose.ui.graphics.Color,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     enabled: Boolean,
@@ -414,12 +425,12 @@ private fun SwipeActionBlock(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = androidx.compose.ui.graphics.Color.White,
+                tint = contentColor,
                 modifier = Modifier.size(24.dp)
             )
             Text(
                 text = label,
-                color = androidx.compose.ui.graphics.Color.White,
+                color = contentColor,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1
             )
@@ -493,19 +504,13 @@ private fun ChatRowContent(
     }
 }
 
-/** 右滑露出的总宽度：两块操作各 [SwipeActionWidth]。 */
-private val SwipeActionRevealWidth = 168.dp
-private val SwipeActionWidth = 84.dp
-
 /**
- * 删除的「确认态」红色：比 error 更深一档。
+ * 右滑露出的总宽度：重命名 + 删除两块，各 [SwipeActionBlockWidth]。
  *
- * 语义上要能和「普通删除」一眼分开——同一位置、不弹窗、不移动，
- * 颜色是唯一的状态信号，必须比第一击的 error 明显更深。
- * 深色/浅色主题下都用固定深红，不跟主题色走（error 在深色主题下
- * 会变亮，那时「更深」就反过来了）。
+ * 块宽与错题卡的删除块取同一个公共值（ui/common/SwipeReveal.kt）：
+ * 两个列表的删除块必须一样大，用户才不会觉得「一边顺手一边别扭」。
  */
-private val SwipeDeleteConfirmRed = Color(0xFF8B0000)
+private val SwipeActionRevealWidth = SwipeActionBlockWidth * 2
 
 @Composable
 private fun QuestionTag(title: String) {
