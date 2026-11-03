@@ -78,6 +78,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
@@ -185,8 +188,8 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     /** 打开 App 内置相机（v0.0.57：替代系统相机；返回的图经容器交接）。 */
     onOpenCamera: () -> Unit = {},
-    /** 左上角：进历史对话页（v0.0.96，照着 ChatGPT 手机端的布局）。 */
-    onOpenHistory: () -> Unit = {},
+    /** 抽屉里点了另一条历史会话（v0.0.96）：由 NavHost 导航过去。 */
+    onOpenSession: (sessionId: Long, questionId: Long?) -> Unit = { _, _ -> },
     /** 右上角：开一条临时对话，退出即删（v0.0.96）。 */
     onNewTemporaryConversation: () -> Unit = {}
 ) {
@@ -432,10 +435,33 @@ fun ChatScreen(
         )
     }
 
+    // 历史抽屉（v0.0.96）：右滑边缘或点左上角滑出，盖住大半屏。
+    // ModalNavigationDrawer 自带边缘手势，不用自己写拖拽判定。
+    val drawerState = rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
+
     // 退出会话统一走 onBack：NavHost 在那里判断「是不是临时对话」并决定删不删。
     // 不接住系统返回键的话，系统自己 pop 栈，删临时对话的那一步就被跳过了。
-    BackHandler { onBack() }
+    // 抽屉开着时返回键优先关抽屉——否则一按返回直接退出了会话，
+    // 用户从历史里点进来又按一下返回，就莫名其妙回到了上一条对话。
+    BackHandler(enabled = drawerState.isOpen) {
+        scope.launch { drawerState.close() }
+    }
+    BackHandler(enabled = !drawerState.isOpen) { onBack() }
 
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                ChatHistorySheet(
+                    container = container,
+                    drawerState = drawerState,
+                    snackbarHostState = snackbarHost,
+                    onOpenSession = onOpenSession,
+                    onOpenCamera = onOpenCamera
+                )
+            }
+        }
+    ) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -449,7 +475,7 @@ fun ChatScreen(
                 navigationIcon = {
                     // 左上角进历史（v0.0.96，用户指定的 ChatGPT 手机端布局）。
                     // 退出会话改由系统返回键/手势承担——顶栏这一格让给了更高频的「翻历史」。
-                    IconButton(onClick = onOpenHistory) {
+                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
                         Icon(
                             Icons.Default.History,
                             contentDescription = stringResource(R.string.chat_list_title)
@@ -592,6 +618,7 @@ fun ChatScreen(
                 onToggleGrading = viewModel::toggleGrading
             )
         }
+    }
     }
 
     if (showModelSheet) {

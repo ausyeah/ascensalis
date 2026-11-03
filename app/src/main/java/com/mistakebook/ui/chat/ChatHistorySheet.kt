@@ -33,7 +33,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -84,12 +83,15 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ChatListScreen(
+internal fun ChatHistorySheet(
     container: AppContainer,
-    onBack: () -> Unit,
+    /** 由 ChatScreen 持有：选完工具/会话后要在这里合上抽屉。 */
+    drawerState: androidx.compose.material3.DrawerState,
+    /** 复用对话页的 Snackbar：删除撤销的提示直接落在对话页底部。 */
+    snackbarHostState: androidx.compose.material3.SnackbarHostState,
     onOpenSession: (sessionId: Long, questionId: Long?) -> Unit,
-    /** 顶部功能入口被点：拍题走相机，其余进一条预填了提示词的新对话。 */
-    onPickTool: (ChatTool) -> Unit = {}
+    /** 对话拍照入口（v0.0.57）：拍题工具直接进相机，不走「预填提示词」那条路。 */
+    onOpenCamera: () -> Unit
 ) {
     val viewModel = containerViewModel(container) { c ->
         ChatListViewModel(c.chatRepository, c.database.questionDao())
@@ -113,8 +115,8 @@ internal fun ChatListScreen(
     }
 
     // 删除撤销（v0.0.66）：软删不再删附件，恢复即完整还原。
-    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     if (showClearConfirm) {
         AlertDialog(
@@ -164,94 +166,81 @@ internal fun ChatListScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    // 左上角是应用签名（v0.0.96，用户指定）。这一页是「这个产品的家」：
-                    // 用名字打头，比一句「对话记录」更像入口。
-                    Text(
-                        text = stringResource(R.string.app_signature),
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontFamily = FontFamily.Serif,
-                            fontStyle = FontStyle.Italic,
-                            fontWeight = FontWeight.Normal,
-                            letterSpacing = 2.sp
-                        )
-                    )
-                },
-                actions = {
-                    if (state.items.isNotEmpty()) {
-                        var menuOpen by remember { mutableStateOf(false) }
-                        IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.chat_list_clear_all))
-                        }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.chat_list_clear_all)) },
-                                onClick = {
-                                    menuOpen = false
-                                    showClearConfirm = true
-                                }
-                            )
-                        }
+    // 抽屉是一整列：头部签名 → 功能行 → 历史记录 → 底部新对话胶囊。
+    // 不是 Scaffold——抽屉没有顶栏/底栏之分，Scaffold 的 padding 语义在这里只会碍事。
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        // 头部：左上角应用签名。抽屉的关闭交给遮罩点击与边缘右滑，
+        // 不另设关闭键——ChatGPT 的抽屉也是这么做的。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.app_signature),
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontStyle = FontStyle.Italic,
+                    fontWeight = FontWeight.Normal,
+                    letterSpacing = 2.sp
+                ),
+                modifier = Modifier.weight(1f)
+            )
+            if (state.items.isNotEmpty()) {
+                var menuOpen by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.chat_list_clear_all))
                     }
-                    // 顶栏左格让给了签名，返回用右上角这颗关闭——与抽屉式历史页一致
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = stringResource(R.string.crop_back)
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_list_clear_all)) },
+                            onClick = {
+                                menuOpen = false
+                                showClearConfirm = true
+                            }
                         )
                     }
                 }
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = {
-                // 新对话：先拿到（或建好）会话 id 再进。
-                // 传 0 是不行的——ViewModel 会当成「没指定」而重建一条，
-                // 这里建的这条就成了孤儿。
-                viewModel.startFreeSession { sessionId -> onOpenSession(sessionId, null) }
-            }) {
-                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_list_new))
             }
-        },
-        snackbarHost = {
-            androidx.compose.material3.SnackbarHost(hostState = snackbarHostState)
         }
-    ) { padding ->
+
         LazyColumn(
-            // `padding` 是 Scaffold 的 innerPadding，含 TopAppBar 高度与状态栏。
-            // 漏掉它的话列表从 y=0 开始画，第一行正好被顶栏压掉上半截——
-            // 而空状态分支用了 `.padding(padding)`，所以「有数据时错、空时对」，
-            // 是个很容易骗过自己的 bug。
-            // 这里只取顶部：底部要留给 FAB 的悬浮高度，见 contentPadding。
             modifier = Modifier
-                .fillMaxSize()
-                .padding(top = padding.calculateTopPadding()),
-            contentPadding = PaddingValues(bottom = 88.dp)
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(bottom = 24.dp)
         ) {
             item(key = "tools") {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Text(
-                        text = stringResource(R.string.chat_tools_title),
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    ChatToolGrid(
-                        llmConfigured = llmConfigured,
-                        ocrConfigured = ocrConfigured,
-                        onPick = onPickTool
-                    )
-                    if (!llmConfigured || !ocrConfigured) {
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = stringResource(R.string.chat_tools_needs_config_hint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                // 功能入口是一行行的（v0.0.96 用户指定，照 ChatGPT 抽屉的样式），
+                // 不再是九宫格——抽屉是竖向空间，行比格子读得快。
+                ChatToolRows(
+                    llmConfigured = llmConfigured,
+                    ocrConfigured = ocrConfigured,
+                    onPick = { tool ->
+                        // 先合抽屉再干活：不关的话新会话已经在底下加载，
+                        // 抽屉还盖在上面，用户会以为点了没反应。
+                        scope.launch { drawerState.close() }
+                        when (tool) {
+                            ChatTool.PHOTO -> onOpenCamera()
+                            else -> {
+                                // 提示词经容器交接（与相机拍照同一套惯例），
+                                // 会话建好再导航——传 0 会被当成「没指定」。
+                                tool.promptRes?.let {
+                                    container.pendingChatDraft = context.getString(it)
+                                }
+                                viewModel.startFreeSession { sessionId ->
+                                    onOpenSession(sessionId, null)
+                                }
+                            }
+                        }
                     }
-                }
+                )
                 HorizontalDivider()
                 Text(
                     text = stringResource(R.string.chat_history_title),
@@ -312,6 +301,37 @@ internal fun ChatListScreen(
                     }
                 )
                 HorizontalDivider()
+            }
+        }
+
+        // 底部新对话胶囊：抽屉里最常用的动作固定在最顺手的位置（拇指区）。
+        Surface(
+            onClick = {
+                scope.launch { drawerState.close() }
+                viewModel.startFreeSession { sessionId -> onOpenSession(sessionId, null) }
+            },
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.chat_list_new),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }

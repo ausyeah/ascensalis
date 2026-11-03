@@ -88,7 +88,6 @@ class ChatToolsTest {
         val strings = readStrings()
         listOf(
             "app_signature",
-            "chat_tools_title",
             "chat_history_title",
             "chat_pin",
             "chat_unpin",
@@ -104,27 +103,64 @@ class ChatToolsTest {
     }
 
     @Test
-    fun `历史页不许再以对话记录为标题`() {
-        val screen = readSource("src/main/java/com/mistakebook/ui/chat/ChatListScreen.kt")
+    fun `抽屉头部是签名而不是对话记录`() {
+        val sheet = readSource("src/main/java/com/mistakebook/ui/chat/ChatHistorySheet.kt")
         assertFalse(
-            "标题必须是应用签名，不是「对话记录」",
-            screen.contains("title = { Text(stringResource(R.string.chat_list_title)) }")
+            "抽屉不许再挂「对话记录」标题——签名就是入口",
+            sheet.contains("R.string.chat_list_title")
         )
-        assertTrue("顶栏必须以应用签名开头", screen.contains("stringResource(R.string.app_signature)"))
+        assertTrue("抽屉头部必须是应用签名", sheet.contains("stringResource(R.string.app_signature)"))
+    }
+
+    @Test
+    fun `功能入口是一行行而不是九宫格`() {
+        val tools = readSource("src/main/java/com/mistakebook/ui/chat/ChatTools.kt")
+        assertTrue("抽屉里必须是行式入口", tools.contains("internal fun ChatToolRows("))
+        assertFalse("九宫格版本已废弃，不许残留", tools.contains("ChatToolGrid"))
     }
 
     @Test
     fun `长按菜单必须有三项且带置顶`() {
-        val screen = readSource("src/main/java/com/mistakebook/ui/chat/ChatListScreen.kt")
-        assertTrue("长按出菜单", screen.contains("onLongClick = { menuOpen = true }"))
-        // 页面里有两个 menuOpen 菜单：顶栏的「清空全部」、行内的长按菜单。
+        val sheet = readSource("src/main/java/com/mistakebook/ui/chat/ChatHistorySheet.kt")
+        assertTrue("长按出菜单", sheet.contains("onLongClick = { menuOpen = true }"))
+        // 抽屉里有两个 menuOpen 菜单：头部的「清空全部」、行内的长按菜单。
         // 长按菜单是后写的那个，从后往前找才不会拿错。
-        val menu = screen.lastIndexOf("DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {")
+        val menu = sheet.lastIndexOf("DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {")
         assertTrue(menu > 0)
-        val block = screen.substring(menu, screen.indexOf("\n        }", menu))
+        val block = sheet.substring(menu, sheet.indexOf("\n        }", menu))
         assertTrue("菜单里要有置顶", block.contains("R.string.chat_unpin") || block.contains("R.string.chat_pin"))
         assertTrue("菜单里要有重命名", block.contains("R.string.chat_rename"))
         assertTrue("菜单里要有删除", block.contains("R.string.swipe_delete_hint"))
+    }
+
+    @Test
+    fun `历史以抽屉形式挂在对话页上`() {
+        val screen = readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
+        assertTrue(
+            "对话页必须内嵌 ModalNavigationDrawer（右滑边缘也能开）",
+            screen.contains("ModalNavigationDrawer(") && screen.contains("ModalDrawerSheet {")
+        )
+        assertTrue(
+            "左上角必须能开抽屉",
+            screen.contains("scope.launch { drawerState.open() }")
+        )
+        assertTrue(
+            "抽屉开着时返回键必须先关抽屉，而不是退出会话",
+            screen.contains("BackHandler(enabled = drawerState.isOpen)")
+        )
+        assertFalse(
+            "独立的历史路由已拆掉——再导航过去就是一条死链",
+            readSource("src/main/java/com/mistakebook/MistakeBookNavHost.kt").contains("Routes.CHAT_LIST")
+        )
+    }
+
+    @Test
+    fun `抽屉底部有新对话胶囊`() {
+        val sheet = readSource("src/main/java/com/mistakebook/ui/chat/ChatHistorySheet.kt")
+        assertTrue(
+            "新对话必须是抽屉里最顺手的动作（底部胶囊），不是原来的悬浮按钮",
+            sheet.contains("stringResource(R.string.chat_list_new)") && !sheet.contains("FloatingActionButton")
+        )
     }
 
     private fun readStrings(): String = readSource("src/main/res/values/strings.xml")

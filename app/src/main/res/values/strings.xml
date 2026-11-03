@@ -530,7 +530,6 @@
     <!-- 顶栏右上角（v0.0.96）：临时对话，退出会话即删除 -->
     <string name="chat_temporary_new">临时对话</string>
     <!-- 历史对话页的功能入口（v0.0.96）：都是对话能力的不同起手式 -->
-    <string name="chat_tools_title">能做什么</string>
     <string name="chat_tool_photo">拍题</string>
     <string name="chat_tool_translate">英语翻译</string>
     <string name="chat_tool_essay">作文批改</string>
@@ -554,7 +553,6 @@
     <string name="chat_pin">置顶</string>
     <string name="chat_unpin">取消置顶</string>
     <string name="chat_pinned_badge">置顶</string>
-    <string name="chat_tools_needs_config_hint">先在设置里配好模型和识别服务，这些入口就能直接用了</string>
     <!-- 应用签名（v0.0.96）：空会话中央标志下方那一行，就是本应用的名字 -->
     <string name="app_signature">Ascensalis</string>
     <string name="chat_cancel">取消</string>

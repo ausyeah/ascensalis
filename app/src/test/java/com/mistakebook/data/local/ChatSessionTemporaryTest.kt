@@ -94,8 +94,9 @@ class ChatSessionTemporaryTest {
         )
         val chat = readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
         assertTrue(
-            "系统返回键必须交给 onBack——系统自己 pop 的话删除那一步会被跳过",
-            chat.contains("BackHandler { onBack() }")
+            "系统返回键必须交给 onBack——系统自己 pop 的话删除那一步会被跳过"
+                + "（抽屉开着时例外：那一下先关抽屉）",
+            chat.contains("BackHandler(enabled = !drawerState.isOpen) { onBack() }")
         )
     }
 

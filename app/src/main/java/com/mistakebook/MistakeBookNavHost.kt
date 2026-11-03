@@ -21,8 +21,6 @@ import androidx.navigation.navArgument
 import android.util.Log
 import com.mistakebook.di.AppContainer
 import com.mistakebook.ui.capture.CaptureScreen
-import com.mistakebook.ui.chat.ChatListScreen
-import com.mistakebook.ui.chat.ChatTool
 import com.mistakebook.ui.chat.ChatScreen
 import com.mistakebook.ui.crop.CropScreen
 import com.mistakebook.ui.detail.DetailScreen
@@ -60,7 +58,6 @@ object Routes {
     const val CHAT = "chat"
 
     /** 会话列表（首页入口）。 */
-    const val CHAT_LIST = "chatList"
 
     /** 自由会话的 questionId 哨兵值。0 是数据库自增起点，不能拿来当「无」。 */
     const val CHAT_FREE = -1L
@@ -104,8 +101,6 @@ fun MistakeBookNavHost(
     // 筛选状态本来就归 HomeViewModel 管，多带一层参数只会让两边状态不同步。
     var homeNotebookPick by remember { mutableStateOf<Long?>(null) }
     val scope = rememberCoroutineScope()
-    // 能力入口要把提示词资源取成字符串再交给容器，非组合上下文里只能用 getString
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     /**
      * F6：提交整批连拍成果。drainCropped 取走文件后**不能**再清空批次
@@ -644,39 +639,15 @@ fun MistakeBookNavHost(
                     container.captureBatch.clear()
                     navController.navigate(Routes.CAPTURE)
                 },
-                onOpenHistory = { navController.navigate(Routes.CHAT_LIST) },
+                onOpenSession = { sessionId, questionId ->
+                    navController.navigate(Routes.chat(questionId, sessionId))
+                },
                 onNewTemporaryConversation = {
                     // 临时对话是**全新的一条**（不复用空会话）：退出时整条删掉，
                     // 复用别人的会话会连同别人的记录一起删掉。
                     scope.launch {
                         val id = container.chatRepository.openTemporarySession()
                         navController.navigate(Routes.chat(null, id))
-                    }
-                }
-            )
-        }
-
-        composable(Routes.CHAT_LIST) {
-            ChatListScreen(
-                container = container,
-                onBack = { navController.popBackStack() },
-                onOpenSession = { sessionId, questionId ->
-                    navController.navigate(Routes.chat(questionId, sessionId))
-                },
-                onPickTool = { tool ->
-                    if (tool == ChatTool.PHOTO) {
-                        // 拍题不是「说一句话」，是「拍一张」——直接进相机
-                        container.cameraPurpose = AppContainer.CameraPurpose.QUESTION
-                        container.captureBatch.clear()
-                        navController.navigate(Routes.CAPTURE)
-                    } else {
-                        // 其余五个：开一条新对话，把第一句提示词预填进去（不自动发送，
-                        // 用户还能改）。openFreeSession 会复用空会话，不会攒孤儿。
-                        scope.launch {
-                            val id = container.chatRepository.openFreeSession()
-                            container.pendingChatDraft = tool.promptRes?.let { context.getString(it) }
-                            navController.navigate(Routes.chat(null, id))
-                        }
                     }
                 }
             )

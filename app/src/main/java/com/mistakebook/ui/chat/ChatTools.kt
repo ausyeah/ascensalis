@@ -1,17 +1,13 @@
 package com.mistakebook.ui.chat
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Insights
@@ -25,11 +21,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 
@@ -115,97 +109,56 @@ internal fun ChatTool.blockReason(
 
 internal enum class ChatToolBlock { READY, NEEDS_LLM, NEEDS_OCR }
 
-/** 两行三列的能力入口。不可用的档位只降透明度，仍可点击——点进去会给出配置引导。 */
+/**
+ * 一行行的功能入口（v0.0.96 改为抽屉布局）：图标 + 文字，右侧标可用状态。
+ *
+ * 抽屉是竖向空间，行比九宫格读得快——九宫格版本用了一天就换掉了。
+ * 不可用的入口**仍可点击**：点进去会给出具体缺什么，而不是把按钮锁死
+ * 让用户猜。状态只在不可用时显示，六个「可用」会稀释成噪音。
+ */
 @Composable
-internal fun ChatToolGrid(
+internal fun ChatToolRows(
     llmConfigured: Boolean,
     ocrConfigured: Boolean,
     onPick: (ChatTool) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // 固定两行三列：六个入口正好铺满，不必用 FlowRow 那种随宽度回流的布局——
-    // 入口位置一旦随屏幕宽度变化，用户就记不住「翻译在最右边」。
-    val rows = ChatTool.entries.chunked(3)
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        rows.forEach { row ->
+    Column(modifier = modifier.fillMaxWidth()) {
+        ChatTool.entries.forEach { tool ->
+            val block = tool.blockReason(llmConfigured, ocrConfigured)
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button, onClick = { onPick(tool) })
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                row.forEach { tool ->
-                    ChatToolTile(
-                        tool = tool,
-                        block = tool.blockReason(llmConfigured, ocrConfigured),
-                        onClick = { onPick(tool) },
-                        modifier = Modifier.weight(1f)
+                Icon(
+                    imageVector = tool.icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(16.dp))
+                Text(
+                    text = stringResource(tool.labelRes),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.weight(1f))
+                if (block != ChatToolBlock.READY) {
+                    Text(
+                        text = stringResource(
+                            when (block) {
+                                ChatToolBlock.NEEDS_LLM -> R.string.chat_tool_needs_llm
+                                else -> R.string.chat_tool_needs_ocr
+                            }
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
-                // 最后一行不满三列时补空位，保持列宽一致
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-    }
-}
-
-@Composable
-private fun ChatToolTile(
-    tool: ChatTool,
-    block: ChatToolBlock,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val ready = block == ChatToolBlock.READY
-    val contentColor = if (ready) {
-        MaterialTheme.colorScheme.onSurface
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Column(
-        modifier = modifier
-            .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-                shape = MaterialTheme.shapes.medium
-            )
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(
-            imageVector = tool.icon,
-            contentDescription = null,
-            tint = contentColor,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = stringResource(tool.labelRes),
-            style = MaterialTheme.typography.labelLarge,
-            color = contentColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = stringResource(
-                when (block) {
-                    ChatToolBlock.READY -> R.string.chat_tool_ready
-                    ChatToolBlock.NEEDS_LLM -> R.string.chat_tool_needs_llm
-                    ChatToolBlock.NEEDS_OCR -> R.string.chat_tool_needs_ocr
-                }
-            ),
-            style = MaterialTheme.typography.labelSmall,
-            color = if (ready) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.error
-            },
-            maxLines = 1
-        )
     }
 }
