@@ -21,6 +21,7 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -79,11 +80,15 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -93,8 +98,10 @@ import com.mistakebook.R
 import com.mistakebook.di.AppContainer
 import com.mistakebook.di.CaptureBatch
 import com.mistakebook.ui.common.ApiKeyRequiredDialog
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ExecutorService
@@ -117,9 +124,6 @@ internal fun flashStateDescriptionRes(flashMode: Int): Int = when (flashMode) {
 }
 
 private const val GALLERY_MAX_ITEMS = 20
-
-/** 连拍「完成」按钮的底色（v0.0.75）：灰底表示「收尾」而非主动作。 */
-private val BatchDoneGray = Color(0xFFBDBDBD)
 
 /**
  * 拍照页（CameraX，PRD 7.2）：全屏预览 + 3×3 网格 + 闪光灯/前后摄切换，
@@ -178,6 +182,23 @@ fun CaptureScreen(
     var showKeyGate by remember { mutableStateOf(false) }
     var mineruMissing by remember { mutableStateOf(false) }
     var llmMissing by remember { mutableStateOf(false) }
+
+    // ---- 连拍成功反馈（v0.0.95）----
+    // 三个矩形都是**窗口坐标**：根容器 / 取景器卡片 / 右下角槽位分属不同层级，
+    // 只有窗口坐标系是共同的（飞行覆盖物据此换算回自己的局部坐标）。
+    var rootOrigin by remember { mutableStateOf(Offset.Zero) }
+    var viewfinderRect by remember { mutableStateOf<Rect?>(null) }
+    var stackRect by remember { mutableStateOf<Rect?>(null) }
+    // 正在飞的那一张：先记下路径，解码完成后再触发动画
+    var flightRequest by remember { mutableStateOf<String?>(null) }
+    var flight by remember { mutableStateOf<CaptureFlight?>(null) }
+    // 飞行中的那张暂不画进堆叠，否则会出现「一张在原地、一张在飞」的重影
+    var flyingPath by remember { mutableStateOf<String?>(null) }
+    // 白边高亮的强度：每次拍成从 1 淡到 0
+    val captureFlash = remember { Animatable(0f) }
+    // 缩略图缓存：键是原图路径。批次清空后自动收敛到空表，不会留着一批已删文件的内存图
+    var thumbs by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
+
     suspend fun checkRecognitionKeys(): Boolean {
         val snapshot = runCatching { container.settingsStore.snapshotNow() }.getOrNull()
         mineruMissing = snapshot?.mineruConfigured != true
@@ -310,6 +331,43 @@ fun CaptureScreen(
     }
     var showDiscardDialog by remember { mutableStateOf(false) }
 
+    // 「本批 N 张」在取景器气泡和右下角堆叠上都用得到，这里算一次，
+    // 两处共用同一份文案（含 TalkBack 的朗读内容）。
+    val countText = stringResource(
+        if (isChatPurpose) R.string.capture_chat_batch_count else R.string.capture_batch_count,
+        batchSize
+    )
+    // 批次里每张原图的缩略图：拍完/导入后按需解码一次，之后复用。
+    // 只保留还在批次里的路径——批次丢弃或提交后这批内存图要跟着走，
+    // 否则一张 220px 的位图会一直挂在组合里陪跑。
+    val batchPaths = container.captureBatch.paths
+    LaunchedEffect(batchPaths) {
+        val missing = batchPaths.filter { it !in thumbs }
+        if (missing.isNotEmpty()) {
+            val decoded = withContext(Dispatchers.IO) {
+                missing.mapNotNull { path ->
+                    decodeThumbnail(path, THUMB_STACK_EDGE)?.let { path to it }
+                }.toMap()
+            }
+            thumbs = (thumbs + decoded).filterKeys { it in batchPaths }
+        } else if (thumbs.keys != batchPaths.toSet()) {
+            thumbs = thumbs.filterKeys { it in batchPaths }
+        }
+    }
+
+    // 拍成 → 解一张够大的图交给飞行动画。
+    // 这张大图**不进缩略图缓存**：900px 的图 12 张要占二十多兆，
+    // 而飞行同一时刻只有一张，落地即释放。
+    LaunchedEffect(flightRequest) {
+        val path = flightRequest ?: return@LaunchedEffect
+        val bitmap = withContext(Dispatchers.IO) { decodeThumbnail(path, THUMB_FLIGHT_EDGE) }
+        flightRequest = null
+        if (bitmap != null && stackRect != null && viewfinderRect != null) {
+            flyingPath = path
+            flight = CaptureFlight(path, bitmap)
+        }
+    }
+
     BackHandler(enabled = batchActive) { showDiscardDialog = true }
 
     if (showDiscardDialog) {
@@ -358,7 +416,12 @@ fun CaptureScreen(
             onDismiss = { showKeyGate = false }
         )
     }
-    Box(modifier = Modifier.fillMaxSize().background(CaptureScrim)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(CaptureScrim)
+            .onGloballyPositioned { rootOrigin = it.boundsInWindow().topLeft }
+    ) {
         // 竖向流：顶部操作栏 / 取景器 / 底部操作区，三者是**兄弟节点**。
         //
         // 为什么不再是「各自 align + 硬编码 top」：v0.0.90 之前取景器卡片
@@ -460,6 +523,9 @@ fun CaptureScreen(
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color.Black)
                     .border(1.dp, ViewfinderBorder, RoundedCornerShape(24.dp))
+                    // 放在 padding 之后：量到的是卡片本身（不是含外边距的格子），
+                    // 飞行动画的起点必须和用户看到的卡片边缘严格重合。
+                    .onGloballyPositioned { viewfinderRect = it.boundsInWindow() }
             ) {
                 CameraPreview(
                     imageCapture = imageCapture,
@@ -474,6 +540,34 @@ fun CaptureScreen(
                 )
                 GridOverlay(modifier = Modifier.fillMaxSize())
                 ViewfinderCorners(modifier = Modifier.fillMaxSize())
+
+                // 拍成瞬间的白边高亮：先在整张卡片上压一层白 + 描白边，
+                // 再迅速淡出。这一步的意义是「照片真的拿到了」，
+                // 与后面的飞行是两件事——飞行是「它去哪了」。
+                val flashAlpha = captureFlash.value
+                if (flashAlpha > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.White.copy(alpha = flashAlpha * 0.55f))
+                            .border(
+                                width = 3.dp,
+                                color = Color.White.copy(alpha = flashAlpha),
+                                shape = RoundedCornerShape(24.dp)
+                            )
+                    )
+                }
+
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.TopEnd
+                ) {
+                    CaptureCountBadge(
+                        count = batchSize,
+                        description = countText,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
             }
         } else {
             // 没权限时占同一个格子：卡片多大这块就多大，底部操作区位置不变。
@@ -578,7 +672,7 @@ fun CaptureScreen(
                                         // 连拍模式拍完**不离开相机页**：capturing 必须在这里复位，
                                         // 否则第二张按不动快门（旧流程直接导航走，页面销毁掩盖了这点）。
                                         capturing = false
-                                        if (isQuestion) {
+                                        val added = if (isQuestion) {
                                             container.captureBatch.add(path, fromGallery = false)
                                         } else {
                                             // T2 对话连拍：CHAT 拍完入批不退出（与 QUESTION 共用批次容器），
@@ -592,8 +686,8 @@ fun CaptureScreen(
                                             // 两条路都走不通，单张链路实际上是死的。改成按「有没有批次」
                                             // 分明分流：空批次 = 单张，入队后直接进裁切；有批次 = 只入队，
                                             // 留在相机页继续拍。
-                                            val added = container.captureBatch.add(path, fromGallery = false)
-                                            if (!added) {
+                                            val queued = container.captureBatch.add(path, fromGallery = false)
+                                            if (!queued) {
                                                 Toast.makeText(
                                                     context,
                                                     context.getString(R.string.capture_chat_batch_full),
@@ -606,6 +700,17 @@ fun CaptureScreen(
                                             // 不裁剪、不提交识别，识不识图由模型自己调工具决定。
                                             // 旧的单张链路会跳裁切页，那等于把错题后端
                                             // 也接了进来（用户反馈的核心问题）。
+                                            queued
+                                        }
+                                        // 拍成反馈：白边一闪（照片拿到了）+ 飞行（它去哪了）。
+                                        // 两个动作分开做是因为它们回答的是两个不同的问题，
+                                        // 只做其中一个，用户都会怀疑「到底拍上没有」。
+                                        if (added) {
+                                            scope.launch {
+                                                captureFlash.snapTo(1f)
+                                                captureFlash.animateTo(0f, tween(durationMillis = 320))
+                                            }
+                                            flightRequest = path
                                         }
                                     },
                                     onError = {
@@ -618,36 +723,27 @@ fun CaptureScreen(
                     }
                 )
 
-                // 右侧：连拍「完成」按钮（v0.0.80 重新排版与交互）
-                // 没拍照时显示灰色且不能点击；拍完后高亮显示张数并可点击
+                // 右侧：连拍成果（v0.0.95）
+                // 没拍照时是禁用的「完成」占位；拍完就变成可点的缩略图扇形堆叠。
+                //
+                // 外框尺寸**固定** 84×56：飞行动画的落点就是它量出来的矩形，
+                // 若空态与堆叠尺寸不同，第二张起飞时槽位会先跳一下再飞。
                 val doneLabel = stringResource(if (isChatPurpose) R.string.capture_chat_batch_done else R.string.capture_batch_done)
-                val countDesc = if (batchActive) stringResource(if (isChatPurpose) R.string.capture_chat_batch_count else R.string.capture_batch_count, batchSize) else ""
                 Box(
                     modifier = Modifier
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(
-                            if (batchActive) Color.White else Color.White.copy(alpha = 0.08f)
-                        )
-                        .clickable(
-                            enabled = batchActive,
-                            role = Role.Button,
+                        .size(width = 84.dp, height = 56.dp)
+                        .onGloballyPositioned { stackRect = it.boundsInWindow() }
+                ) {
+                    if (batchActive) {
+                        CaptureThumbnailStack(
+                            // 正在飞的那张不画进来：它此刻由飞行覆盖物代表
+                            thumbs = batchPaths.filter { it != flyingPath }.mapNotNull { thumbs[it] },
+                            description = stringResource(R.string.capture_stack_open, batchSize),
                             onClick = onStartBatchCrop
                         )
-                        .semantics {
-                            if (batchActive) {
-                                stateDescription = countDesc
-                            }
-                        }
-                        .padding(horizontal = 18.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (batchActive) "$doneLabel ($batchSize)" else doneLabel,
-                        color = if (batchActive) Color(0xFF14151A) else Color.White.copy(alpha = 0.35f),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = if (batchActive) FontWeight.Bold else FontWeight.Medium
-                    )
+                    } else {
+                        CaptureDonePlaceholder(label = doneLabel)
+                    }
                 }
             }
         }
@@ -680,6 +776,21 @@ fun CaptureScreen(
                 Text(stringResource(R.string.gallery_copying), color = Color.White)
             }
         }
+
+        // 拍成飞行：必须是 Column 的**兄弟**而不是子节点——它是一层覆盖物，
+        // 塞进 Column 会被当作普通一列排下来，把取景器挤矮。
+        CaptureFlightOverlay(
+            flight = flight,
+            from = viewfinderRect,
+            to = stackRect,
+            rootOrigin = rootOrigin,
+            onLanded = {
+                // 落地：这张交回堆叠（flyingPath 清空后它就不再被过滤掉），
+                // 同时释放飞行用的大图。
+                flyingPath = null
+                flight = null
+            }
+        )
     }
 }
 
@@ -1178,7 +1289,7 @@ private fun decodeFromProxy(image: ImageProxy): Bitmap? {
     }
 }
 
-private fun sampleSizeFor(width: Int, height: Int, maxEdge: Int): Int {
+internal fun sampleSizeFor(width: Int, height: Int, maxEdge: Int): Int {
     if (width <= 0 || height <= 0) return 1
     var sample = 1
     var longEdge = maxOf(width, height)

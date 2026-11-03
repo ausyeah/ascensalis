@@ -113,6 +113,9 @@
     <string name="capture_batch_discard_title">丢弃本批照片？</string>
     <string name="capture_batch_discard_body">本批 %1$d 张将丢弃</string>
     <string name="capture_batch_skip_missing">原图文件丢失，已跳过</string>
+    <!-- 连拍缩略图堆叠（v0.0.95）：右下角堆叠本身就是「完成」入口，
+         点它继续；朗读时要说清这一批有几张，否则只有图标没有信息量 -->
+    <string name="capture_stack_open">查看本批 %1$d 张</string>
 
     <!-- 进度页 -->
     <string name="progress_title">识别进度</string>
