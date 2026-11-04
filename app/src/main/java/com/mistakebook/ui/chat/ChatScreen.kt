@@ -157,6 +157,8 @@ import java.io.File
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.drawscope.Stroke
 
 /**
  * 会话相册一次最多选几张（v0.0.52 多选）。
@@ -768,17 +770,18 @@ private fun ChatEmptyState(onSnapAsk: () -> Unit, modifier: Modifier = Modifier)
     ) {
         // 点标志直接进拍题（v0.0.98）：空会话里唯一能干的事就是开始一问，
         // 而这一页最常见的问法就是「拍一道题」。标志本身就是最大的可点区域。
+        //
+        // v0.0.114：山形 logo 换成**相机**黑白标记——空对话页的语义是
+        // 「拍题」，相机比山更直接；镜面里藏一座小山，与品牌仍是一体。
         Box(
             modifier = Modifier
-                .size(96.dp)
+                .size(112.dp)
                 .clip(CircleShape)
                 .clickable(role = Role.Button, onClick = onSnapAsk),
             contentAlignment = Alignment.Center
         ) {
-            Image(
-                painter = painterResource(R.drawable.ic_app_mark),
-                contentDescription = stringResource(R.string.home_snap_ask),
-                colorFilter = ColorFilter.tint(ink),
+            CameraMark(
+                color = ink,
                 modifier = Modifier.size(96.dp)
             )
         }
@@ -919,3 +922,89 @@ private fun Context.findActivity(): Activity? {
  * 纯函数抽出便于与防抖组合。
  */
 
+/**
+ * 黑白相机标记（v0.0.114）：空对话页的中央标志。
+ *
+ * 纯 Canvas 手绘：机身圆角矩形 + 顶部取景器凸起 + 圆形镜头，
+ * 镜面里一座小山——「拍题」语义直达，又与品牌山形呼应。
+ * 全部用描边与填充的几何组合，任何主题密度下都清晰。
+ */
+@Composable
+private fun CameraMark(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = size.minDimension * 0.055f
+        val w = size.width
+        val h = size.height
+        val bodyTop = h * 0.24f
+        val bodyBottom = h * 0.86f
+        val bodyLeft = w * 0.06f
+        val bodyRight = w * 0.94f
+        val corner = w * 0.14f
+
+        // 顶部取景器凸起（梯形）
+        val bumpLeft = w * 0.32f
+        val bumpRight = w * 0.68f
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(bumpLeft, bodyTop)
+                lineTo(bumpLeft + w * 0.06f, h * 0.12f)
+                lineTo(bumpRight - w * 0.06f, h * 0.12f)
+                lineTo(bumpRight, bodyTop)
+                close()
+            },
+            color = color,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
+
+        // 机身：圆角矩形描边
+        drawRoundRect(
+            color = color,
+            topLeft = androidx.compose.ui.geometry.Offset(bodyLeft, bodyTop),
+            size = androidx.compose.ui.geometry.Size(bodyRight - bodyLeft, bodyBottom - bodyTop),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(corner, corner),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
+
+        // 镜头外圈
+        val lensR = w * 0.20f
+        val cx = w / 2f
+        val cy = (bodyTop + bodyBottom) / 2f
+        drawCircle(
+            color = color,
+            radius = lensR,
+            center = androidx.compose.ui.geometry.Offset(cx, cy),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
+
+        // 镜面里的小山：两座三角峰（填充），底部一条地平线
+        val mountainBase = cy + lensR * 0.42f
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx - lensR * 0.62f, mountainBase)
+                lineTo(cx - lensR * 0.18f, cy - lensR * 0.30f)
+                lineTo(cx + lensR * 0.10f, mountainBase)
+                close()
+            },
+            color = color
+        )
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx + lensR * 0.02f, mountainBase)
+                lineTo(cx + lensR * 0.34f, cy - lensR * 0.05f)
+                lineTo(cx + lensR * 0.62f, mountainBase)
+                close()
+            },
+            color = color
+        )
+
+        // 快门指示点（机身右上）
+        drawCircle(
+            color = color,
+            radius = stroke * 0.9f,
+            center = androidx.compose.ui.geometry.Offset(
+                bodyRight - w * 0.10f,
+                bodyTop + (bodyBottom - bodyTop) * 0.14f
+            )
+        )
+    }
+}

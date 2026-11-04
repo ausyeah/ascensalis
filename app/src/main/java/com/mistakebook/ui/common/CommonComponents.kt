@@ -47,6 +47,10 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.mistakebook.domain.ErrorReason
 import com.mistakebook.ui.theme.SurfaceCard
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material3.SmallFloatingActionButton
+import com.mistakebook.R
 
 // 学科色点
 @Composable
@@ -259,6 +263,8 @@ fun FullScreenImageDialog(
     contentDescription: String? = null,
     onDismiss: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // v0.0.114：长按保存到系统相册。绘图产物与拍题照片共用这一张画布。
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
@@ -285,8 +291,85 @@ fun FullScreenImageDialog(
                     tint = Color.White
                 )
             }
+            androidx.compose.material3.SmallFloatingActionButton(
+                onClick = {
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(
+                            if (saveToGallery(context, imagePath)) R.string.image_saved
+                            else R.string.image_save_failed
+                        ),
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(20.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Download,
+                    contentDescription = androidx.compose.ui.res.stringResource(
+                        R.string.image_save_to_gallery
+                    ),
+                    tint = Color.White
+                )
+            }
         }
     }
+}
+
+/**
+ * 把本地图片存进系统相册（Pictures/Ascensalis）。
+ *
+ * API 29+ 走 MediaStore，应用自身的插入不需要任何权限；
+ * 26-28 落到应用专属外部目录再扫媒入库，同样零权限。
+ *
+ * @return true = 已入库（或已落盘并通知了媒体扫描）。
+ */
+internal fun saveToGallery(context: android.content.Context, imagePath: String): Boolean {
+    val file = java.io.File(imagePath)
+    if (!file.isFile) return false
+    return runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val values = android.content.ContentValues().apply {
+                put(
+                    android.provider.MediaStore.Images.Media.DISPLAY_NAME,
+                    file.name
+                )
+                put(
+                    android.provider.MediaStore.Images.Media.MIME_TYPE,
+                    "image/" + file.extension.removePrefix(".").ifBlank { "jpeg" }
+                )
+                put(
+                    android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_PICTURES + "/Ascensalis"
+                )
+                put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return@runCatching false
+            resolver.openOutputStream(uri)?.use { output ->
+                file.inputStream().use { input -> input.copyTo(output) }
+            } ?: return@runCatching false
+            values.clear()
+            values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            true
+        } else {
+            val dir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES)
+                ?: return@runCatching false
+            val target = java.io.File(dir, file.name)
+            file.copyTo(target, overwrite = true)
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(target.absolutePath),
+                arrayOf("image/*"),
+                null
+            )
+            true
+        }
+    }.getOrDefault(false)
 }
 
 @Composable
@@ -295,6 +378,7 @@ private fun ZoomableImage(
     contentDescription: String?,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     // 不能用 rememberSaveable：Offset 不可被 Saver 序列化，会在配置变更时崩溃
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -305,6 +389,21 @@ private fun ZoomableImage(
                     scale = (scale * zoom).coerceIn(1f, 5f)
                 offset = if (scale > 1f) offset + pan else Offset.Zero
                 }
+            }
+            // 长按 = 保存到相册（v0.0.114 用户指定）
+            .pointerInput(imagePath) {
+                detectTapGestures(
+                    onLongPress = {
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(
+                                if (saveToGallery(context, imagePath)) R.string.image_saved
+                                else R.string.image_save_failed
+                            ),
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                )
             },
         contentAlignment = Alignment.Center
     ) {

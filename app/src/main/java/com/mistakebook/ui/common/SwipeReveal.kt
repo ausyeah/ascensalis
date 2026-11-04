@@ -31,7 +31,7 @@ import androidx.compose.animation.core.spring
  */
 
 /** 单块操作区的宽度。放得下图标 + 一行小字，拇指点得中。 */
-val SwipeActionBlockWidth: Dp = 88.dp
+val SwipeActionBlockWidth: Dp = 96.dp
 
 /**
  * 松手吸附的弹簧。
@@ -105,7 +105,7 @@ internal fun SwipeActionBlock(
                 imageVector = icon,
                 contentDescription = label,
                 tint = contentColor,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(28.dp)
             )
             Text(
                 text = label,

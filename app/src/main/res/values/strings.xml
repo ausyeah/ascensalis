@@ -51,7 +51,7 @@
     <string name="settings_memory_entry">记忆库</string>
     <string name="memory_title">记忆库</string>
     <string name="memory_empty">还没有记忆。
-在下面说要记住什么（如「我叫小明，在准备考研」），点右上角「整理」可以把杂乱内容重排成清晰的分节条目。</string>
+在下面说要记住什么（如「我叫Ausyeah，在准备考研」），点右上角「整理」可以把杂乱内容重排成清晰的分节条目。</string>
     <string name="memory_hint">告诉它要记住什么…</string>
     <string name="memory_add">记住</string>
     <string name="memory_delete">删除这条记忆</string>
@@ -96,6 +96,7 @@
 
     <string name="home_action_print">打印</string>
     <string name="home_add_by_photo">拍错题</string>
+    <string name="home_open_chat">进入对话</string>
     <string name="home_add_from_gallery">从相册选择</string>
     <string name="home_import_pdf">导入 PDF</string>
     <string name="home_add_manual">手动录入题目</string>
@@ -874,6 +875,10 @@
     <string name="wordbook_stat_learned">今日已学</string>
     <string name="wordbook_stat_due_wrong">待复习错词</string>
     <string name="wordbook_stat_due_today">今日到期</string>
+    <string name="settings_profile_saved">已保存</string>
+    <string name="image_save_to_gallery">保存到相册</string>
+    <string name="image_saved">已保存到相册</string>
+    <string name="image_save_failed">保存失败</string>
     <string name="wordbook_stat_mastered">已掌握</string>
     <string name="wordbook_scene_generating">生成中…</string>
     <string name="wordbook_cd_scene">场景图</string>

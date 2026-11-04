@@ -61,11 +61,12 @@ class ChatEmptyBrandTest {
         assertTrue("ChatEmptyState 必须存在", start >= 0)
         val body = screen.substring(start, screen.indexOf("\n}", start))
 
-        assertTrue("必须渲染新的矢量标志", body.contains("R.drawable.ic_app_mark"))
-        assertTrue("标志必须取当前主题的墨色", body.contains("ColorFilter.tint(ink)"))
-        assertTrue("墨色必须来自 onSurface（黑白两套都成立）", body.contains("colorScheme.onSurface"))
+        // v0.0.114：山形 logo 换成 Canvas 手绘的黑白相机（用户指定）。
+        // 墨色语义不变：相机描边取 onSurface，黑白两套主题都成立。
+        assertTrue("必须渲染 Canvas 相机标志", body.contains("CameraMark("))
+        assertTrue("墨色必须取当前主题", body.contains("val ink = MaterialTheme.colorScheme.onSurface"))
         assertFalse(
-            "不许再 tint 强调色——那会让品牌色跟着用户换的 8 档主题色一起变",
+            "不许 tint 强调色——那会让标志跟着用户换的 8 档主题色一起变",
             body.contains("ColorFilter.tint(MaterialTheme.colorScheme.primary)")
         )
     }

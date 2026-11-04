@@ -331,6 +331,9 @@ class ChatGenerationService : Service() {
                         // 资料库只读工具（v0.0.57）：模型可自行列出 / 读取资料。
                         // 与 web_search 同一条 tool loop，无副作用，始终提供。
                         addAll(com.mistakebook.data.library.LibraryTools.all())
+                        // 数学计算器（v0.0.114）：算术外包给确定性求值器。
+                        // 大模型心算多步算术错一位就是整题全错；无副作用，始终提供。
+                        add(com.mistakebook.data.chat.MathTools.calculatorTool())
                     }.takeIf { it.isNotEmpty() }
                 )
                 // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）。
@@ -438,6 +441,7 @@ class ChatGenerationService : Service() {
                     // 传图 / 生图 / 读资料时也这么显示，用户会以为在搜网页。
                     val stageLabel = when {
                         call.name == SearchTools.WEB_SEARCH -> "正在联网搜索…"
+                        com.mistakebook.data.chat.MathTools.handles(call.name) -> "正在精确计算…"
                         com.mistakebook.data.library.LibraryTools.handles(call.name) -> "正在读取资料库…"
                         call.name == MediaTools.DESCRIBE_IMAGE ||
                             call.name == MediaTools.OCR_IMAGE -> "正在查看图片…"
@@ -453,6 +457,16 @@ class ChatGenerationService : Service() {
                         )
                     )
                     val result = when (call.name) {
+                        com.mistakebook.data.chat.MathTools.CALCULATOR -> {
+                            val expression = com.mistakebook.data.chat.MathTools
+                                .parseExpression(call.arguments)
+                            if (expression == null) {
+                                "计算未执行：参数缺少 expression 字段，请修正后重试。"
+                            } else {
+                                com.mistakebook.data.chat.MathTools.evaluate(expression)
+                            }
+                        }
+
                         SearchTools.WEB_SEARCH -> {
                             val query = SearchTools.parseSearchQuery(call.arguments)
                             if (query == null) {

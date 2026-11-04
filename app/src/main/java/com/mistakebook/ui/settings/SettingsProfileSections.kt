@@ -106,6 +106,7 @@ import com.mistakebook.data.prefs.ThemeMode
 import com.mistakebook.data.prefs.UsageSnapshot
 import com.mistakebook.data.prefs.formatCount
 import com.mistakebook.domain.ErrorReason
+import kotlinx.coroutines.delay
 
 @Composable
 internal fun ProfileRow(
@@ -193,6 +194,14 @@ internal fun ProfileRow(
     var baseUrl by remember(profile.id) { mutableStateOf(profile.baseUrl) }
     var apiKey by remember(profile.id) { mutableStateOf(profile.apiKey) }
     var model by remember(profile.id) { mutableStateOf(profile.model) }
+    // 「已保存」反馈（v0.0.114）：点保存后亮 2.5s，用户反馈「不知道保存与否」
+    var justSaved by remember(profile.id) { mutableStateOf(false) }
+    LaunchedEffect(justSaved) {
+        if (justSaved) {
+            kotlinx.coroutines.delay(2500)
+            justSaved = false
+        }
+    }
 
     // **附加 Key 池**：同一个 baseUrl 下的其他 key。
     // 中转站（one-api / new-api）就是这个形态：一个 URL、多份 key，
@@ -533,7 +542,12 @@ internal fun ProfileRow(
                 // 「可用模型」被挤成两行竖排（用户反馈：UI 有问题）。
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
-                        onClick = { onSave(draft()) },
+                        onClick = {
+                            onSave(draft())
+                            // v0.0.114：保存后亮「已保存」2.5s——用户反馈
+                            // 「点了没反馈，不知道保存与否」。
+                            justSaved = true
+                        },
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(stringResource(R.string.action_save))
@@ -557,6 +571,23 @@ internal fun ProfileRow(
                 result?.let { message ->
                     Spacer(Modifier.height(8.dp))
                     TestResultBanner(message = message, ok = resultOk)
+                }
+                // 「已保存」反馈：与测试结果互斥展示，2.5s 自动消失（v0.0.114）
+                androidx.compose.animation.AnimatedVisibility(visible = justSaved) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = stringResource(R.string.settings_profile_saved),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }

@@ -289,9 +289,12 @@ private fun WordbookHeaderSummary(
             SummaryStatBadge(
                 label = stringResource(R.string.wordbook_stat_due_today),
                 value = "$dueToday",
-                accentColor = if (dueToday > 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                // v0.0.114 修复：tertiary 在本主题里是 #F4F4F5（近白的次级面色），
+                // 当文字色在浅色模式下几乎看不见（用户反馈「纯白看不清」）。
+                // 到期 >0 时用品牌蓝强调，=0 时回中性灰。
+                accentColor = if (dueToday > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 bgColor = if (dueToday > 0) {
-                    MaterialTheme.colorScheme.tertiary.copy(alpha = if (isDark) 0.16f else 0.10f)
+                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.16f else 0.10f)
                 } else {
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                 },
