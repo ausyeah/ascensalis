@@ -9,7 +9,6 @@ import com.mistakebook.data.chat.ChatPrompts
 import com.mistakebook.data.chat.MemoryPrompts
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.local.ChatDao
-import com.mistakebook.data.local.MemoryDao
 import com.mistakebook.data.local.QuestionDao
 import com.mistakebook.data.local.SubjectDao
 import com.mistakebook.data.local.entities.ChatAttachment
@@ -48,7 +47,8 @@ class ChatRepository(
     private val chatDao: ChatDao,
     private val questionDao: QuestionDao,
     private val subjectDao: SubjectDao,
-    private val memoryDao: MemoryDao,
+    /** 长期记忆文本的提供者（v0.0.112 单文档模型，来自 DataStore）。 */
+    private val memoryText: suspend () -> String,
     private val appFiles: AppFiles,
     private val imageDataUrls: ImageDataUrlProvider
 ) {
@@ -134,17 +134,25 @@ class ChatRepository(
     }
 
     /**
-     * 退出会话时调用：是临时对话就整条删掉。
+     * 退出临时对话时调用（v0.0.112 用户改口）：**转正 + 归档**，不再整条删除。
      *
-     * 先删附件目录再删行——行没了以后 `chatDir(id)` 就再也找不到归属，
-     * 那些图片会永远留在缓存里（与「清空全部」同一口径）。
-     * 非临时会话直接返回，历史对话不受影响。
+     * 旧行为是硬删——临时对话的价值恰恰是「随便聊、不进历史」，
+     * 但聊出有价值内容的瞬间，退出等于销毁，用户连反悔的机会都没有。
+     * 现在退出即打上归档时间、摘掉临时标记：它出现在「已归档会话」里，
+     * 想留着就恢复，不想要就在那里删除。
+     *
+     * 一条消息都没有的临时对话没什么可归档的（与「空会话不留记录」同口径），
+     * 照旧整条删掉。非临时会话直接返回。
      */
-    suspend fun discardIfTemporary(id: Long) {
+    suspend fun archiveTemporaryOnExit(id: Long) {
         val session = chatDao.findSession(id) ?: return
         if (!session.temporary) return
-        appFiles.deleteRecursively(appFiles.chatDir(id))
-        chatDao.deleteSession(id)
+        if (chatDao.countMessages(id) == 0) {
+            appFiles.deleteRecursively(appFiles.chatDir(id))
+            chatDao.deleteSession(id)
+            return
+        }
+        chatDao.graduateTemporary(id, System.currentTimeMillis())
     }
 
     /**
@@ -179,11 +187,19 @@ class ChatRepository(
      *
      * @return 清掉的会话数（日志用）。
      */
-    suspend fun purgeTemporarySessions(): Int {
+    /**
+     * 启动兜底：上次进程被杀时没走到退出归档的临时对话，这里补归档。
+     *
+     * v0.0.112 起临时对话退出不再删除，这条兜底也从「删」改成「归档」：
+     * 崩溃/被杀同样不该销毁用户聊出的内容。
+     *
+     * @return 处理的会话数（日志用）。
+     */
+    suspend fun archiveAbandonedTemporarySessions(): Int {
         val leftovers = chatDao.listTemporarySessions()
         if (leftovers.isEmpty()) return 0
-        leftovers.forEach { appFiles.deleteRecursively(appFiles.chatDir(it.id)) }
-        chatDao.deleteTemporarySessions()
+        val now = System.currentTimeMillis()
+        leftovers.forEach { chatDao.graduateTemporary(it.id, now) }
         return leftovers.size
     }
 
@@ -589,7 +605,7 @@ class ChatRepository(
         val systemContext = buildString {
             // 长期记忆放最前（v0.0.108）：它是最一般的背景，题目上下文与功能指令
             // 都要压在它上面——越具体的内容越靠后，模型读起来层次才是对的。
-            val memoryBlock = MemoryPrompts.injectBlock(memoryDao.allOnce().map { it.content })
+            val memoryBlock = MemoryPrompts.injectDocument(memoryText())
             if (memoryBlock.isNotBlank()) append(memoryBlock)
             if (questionId != null) {
                 if (isNotBlank()) append("\n\n")

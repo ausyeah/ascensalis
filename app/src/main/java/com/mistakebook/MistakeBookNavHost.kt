@@ -691,7 +691,7 @@ fun MistakeBookNavHost(
                         popToHome()
                     } else {
                         scope.launch {
-                            runCatching { container.chatRepository.discardIfTemporary(leaving) }
+                            runCatching { container.chatRepository.archiveTemporaryOnExit(leaving) }
                             // 一条消息都没发过就退出：这条会话整条删掉，不留记录。
                             // 草稿也一起清——它绑在一条已经不存在的会话上，留着只是垃圾。
                             runCatching {

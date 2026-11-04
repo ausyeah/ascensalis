@@ -160,6 +160,9 @@ data class ChatUiState(
 
     val isStreaming: Boolean = false,
 
+    /** 当前会话是否为临时对话（v0.0.112）：界面据此挂出归档提示横幅。 */
+    val temporary: Boolean = false,
+
     /**
      * 被省略的早期对话轮数。大于 0 时列表顶部要插一条灰色分隔条，
      * 否则用户以为 AI 失忆。
@@ -437,7 +440,8 @@ class ChatViewModel(
             _state.value = _state.value.copy(
                 sessionId = session.id,
                 questionId = session.questionId,
-                title = session.title
+                title = session.title,
+                temporary = session.temporary
             )
             // **恢复输入草稿**。
             //

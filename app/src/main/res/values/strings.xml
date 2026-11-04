@@ -51,19 +51,20 @@
     <string name="settings_memory_entry">记忆库</string>
     <string name="memory_title">记忆库</string>
     <string name="memory_empty">还没有记忆。
-说一句「记住我不吃辣」，或者点右上角「整理」，从最近的对话里挑出长期有用的信息。</string>
+在下面说要记住什么（如「我叫黄浩，在准备考研」），点右上角「整理」可以把杂乱内容重排成清晰的分节条目。</string>
     <string name="memory_hint">告诉它要记住什么…</string>
     <string name="memory_add">记住</string>
     <string name="memory_delete">删除这条记忆</string>
-    <string name="memory_from_model">AI 整理</string>
     <string name="memory_organize">整理</string>
     <string name="memory_organizing">整理中…</string>
-    <string name="memory_added">已记住</string>
-    <string name="memory_duplicate">这条已经记过了</string>
-    <string name="memory_deleted">已删除</string>
-    <string name="memory_organize_done">新增 %1$d 条记忆</string>
     <string name="memory_organize_empty">这次没有挑出可记的新内容</string>
     <string name="memory_organize_failed">整理失败：%1$s</string>
+    <string name="memory_apply_done">记忆已更新（第 %1$d 版）</string>
+    <string name="memory_version_line">第 %1$d 版 · 更新于 %2$s</string>
+    <string name="memory_edit">编辑记忆</string>
+    <string name="memory_edit_hint">直接编辑记忆全文</string>
+    <string name="memory_edit_save">保存</string>
+    <string name="chat_temporary_banner">临时对话：退出后内容会直接归档，可在「设置 → 已归档会话」找回</string>
     <!-- 前台服务通知（v0.0.98 收进资源）：标题与停止按钮 -->
     <string name="chat_service_generating">正在生成回复…</string>
     <string name="swipe_delete_action">删除这道题</string>

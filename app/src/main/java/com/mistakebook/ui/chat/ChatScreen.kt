@@ -561,6 +561,12 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            // 临时对话横幅（v0.0.112）：临时对话退出不再删除，而是归档；
+            // 界面必须把「现在在临时对话里、退出后会去哪」讲清楚，
+            // 否则用户以为聊的内容凭空消失了。
+            if (state.temporary) {
+                TemporaryChatBanner()
+            }
             Box(modifier = Modifier.weight(1f)) {
                 if (state.loading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -827,6 +833,42 @@ private fun OcrProgressBar(stage: String) {
  * 右侧「重试」：清掉失败说明重新排队——网断了、额度没了
  * 这类原因恢复后，用户不用退出会话再进来。
  */
+/**
+ * 临时对话横幅：常驻在消息区上方的一条细提示。
+ *
+ * v0.0.112 起临时对话退出是「归档」而不是「删除」——行为变了，
+ * 界面必须跟上：用户得知道当前在临时状态、退出后内容去了哪、
+ * 刚退出想找回该去哪里。常驻而不做成一次性 snackbar：
+ * 聊到一半才想起来「这是临时对话」已经晚了。
+ */
+@Composable
+private fun TemporaryChatBanner() {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_temp_chat),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.chat_temporary_banner),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
 @Composable
 private fun OcrNoticeBar(notice: String, onRetry: () -> Unit) {
     Surface(

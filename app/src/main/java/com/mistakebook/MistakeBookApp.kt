@@ -35,7 +35,7 @@ class MistakeBookApp : Application() {
         // 但进程被系统杀掉时那条退出路径根本不会跑——这里把残留的收拾干净，
         // 否则「退出即删」这句话在崩溃之后就不成立了。
         container.appScope.launch {
-            runCatching { container.chatRepository.purgeTemporarySessions() }
+            runCatching { container.chatRepository.archiveAbandonedTemporarySessions() }
         }
         // 空会话的兜底清理（v0.0.107）：老版本「点开就建行」，退出后那行还在。
         // 列表已经过滤掉了，但库里的空行没有意义——启动时顺手收拾干净。
