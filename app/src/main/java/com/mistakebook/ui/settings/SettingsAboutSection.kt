@@ -1,6 +1,12 @@
 package com.mistakebook.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -165,11 +171,30 @@ internal fun AboutUpdateSection() {
                 )
                 if (current.notes.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = current.notes.take(300),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    // 更新说明**全文**放在一个定高可滚动的框里（v0.0.111）。
+                    //
+                    // 之前 `take(300)` 截断：用户只看到开头，具体改了什么
+                    // 得自己去仓库翻——而「这个版本改了什么」正是他点开
+                    // 更新的原因。定高而不是撑开整个设置页：几十行说明
+                    // 全部展开会把「下载」按钮顶出屏幕外。
+                    //
+                    // 用 heightIn(max) 而不是 height：说明短的时候框就矮，
+                    // 不留一片空白。
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = AppUpdate.notesForDisplay(current.notes),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 when {

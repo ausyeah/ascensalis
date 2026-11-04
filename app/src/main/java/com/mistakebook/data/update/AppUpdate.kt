@@ -169,6 +169,18 @@ object AppUpdate {
         )
     }
 
+    /**
+     * 给界面展示用的说明文本：剥掉 Markdown 的标题井号与加粗星号（v0.0.111）。
+     *
+     * 说明框里是纯 Text，`##` 和 `**` 原样摊出来只会让用户以为排版坏了。
+     * 列表符号（`- `）保留——它本身就是可读的。
+     */
+    internal fun notesForDisplay(notes: String): String {
+        var out = notes.replace("\r\n", "\n").replace('\r', '\n')
+        out = Regex("(?m)^#{1,6}[ \t]*").replace(out, "")
+        return out.replace("**", "").trim()
+    }
+
     /** 更新包的文件名按版本分开：换一个版本就是另一个文件，不会拿旧包去装。 */
     internal fun apkFileName(version: String): String = "app-update-$version.apk"
 

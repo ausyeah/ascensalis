@@ -121,6 +121,29 @@ class AppUpdateInstallFlowTest {
         assertTrue("按钮文案走 strings.xml", ui.contains("R.string.settings_about_issue_action"))
     }
 
+    @Test
+    fun `更新说明全文放在定高滚动框里`() {
+        val ui = readSource("src/main/java/com/mistakebook/ui/settings/SettingsAboutSection.kt")
+        assertFalse(
+            "不许再 take(300) 截断——用户点开更新就是要看全改了什么",
+            ui.contains("notes.take(300)")
+        )
+        assertTrue("说明框必须可以框内滚动", ui.contains(".verticalScroll(rememberScrollState())"))
+        assertTrue("说明框必须有高度上限，否则把下载按钮顶出屏幕", ui.contains("heightIn(max"))
+        assertTrue("框里放的是完整说明（先剥 markdown 标记）", ui.contains("AppUpdate.notesForDisplay(current.notes)"))
+    }
+
+    @Test
+    fun `说明文本剥掉 markdown 井号与加粗星号`() {
+        val raw = "## 思考块的折叠键\n\n列表是**倒序贴底**：气泡一变高，整条**往上长**。\n\n- 按钮留在原地\n- 内容向下长"
+        val cleaned = AppUpdate.notesForDisplay(raw)
+        assertFalse("标题井号要去掉", cleaned.contains("##"))
+        assertFalse("加粗星号要去掉", cleaned.contains("**"))
+        assertTrue("标题文字保留", cleaned.startsWith("思考块的折叠键"))
+        assertTrue("列表符号保留", cleaned.contains("- 按钮留在原地"))
+        assertTrue("换行结构保留", cleaned.contains("\n\n"))
+    }
+
     private fun readSource(path: String): String {
         val candidates = listOf(
             java.io.File(path),
