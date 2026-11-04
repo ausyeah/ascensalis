@@ -149,6 +149,7 @@ import androidx.core.content.FileProvider
 import java.io.File
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.gestures.scrollBy
 
 /**
  * 会话相册一次最多选几张（v0.0.52 多选）。
@@ -177,9 +178,11 @@ internal fun MessageList(
     onContinue: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：批改结果「存入题目备注」入口；自由会话传 null 不展示。 */
-    onSaveToNote: ((Long) -> Unit)? = null,
-    onToggleThinking: () -> Unit = {}
+    onSaveToNote: ((Long) -> Unit)? = null
 ) {
+    // 思考块展开/收起后按钮被反向列表顶走的补偿：
+    // 列表按位移反着滚同样的量，按钮就留在手指底下，内容只往下长。
+    val anchorScope = rememberCoroutineScope()
     // 倒序提供数据配合 reverseLayout：最新消息固定在底边，流式气泡增长无需反复重启滚动动画。
     //
     // 流式预览（streamingContent）在**item 作用域内**读取，不在外层：
@@ -239,7 +242,9 @@ internal fun MessageList(
                 onContinue = onContinue,
                 onDelete = onDelete,
                 onSaveToNote = onSaveToNote,
-                onToggleThinking = onToggleThinking
+                onThinkingAnchor = { shiftPx ->
+                    anchorScope.launch { listState.scrollBy(shiftPx) }
+                }
             )
         }
         if (state.omittedCount > 0) {

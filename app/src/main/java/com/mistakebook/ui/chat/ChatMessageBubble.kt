@@ -96,6 +96,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -109,6 +110,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import android.content.ClipData
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -181,7 +184,9 @@ internal fun MessageBubble(
     onDelete: (Long) -> Unit,
     /** T13：把助手回复存入题目备注。null = 当前会话不展示该入口（自由会话）。 */
     onSaveToNote: ((Long) -> Unit)? = null,
-    onToggleThinking: () -> Unit = {}
+    onToggleThinking: () -> Unit = {},
+    /** 思考块展开/收起后按钮的位移（px），交给列表补偿滚动。 */
+    onThinkingAnchor: (Float) -> Unit = {}
 ) {
     val isUser = message.role == ChatRole.USER
     val isInjected = message.injected
@@ -346,7 +351,8 @@ internal fun MessageBubble(
                         mathRenderer = mathRenderer,
                         // 思考块与正文同属一条消息：共用消息 id 隔离防抖
                         debounceKey = message.id,
-                        onToggle = { onToggleThinking() }
+                        onToggle = { onToggleThinking() },
+                        onAnchorShift = onThinkingAnchor
                     )
                     if (answer.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
@@ -688,7 +694,14 @@ internal fun ThinkingBlock(
     debounceKey: Any? = null,
     /** 生成进行中（思考+作答全程）：折叠/展开点击一律无效。 */
     locked: Boolean = false,
-    onToggle: (Boolean) -> Unit = {}
+    onToggle: (Boolean) -> Unit = {},
+    /**
+     * 展开/收起把按钮顶边推移了多少像素（正数 = 被顶上去）。
+     *
+     * 列表是反向布局：气泡变高时整体往上长，按钮会从手指底下跑掉。
+     * 交给列表按这个量补偿滚动，按钮才会留在原地、内容只往下长。
+     */
+    onAnchorShift: (Float) -> Unit = {}
 ) {
     // 初始展开态直接取 streaming：历史消息（streaming=false）首次组合就是
     // 收起态，不会先把整段思考渲染一遍再折叠——那笔开销在滚动到每条
@@ -699,6 +712,24 @@ internal fun ThinkingBlock(
         if (!streaming) {
             expanded = false
         }
+    }
+
+    // 折叠按钮的窗口坐标 + 点击那一刻记下的锚点。
+    //
+    // 为什么要量：列表是 reverseLayout，气泡长高时**整体向上长**，
+    // 按钮（在块顶部）就被顶离手指所在的位置——用户连点两下折叠/展开，
+    // 第二下永远点空。量出位移、让列表补一次同样的滚动量，按钮才会定在原处，
+    // 而新内容向**下**长出来（这正是用户说的「永远向下展开」）。
+    var buttonTopY by remember { mutableStateOf(0f) }
+    var anchorTopY by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(expanded) {
+        val anchor = anchorTopY ?: return@LaunchedEffect
+        anchorTopY = null
+        // 等两帧：一帧完成新布局，一帧让 onGloballyPositioned 把新坐标写回来
+        withFrameNanos { }
+        withFrameNanos { }
+        val shift = anchor - buttonTopY
+        if (kotlin.math.abs(shift) >= 1f) onAnchorShift(shift)
     }
 
     // 尾巴上未闭合的公式先藏起来：半截公式一旦进 RichText 就会先显示
@@ -750,10 +781,13 @@ internal fun ThinkingBlock(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
+                    .onGloballyPositioned { buttonTopY = it.boundsInWindow().top }
                     .clickable(
                         enabled = !locked,
                         role = Role.Button,
                         onClick = {
+                            // 先记住「点下去那一刻按钮在哪」，布局变了才有得比
+                            anchorTopY = buttonTopY
                             val next = !expanded
                             expanded = next
                             onToggle(next)

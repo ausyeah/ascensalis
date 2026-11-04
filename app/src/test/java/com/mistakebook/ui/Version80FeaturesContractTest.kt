@@ -41,9 +41,16 @@ class Version80FeaturesContractTest {
         val src = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatMessageBubble.kt")
         val listSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatMessageList.kt")
         assertTrue("ThinkingBlock 必须提供 onToggle 回调", src.contains("onToggle: (Boolean) -> Unit = {}"))
-        // 折叠回滚 lambda 在入口接线处（ChatScreen.kt 传给 MessageList）
+        // v0.0.110：折叠不再靠「滚回底部」（那会把用户正在读的位置拽走），
+        // 而是量出按钮被顶走的位移，让列表反着滚同样的量——按钮留在手指底下，
+        // 内容只往下长。旧的 no-op 接线不许残留。
         val mainSrc = readSource("app/src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
-        assertTrue("MessageList 必须在折叠时回滚到列表底部", mainSrc.contains("onToggleThinking = {") && listSrc.contains("onToggleThinking"))
+        assertTrue(
+            "MessageList 必须按位移补偿滚动",
+            listSrc.contains("listState.scrollBy(shiftPx)")
+        )
+        assertTrue("ThinkingBlock 必须把位移交出去", src.contains("onAnchorShift"))
+        assertFalse("旧的 onToggleThinking 接线不许残留", mainSrc.contains("onToggleThinking = {"))
         assertTrue("ThinkingBlock 移除多帧高度过渡动画防 reverseLayout 抖动", !src.contains("ThinkingBlock") || !src.contains(".animateContentSize()\n            .clip(RoundedCornerShape(8.dp))\n            .background(MaterialTheme.colorScheme.surface"))
     }
 

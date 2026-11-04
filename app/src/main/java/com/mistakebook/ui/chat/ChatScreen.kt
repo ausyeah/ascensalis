@@ -607,11 +607,7 @@ fun ChatScreen(
                         // 早先无条件传回调，自由会话里图标照画、点下去 saveToNote
                         // 第一行 questionId==null 静默退出——用户看到的就是
                         // 「第二个图标点了没反应」。
-                        onSaveToNote = questionId?.let { viewModel::saveToNote },
-                        onToggleThinking = {
-                            // 思考折叠/展开为卡片就地展开，绝不强制 scrollToItem(0, 0)
-                            // 避免用户阅读历史消息时列表发生恶性跳转和抽搐抖动
-                        }
+                        onSaveToNote = questionId?.let { viewModel::saveToNote }
                     )
                 }
 
