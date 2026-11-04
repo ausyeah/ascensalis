@@ -107,6 +107,20 @@ class AppUpdateInstallFlowTest {
         assertTrue("完整收到才改名", source.contains("part.renameTo(target)"))
     }
 
+    @Test
+    fun `关于页提供提 Issue 的入口`() {
+        val appUpdate = readSource("src/main/java/com/mistakebook/data/update/AppUpdate.kt")
+        assertTrue(
+            "要有一个直达「新建 issue」的地址",
+            appUpdate.contains("const val ISSUE_URL = \"\$REPO_URL/issues/new\"")
+        )
+
+        val ui = readSource("src/main/java/com/mistakebook/ui/settings/SettingsAboutSection.kt")
+        // 用户明确要求：紧挨着 star 给一个提 issue 的按钮
+        assertTrue("按钮要点得动", ui.contains("AppUpdate.openIssue(context)"))
+        assertTrue("按钮文案走 strings.xml", ui.contains("R.string.settings_about_issue_action"))
+    }
+
     private fun readSource(path: String): String {
         val candidates = listOf(
             java.io.File(path),

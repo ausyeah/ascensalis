@@ -340,6 +340,9 @@ fun MistakeBookNavHost(
                 },
                 onBack = {
                     container.cameraPurpose = AppContainer.CameraPurpose.QUESTION
+                    // 从对话进来的相机被关掉：连自动发送的意图一起作废。
+                    // 留着的话，用户之后手动挑一张图做附件，会被静默发出去。
+                    container.pendingTool = null
                     navController.popBackStack()
                 },
                 onStartBatchCrop = {

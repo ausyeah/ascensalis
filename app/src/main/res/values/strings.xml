@@ -43,6 +43,9 @@
     <string name="settings_about_star">给这个项目点个 Star</string>
     <string name="settings_about_star_desc">一键打开 GitHub 仓库页</string>
     <string name="settings_about_star_action">去 Star</string>
+    <string name="settings_about_issue">遇到问题？</string>
+    <string name="settings_about_issue_desc">去 GitHub 提个 Issue，我会看到</string>
+    <string name="settings_about_issue_action">提 Issue</string>
     <!-- 前台服务通知（v0.0.98 收进资源）：标题与停止按钮 -->
     <string name="chat_service_generating">正在生成回复…</string>
     <string name="swipe_delete_action">删除这道题</string>
@@ -572,6 +575,7 @@
     <string name="swipe_pin_action">置顶</string>
     <string name="swipe_unpin_action">取消置顶</string>
     <string name="capture_hint_essay">先拍题目要求，再拍作文，拍完点完成</string>
+    <string name="capture_hint_translate">拍下要翻译的英文，拍完直接讲解</string>
     <string name="chat_tool_needs_llm">需配模型</string>
     <string name="chat_tool_needs_ocr">需配识别</string>
     <string name="chat_history_title">历史对话</string>

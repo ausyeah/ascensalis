@@ -31,6 +31,10 @@ class PendingToolCameraTest {
             "不许再有 camera 开关——「开不开相机」只能由入口推导",
             block.contains("camera:") || block.contains("autoSend:")
         )
+        assertTrue(
+            "但要记账：相机已经为这个入口拉起过",
+            block.contains("val launchedCamera: Boolean = false")
+        )
     }
 
     @Test
@@ -47,15 +51,25 @@ class PendingToolCameraTest {
     }
 
     @Test
-    fun `纯文字入口一律不碰相机`() {
-        // 英语翻译 / 绘图生图是纯文字：它们点了绝不能去拍照
-        listOf(ChatTool.TRANSLATE, ChatTool.DIAGRAM).forEach { tool ->
-            assertFalse("${tool.name} 不该拉相机", tool.needsCamera)
-        }
-        // 拍题 / 作文批改是照片入口
+    fun `纯文字入口不碰相机而翻译要拍照`() {
+        // 绘图生图是纯文字/纯生成，它点了绝不能去拍照
+        assertFalse("DIAGRAM 不该拉相机", ChatTool.DIAGRAM.needsCamera)
+        // v0.0.106 用户改口：「英语翻译」也是拍一段英文再讲，要先进相机。
+        // 手持一段英文却要先把它敲进输入框，等于让工具替用户做了两遍活。
+        assertTrue("英语翻译要先拍照", ChatTool.TRANSLATE.needsCamera)
+        // 拍题 / 作文批改本来就是照片入口
         listOf(ChatTool.PHOTO, ChatTool.ESSAY).forEach { tool ->
             assertTrue("${tool.name} 该拉相机", tool.needsCamera)
         }
+    }
+
+    @Test
+    fun `相机只自动拉起一次`() {
+        // 用户实测报过：从对话进相机，左上角关闭点了没反应——其实是关掉后
+        // ChatScreen 的 LaunchedEffect 又拉了一次，看起来就是「关不掉」。
+        val screen = readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
+        assertTrue("开相机前必须判「已经拉过」", screen.contains("mine.launchedCamera"))
+        assertTrue("拉起时必须把账记上", screen.contains("mine.copy(launchedCamera = true)"))
     }
 
     @Test

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -277,6 +278,39 @@ internal fun AboutUpdateSection() {
                 )
                 Spacer(Modifier.size(6.dp))
                 Text(stringResource(R.string.settings_about_star_action))
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        // 提 Issue：紧挨着 star 放。用户遇到问题时最不想做的就是
+        // 「去仓库 → 找 Issues → 新建」，路径每多一步，反馈就少一半。
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.settings_about_issue),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = stringResource(R.string.settings_about_issue_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = { AppUpdate.openIssue(context) }) {
+                Icon(
+                    imageVector = Icons.Default.BugReport,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(stringResource(R.string.settings_about_issue_action))
             }
         }
     }

@@ -65,11 +65,11 @@ class ChatToolsTest {
     }
 
     @Test
-    fun `要拍照的入口就两个`() {
-        // 拍题讲解 / 作文批改都从一张照片开始；
-        // 翻译和绘图生图是纯文字/纯生成，不该拉起相机
+    fun `要拍照的入口有三个`() {
+        // 拍题讲解 / 英语翻译 / 作文批改都从一张照片开始（v0.0.106 翻译改口）；
+        // 只有绘图生图是纯文字/纯生成，不该拉起相机
         assertEquals(
-            setOf(ChatTool.PHOTO, ChatTool.ESSAY),
+            setOf(ChatTool.PHOTO, ChatTool.TRANSLATE, ChatTool.ESSAY),
             ChatTool.entries.filter { it.needsCamera }.toSet()
         )
     }

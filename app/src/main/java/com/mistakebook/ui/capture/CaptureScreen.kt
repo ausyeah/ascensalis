@@ -594,6 +594,8 @@ fun CaptureScreen(
                     when {
                         // 作文批改是两段式：先题目要求再作文，不提示用户会只拍一张
                         container.pendingTool?.tool == com.mistakebook.ui.chat.ChatTool.ESSAY -> R.string.capture_hint_essay
+                        // 翻译只拍一段文字：提示「支持连拍」会让人以为要拍整页
+                        container.pendingTool?.tool == com.mistakebook.ui.chat.ChatTool.TRANSLATE -> R.string.capture_hint_translate
                         isChatPurpose -> R.string.capture_hint_chat
                         else -> R.string.capture_hint_question
                     }

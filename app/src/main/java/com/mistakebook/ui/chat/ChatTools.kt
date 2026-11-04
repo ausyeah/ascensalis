@@ -45,7 +45,7 @@ internal enum class ChatTool(
     val icon: ImageVector,
     /** 发给模型的隐藏指令（[ChatToolPrompts]），以 SYSTEM 消息注入会话，不进输入框。 */
     val instruction: String,
-    /** 拍题 / 作文批改要先拍照：进对话页后自动拉起相机，拍完裁切自动发送。 */
+    /** 拍题 / 翻译 / 作文批改都从一张照片开始：进对话页后自动拉起相机，拍完裁切自动发送。 */
     val needsCamera: Boolean,
     val needsLlm: Boolean,
     val needsOcr: Boolean
@@ -62,7 +62,9 @@ internal enum class ChatTool(
         labelRes = R.string.chat_tool_translate,
         icon = Icons.Default.Translate,
         instruction = ChatToolPrompts.TRANSLATE,
-        needsCamera = false,
+        // v0.0.106 用户改口：翻译也是「拍一段英文再讲」，所以要先进相机。
+        // 手持一段英文却要先打字把原文敲进去，等于让工具替用户做了两遍活。
+        needsCamera = true,
         needsLlm = true,
         needsOcr = false
     ),

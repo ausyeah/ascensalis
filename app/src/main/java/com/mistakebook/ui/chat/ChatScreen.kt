@@ -337,14 +337,16 @@ fun ChatScreen(
         viewModel.installInstruction(mine.instruction)
     }
 
-    // ② 拍题 / 作文批改要先拍照：会话就绪后自动拉起相机。
-    //    **开不开相机由入口本身决定**（mine.tool.needsCamera），不是某个抄过来的开关——
-    //    用户点「英语翻译」却开了相机，根因就是「开不开相机」这件事被写了两遍。
-    //    「拉起相机」用掉即焚：留着的话，下次进这条会话会凭空再弹一次相机。
+    // ② 拍题 / 翻译 / 作文批改要先拍照：会话就绪后自动拉起相机。
+    //    **开不开相机由入口本身决定**（mine.tool.needsCamera），不是某个抄过来的开关。
+    //    「拉起相机」必须**用掉即焚**（launchedCamera）：这条 effect 的 key 含
+    //    state.loading / sessionId，从相机返回时页面重建，条件一成立就会再拉一次——
+    //    用户点关闭后相机立刻又盖回来，看起来就是「关闭按钮坏了」。同理也会
+    //    叠出两份取景器互相 unbindAll，预览全黑。
     LaunchedEffect(pendingTool, state.sessionId, state.loading) {
         val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
-        if (!mine.tool.needsCamera || state.loading) return@LaunchedEffect
-        container.pendingTool = mine.copy(instruction = mine.instruction)
+        if (!mine.tool.needsCamera || state.loading || mine.launchedCamera) return@LaunchedEffect
+        container.pendingTool = mine.copy(launchedCamera = true)
         if (state.pendingAttachments.isNotEmpty()) return@LaunchedEffect
         onOpenCamera()
     }

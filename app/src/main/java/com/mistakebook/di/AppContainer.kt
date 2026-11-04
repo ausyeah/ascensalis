@@ -583,5 +583,13 @@ internal data class PendingTool(
     /** 哪个功能入口带进来的。 */
     val tool: ChatTool,
     /** 以 SYSTEM 消息注入的隐藏指令；装载后置 null，其余意图继续有效。 */
-    val instruction: String?
+    val instruction: String?,
+    /**
+     * 相机已经为这个入口拉起来过了（v0.0.106）。
+     *
+     * 这不是「要不要开相机」的开关——那件事仍由 [tool] 的 needsCamera 单独决定。
+     * 它是**记账**：没有它，从相机返回对话页时 ChatScreen 的 LaunchedEffect
+     * 会再拉一次相机，用户点左上角关闭等于没点（相机立刻又盖回来）。
+     */
+    val launchedCamera: Boolean = false
 )

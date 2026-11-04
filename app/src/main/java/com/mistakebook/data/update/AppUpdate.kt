@@ -50,6 +50,9 @@ object AppUpdate {
     /** 仓库主页（给「去 star」用）。 */
     const val REPO_URL = "https://github.com/$REPO"
 
+    /** 新建 issue 页：遇到问题直接从这里说，比让用户去翻仓库强。 */
+    const val ISSUE_URL = "$REPO_URL/issues/new"
+
     private const val TAG = "AppUpdate"
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
 
@@ -320,14 +323,23 @@ object AppUpdate {
 
     /** 打开仓库主页（给 star 用）。 */
     fun openRepo(context: Context): Boolean {
+        return openUrl(context, REPO_URL, "打开仓库页失败")
+    }
+
+    /** 打开「新建 issue」页。 */
+    fun openIssue(context: Context): Boolean {
+        return openUrl(context, ISSUE_URL, "打开 Issue 页失败")
+    }
+
+    private fun openUrl(context: Context, url: String, failureLog: String): Boolean {
         return runCatching {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(REPO_URL)).apply {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
             true
         }.getOrElse {
-            Log.w(TAG, "打开仓库页失败", it)
+            Log.w(TAG, failureLog, it)
             false
         }
     }
