@@ -6,8 +6,10 @@ import com.mistakebook.data.chat.AssembledContext
 import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.chat.ChatOcrText
 import com.mistakebook.data.chat.ChatPrompts
+import com.mistakebook.data.chat.MemoryPrompts
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.local.ChatDao
+import com.mistakebook.data.local.MemoryDao
 import com.mistakebook.data.local.QuestionDao
 import com.mistakebook.data.local.SubjectDao
 import com.mistakebook.data.local.entities.ChatAttachment
@@ -46,6 +48,7 @@ class ChatRepository(
     private val chatDao: ChatDao,
     private val questionDao: QuestionDao,
     private val subjectDao: SubjectDao,
+    private val memoryDao: MemoryDao,
     private val appFiles: AppFiles,
     private val imageDataUrls: ImageDataUrlProvider
 ) {
@@ -584,7 +587,14 @@ class ChatRepository(
         extraContext: String = ""
     ): AssembledContext {
         val systemContext = buildString {
-            if (questionId != null) append(buildQuestionContext(questionId).orEmpty())
+            // 长期记忆放最前（v0.0.108）：它是最一般的背景，题目上下文与功能指令
+            // 都要压在它上面——越具体的内容越靠后，模型读起来层次才是对的。
+            val memoryBlock = MemoryPrompts.injectBlock(memoryDao.allOnce().map { it.content })
+            if (memoryBlock.isNotBlank()) append(memoryBlock)
+            if (questionId != null) {
+                if (isNotBlank()) append("\n\n")
+                append(buildQuestionContext(questionId).orEmpty())
+            }
             // 功能入口的隐藏指令（v0.0.99）：拍题讲解 / 英语翻译 / 作文批改 /
             // 绘图生图等各个功能的规则。
             //
@@ -775,6 +785,18 @@ class ChatRepository(
             val element = json.parseToJsonElement(attachmentIdsJson) as? JsonArray ?: return emptyList()
             element.mapNotNull { it.jsonPrimitive.content.toLongOrNull() }
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * 写入模型生成的标题（v0.0.108）。
+     *
+     * 只在首条消息发出时调用一次；手动重命名过的会话（titleLocked）不覆盖——
+     * 用户自己起的名永远优先于模型。
+     */
+    suspend fun applyGeneratedTitle(sessionId: Long, title: String) {
+        val session = chatDao.findSession(sessionId) ?: return
+        if (session.titleLocked || title.isBlank()) return
+        chatDao.updateSession(session.copy(title = title.trim()))
     }
 
     /** 首条用户消息的前若干字当标题。已重命名过的会话不覆盖。 */

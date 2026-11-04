@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,6 +57,8 @@ fun SettingsScreen(
     onOpenLibrary: () -> Unit = {},
     /** 成就墙入口（T10）。 */
     onOpenBadgeWall: () -> Unit = {},
+    /** 记忆库入口（v0.0.108）。 */
+    onOpenMemory: () -> Unit = {},
     /** 已归档题目入口（v0.0.104）。 */
     onOpenArchivedQuestions: () -> Unit = {},
     /** 已归档会话入口（v0.0.104）。 */
@@ -195,6 +198,16 @@ fun SettingsScreen(
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_websearch), nested = true) {
                     SearchProviderSection(state = state, viewModel = viewModel)
                 }
+
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_memory), nested = true) {
+                    // 记忆是「让模型认识这个用户」的地方，跟模型配置同属 AI 一侧；
+                    // 放进通用组的话，用户会以为它和数据备份是一类东西。
+                    SettingsEntryRow(
+                        titleRes = R.string.settings_memory_entry,
+                        icon = Icons.Default.Memory,
+                        onOpen = onOpenMemory
+                    )
+                }
             }
 
             SettingsCategoryCard(
@@ -267,13 +280,13 @@ fun SettingsScreen(
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_archived), nested = true) {
                     // 归档不是删除：主列表里「删掉一道题」现在只是把它收起来，
                     // 这里就是把它再拿回来的地方。
-                    ArchivedEntrySection(
+                    SettingsEntryRow(
                         titleRes = R.string.settings_archived_questions,
                         icon = Icons.Default.Archive,
                         onOpen = onOpenArchivedQuestions
                     )
                     Spacer(Modifier.height(8.dp))
-                    ArchivedEntrySection(
+                    SettingsEntryRow(
                         titleRes = R.string.settings_archived_sessions,
                         icon = Icons.Default.Forum,
                         onOpen = onOpenArchivedSessions

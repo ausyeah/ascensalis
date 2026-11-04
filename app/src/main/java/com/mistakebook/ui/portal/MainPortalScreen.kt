@@ -75,6 +75,8 @@ fun MainPortalScreen(
     /** 已归档题目 / 会话入口（v0.0.104），设置页要用。 */
     onOpenArchivedQuestions: () -> Unit = {},
     onOpenArchivedSessions: () -> Unit = {},
+    /** 记忆库入口（v0.0.108）。 */
+    onOpenMemory: () -> Unit = {},
     onSnapAsk: () -> Unit = {},
     onStartReview: () -> Unit = {},
     /** 资料库管理页（T6）：门户设置 Tab 的内嵌设置页经此进子页面。 */
@@ -193,7 +195,8 @@ fun MainPortalScreen(
                         onOpenLibrary = onOpenLibrary,
                         onOpenBadgeWall = onOpenBadgeWall,
                         onOpenArchivedQuestions = onOpenArchivedQuestions,
-                        onOpenArchivedSessions = onOpenArchivedSessions
+                        onOpenArchivedSessions = onOpenArchivedSessions,
+                        onOpenMemory = onOpenMemory
                     )
                 }
             }

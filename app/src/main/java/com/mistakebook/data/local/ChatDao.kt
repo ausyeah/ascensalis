@@ -153,6 +153,25 @@ interface ChatDao {
     )
     fun observeArchivedSessions(): Flow<List<ChatSession>>
 
+    /**
+     * 最近「真人说过的话」（v0.0.108），给记忆整理用。
+     *
+     * 只按时间取最近若干条，不按会话分：记忆要的是用户反复提到的东西，
+     * 跨会话出现两次才更像「长期偏好」，而不是某一次提问的细节。
+     *
+     * 只取 **USER**（v0.0.109 实测修正）：把助手回复也塞进去的话，
+     * 模型会把界面上那些「**描述这张图片**：比如…」的提示语当成用户信息
+     * 记下来——这些是 App 自己的文案，跟用户毫无关系。
+     */
+    @Query(
+        """SELECT m.role AS role, m.content AS content FROM chat_messages m
+           JOIN chat_sessions s ON s.id = m.sessionId
+           WHERE s.deletedAt IS NULL AND s.temporary = 0 AND s.archivedAt IS NULL
+             AND m.role = 'USER' AND m.injected = 0 AND m.content <> ''
+           ORDER BY m.createdAt DESC LIMIT :limit"""
+    )
+    suspend fun recentSpoken(limit: Int): List<RecentSpoken>
+
     @Query("UPDATE chat_sessions SET archivedAt = :at, updatedAt = :at WHERE id = :id")
     suspend fun setArchived(id: Long, at: Long)
 

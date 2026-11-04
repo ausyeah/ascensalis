@@ -68,46 +68,6 @@ import kotlin.math.roundToInt
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/**
- * 设置里的入口行（与资料库入口同款：一枚图标 + 标题 + 右箭头）。
- *
- * 放这里而不是 SettingsScreen：两个入口行长得一样，抄两份就是两份重复。
- */
-@Composable
-internal fun ArchivedEntrySection(
-    titleRes: Int,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onOpen: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 4.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = stringResource(titleRes),
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.weight(1f)
-        )
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp)
-        )
-    }
-}
-
 /** 已归档内容的两个入口。 */
 enum class ArchivedKind { QUESTIONS, SESSIONS }
 

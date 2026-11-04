@@ -9,6 +9,7 @@ import com.mistakebook.data.local.entities.CaptureTask
 import com.mistakebook.data.local.entities.ChatAttachment
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.local.entities.ChatSession
+import com.mistakebook.data.local.entities.Memory
 import com.mistakebook.data.local.entities.Notebook
 import com.mistakebook.data.local.entities.PomodoroSession
 import com.mistakebook.data.local.entities.PomodoroTask
@@ -25,7 +26,7 @@ import com.mistakebook.data.local.entities.BadgeRecord
  * 高版本备份恢复进低版本 App，Room 下次启动会因找不到迁移而启动崩循环，
  * 只能清数据自救（v0.0.60 起在恢复入口直接拒绝）。
  */
-const val MISTAKE_BOOK_DB_VERSION = 10
+const val MISTAKE_BOOK_DB_VERSION = 11
 
 @Database(
     entities = [
@@ -39,6 +40,7 @@ const val MISTAKE_BOOK_DB_VERSION = 10
         ChatSession::class,
         ChatMessage::class,
         ChatAttachment::class,
+        Memory::class,
         PomodoroTask::class,
         PomodoroSession::class,
         WeeklyReport::class,
@@ -63,6 +65,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
     abstract fun notebookDao(): NotebookDao
 
     abstract fun chatDao(): ChatDao
+
+    abstract fun memoryDao(): MemoryDao
 
     abstract fun pomodoroDao(): PomodoroDao
 
@@ -346,6 +350,28 @@ abstract class MistakeBookDatabase : RoomDatabase() {
          * 都是**可空**列：老数据一律是「没归档」，查询里 `archivedAt IS NULL`
          * 就是「未归档」，不需要给老行填默认值。
          */
+        /**
+         * 10 -> 11：新增记忆库（v0.0.108）。
+         *
+         * 建表 SQL 与 `Memory` 实体逐字对应：`fromModel` 是 Boolean，
+         * Room 里存 INTEGER NOT NULL。
+         */
+        val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `memories` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `fromModel` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `questions` ADD COLUMN `archivedAt` INTEGER")
@@ -393,7 +419,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                     MIGRATION_6_7,
                     MIGRATION_7_8,
                     MIGRATION_8_9,
-                    MIGRATION_9_10
+                    MIGRATION_9_10,
+                    MIGRATION_10_11
                 )
                 .build()
     }

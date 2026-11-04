@@ -11,6 +11,7 @@ import com.mistakebook.data.chat.ChatContextCompressor
 import com.mistakebook.data.chat.ChatImageOcr
 import com.mistakebook.data.chat.ChatOcrText
 import com.mistakebook.data.chat.ChatPrompts
+import com.mistakebook.data.chat.ChatTitleGenerator
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.chat.PreparedAttachment
 import com.mistakebook.data.local.entities.ChatAttachment
@@ -309,6 +310,7 @@ class ChatViewModel(
     private val usageStatsStore: UsageStatsStore,
     private val preparer: ChatAttachmentPreparer,
     private val compressor: ChatContextCompressor,
+    private val titleGenerator: ChatTitleGenerator,
     private val imageOcr: ChatImageOcr,
     private val questionId: Long?,
 
@@ -1104,6 +1106,10 @@ class ChatViewModel(
             profile
         }
 
+        // 标题只生成一次：首条消息进来时让模型概括一下。
+        // 不这样做的后果是历史里全是被截断的第一句话，扫一眼分不清是哪条。
+        val isFirstUserMessage = _state.value.messages.none { it.role == ChatRole.USER }
+
         if (!isRetry) {
             val message = repository.insertUserMessage(sessionId, text, emptyList(), questionId)
             // 附件必须在消息建好之后才能插（外键指向它），
@@ -1121,6 +1127,17 @@ class ChatViewModel(
                     sessionId = sessionId,
                     files = libraryPaths.map { File(it) }.filter { it.isFile }
                 )
+            }
+            if (isFirstUserMessage) {
+                // 不阻塞发送：标题是锦上添花，模型慢或失败都不能耽误这次回答。
+                viewModelScope.launch {
+                    val generated = runCatching {
+                        titleGenerator.generate(effectiveProfile, text)
+                    }.getOrNull()
+                    if (generated != null) {
+                        runCatching { repository.applyGeneratedTitle(sessionId, generated) }
+                    }
+                }
             }
         }
         // **模型不识图时，先让 MinerU 把图片读一遍。**

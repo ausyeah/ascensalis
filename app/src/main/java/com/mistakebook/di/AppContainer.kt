@@ -145,6 +145,7 @@ class AppContainer(context: Context) {
             chatDao = database.chatDao(),
             questionDao = database.questionDao(),
             subjectDao = database.subjectDao(),
+            memoryDao = database.memoryDao(),
             appFiles = files,
             imageDataUrls = com.mistakebook.data.chat.ChatImageDataUrls()
         )
@@ -360,6 +361,19 @@ class AppContainer(context: Context) {
      * 会话上下文压缩器：旧轮次滚成摘要，长对话不再「越聊越失忆》。
      * 与 chatCompletionStream 共享同一个实例（内部各自派生 HTTP 配置，无冲突）。
      */
+    val chatTitleGenerator: com.mistakebook.data.chat.ChatTitleGenerator by lazy {
+        com.mistakebook.data.chat.ChatTitleGenerator(chatCompletionStream, usageStatsStore)
+    }
+
+    val memoryRepository: com.mistakebook.data.repos.MemoryRepository by lazy {
+        com.mistakebook.data.repos.MemoryRepository(
+            memoryDao = database.memoryDao(),
+            chatDao = database.chatDao(),
+            stream = chatCompletionStream,
+            usageStatsStore = usageStatsStore
+        )
+    }
+
     val chatContextCompressor: com.mistakebook.data.chat.ChatContextCompressor by lazy {
         com.mistakebook.data.chat.ChatContextCompressor(database.chatDao(), chatCompletionStream, usageStatsStore)
     }

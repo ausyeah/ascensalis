@@ -64,6 +64,7 @@ object Routes {
 
     /** 自由会话的 questionId 哨兵值。0 是数据库自增起点，不能拿来当「无」。 */
     const val CHAT_FREE = -1L
+    const val MEMORY = "memory"
     const val ARCHIVED_QUESTIONS = "archivedQuestions"
     const val ARCHIVED_SESSIONS = "archivedSessions"
 
@@ -258,7 +259,8 @@ fun MistakeBookNavHost(
                 onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
                 onOpenBadgeWall = { navController.navigate(Routes.BADGE_WALL) },
                 onOpenArchivedQuestions = { navController.navigate(Routes.ARCHIVED_QUESTIONS) },
-                onOpenArchivedSessions = { navController.navigate(Routes.ARCHIVED_SESSIONS) }
+                onOpenArchivedSessions = { navController.navigate(Routes.ARCHIVED_SESSIONS) },
+                onOpenMemory = { navController.navigate(Routes.MEMORY) }
             )
         }
 
@@ -289,6 +291,13 @@ fun MistakeBookNavHost(
                 onBack = { navController.popBackStack() },
                 onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
                 onOpenBadgeWall = { navController.navigate(Routes.BADGE_WALL) }
+            )
+        }
+
+        composable(Routes.MEMORY) {
+            com.mistakebook.ui.settings.MemoryScreen(
+                container = container,
+                onBack = { navController.popBackStack() }
             )
         }
 

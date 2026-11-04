@@ -213,6 +213,7 @@ fun ChatScreen(
             usageStatsStore = c.usageStatsStore,
             preparer = c.chatAttachmentPreparer,
             compressor = c.chatContextCompressor,
+            titleGenerator = c.chatTitleGenerator,
             imageOcr = c.chatImageOcr,
             questionId = questionId,
             sessionId = sessionId,
