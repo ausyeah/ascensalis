@@ -253,6 +253,11 @@ fun SettingsScreen(
                     )
                 }
 
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_about), nested = true) {
+                    // 版本号 / 检查更新 / 去 star
+                    AboutUpdateSection()
+                }
+
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_wordbook_data), nested = true) {
                     // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
                     // 都要留给题目），统一收到设置里，与数据管理相邻。

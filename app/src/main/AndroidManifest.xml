@@ -22,9 +22,17 @@
     <!-- Android 11+ 包可见性：不声明的话 resolveActivity() 查
          ACTION_IMAGE_CAPTURE 永远返回 null，拍照前的可用性预检会误判，
          只能等 launch 抛 ActivityNotFoundException 闪退才发现。 -->
+    <!-- 自更新：装 APK 需要「安装未知应用」权限（Android 8+ 必须用户手动授权） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <queries>
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <!-- 「去 star」要拉起浏览器；不声明的话 Android 11+ 查不到可处理的 app -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
         </intent>
     </queries>
 
