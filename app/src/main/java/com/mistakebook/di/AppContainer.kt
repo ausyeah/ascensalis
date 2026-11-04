@@ -145,7 +145,7 @@ class AppContainer(context: Context) {
             chatDao = database.chatDao(),
             questionDao = database.questionDao(),
             subjectDao = database.subjectDao(),
-            memoryDao = database.memoryDao(),
+            memoryText = { memoryRepository.blockText() },
             appFiles = files,
             imageDataUrls = com.mistakebook.data.chat.ChatImageDataUrls()
         )
@@ -367,8 +367,7 @@ class AppContainer(context: Context) {
 
     val memoryRepository: com.mistakebook.data.repos.MemoryRepository by lazy {
         com.mistakebook.data.repos.MemoryRepository(
-            memoryDao = database.memoryDao(),
-            chatDao = database.chatDao(),
+            settingsStore = settingsStore,
             stream = chatCompletionStream,
             usageStatsStore = usageStatsStore
         )

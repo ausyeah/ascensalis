@@ -488,6 +488,41 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ===== 长期记忆文档（v0.0.112，单文档模型，存 DataStore 不进 Room）=====
+
+    private val KEY_MEMORY_DOC = stringPreferencesKey("memory_doc")
+    private val KEY_MEMORY_VERSION = intPreferencesKey("memory_version")
+    private val KEY_MEMORY_UPDATED = longPreferencesKey("memory_updated_at")
+
+    /** 记忆全文的订阅流（空串 = 还没有记忆）。 */
+    val memoryDocument: Flow<String> =
+        appContext.settingsDataStore.data.map { it[KEY_MEMORY_DOC].orEmpty() }
+
+    suspend fun memoryDocumentNow(): String =
+        appContext.settingsDataStore.data.first()[KEY_MEMORY_DOC].orEmpty()
+
+    /** 当前是第几版记忆（0 = 从未写过）。模型每次改写 +1。 */
+    suspend fun memoryVersionNow(): Int =
+        appContext.settingsDataStore.data.first()[KEY_MEMORY_VERSION] ?: 0
+
+    suspend fun memoryUpdatedAtNow(): Long =
+        appContext.settingsDataStore.data.first()[KEY_MEMORY_UPDATED] ?: 0L
+
+    /**
+     * 保存一版记忆全文，版本号 +1。
+     *
+     * 为什么是「整篇覆盖」而不是增删条目：记忆的消费方只有
+     * 系统提示词注入和用户阅读，一次改写就是一份自洽的新文档；
+     * 版本号让界面能说清「现在是第几版」，改坏了也知道退过几步。
+     */
+    suspend fun saveMemoryDocument(text: String) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[KEY_MEMORY_DOC] = text
+            prefs[KEY_MEMORY_VERSION] = (prefs[KEY_MEMORY_VERSION] ?: 0) + 1
+            prefs[KEY_MEMORY_UPDATED] = System.currentTimeMillis()
+        }
+    }
+
     // ===== 每个会话选用的模型（临时状态，存 DataStore 不进 Room）=====
 
     /**

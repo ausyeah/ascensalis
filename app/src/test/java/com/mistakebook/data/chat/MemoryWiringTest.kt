@@ -1,5 +1,6 @@
 package com.mistakebook.data.chat
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -17,13 +18,34 @@ class MemoryWiringTest {
     fun `记忆必须拼进系统提示词`() {
         val repo = readSource("src/main/java/com/mistakebook/data/repos/ChatRepository.kt")
         assertTrue(
-            "buildContext 要把记忆块拼进 system 上下文",
-            repo.contains("MemoryPrompts.injectBlock(memoryDao.allOnce().map { it.content })")
+            "buildContext 要把记忆块拼进 system 上下文（v0.0.112 单文档注入）",
+            repo.contains("MemoryPrompts.injectDocument(memoryText())")
         )
         // 放在题目上下文之前：越一般的背景越靠前，模型读起来层次才对
-        val memoryAt = repo.indexOf("MemoryPrompts.injectBlock")
+        val memoryAt = repo.indexOf("MemoryPrompts.injectDocument")
         val questionAt = repo.indexOf("append(buildQuestionContext(questionId).orEmpty())")
         assertTrue(memoryAt in 1 until questionAt)
+    }
+
+    @Test
+    fun `记忆改写走单文档模型`() {
+        val repo = readSource("src/main/java/com/mistakebook/data/repos/MemoryRepository.kt")
+        assertTrue("依赖收窄到 SettingsStore", repo.contains("settingsStore: SettingsStore"))
+        assertFalse("旧的记忆条目表已退役", repo.contains("MemoryDao"))
+        // 两条入口共用一次模型改写：当前全文 + 请求 → 全新全文
+        assertTrue("用户请求要走改写", repo.contains("MemoryPrompts.rewriteUserPrompt(documentNow(), request)"))
+        assertTrue("整理也要走改写", repo.contains("MemoryPrompts.ORGANIZE_REQUEST"))
+        assertTrue("改写要走 completeOnce", repo.contains("stream.completeOnce"))
+        // 模型返回「（空）」是清空记忆的约定
+        assertTrue(repo.contains("（空）"))
+    }
+
+    @Test
+    fun `记忆页输入框发的是改写请求`() {
+        val screen = readSource("src/main/java/com/mistakebook/ui/settings/MemoryScreen.kt")
+        assertTrue("输入框要调 applyRequest", screen.contains("container.memoryRepository.applyRequest(request, profile)"))
+        assertTrue("整理按钮要走 organize", screen.contains("container.memoryRepository.organize(profile)"))
+        assertTrue("全文要展示出来", screen.contains("container.memoryRepository.document"))
     }
 
     @Test

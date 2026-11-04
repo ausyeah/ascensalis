@@ -9,7 +9,6 @@ import com.mistakebook.data.local.entities.CaptureTask
 import com.mistakebook.data.local.entities.ChatAttachment
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.local.entities.ChatSession
-import com.mistakebook.data.local.entities.Memory
 import com.mistakebook.data.local.entities.Notebook
 import com.mistakebook.data.local.entities.PomodoroSession
 import com.mistakebook.data.local.entities.PomodoroTask
@@ -26,7 +25,7 @@ import com.mistakebook.data.local.entities.BadgeRecord
  * 高版本备份恢复进低版本 App，Room 下次启动会因找不到迁移而启动崩循环，
  * 只能清数据自救（v0.0.60 起在恢复入口直接拒绝）。
  */
-const val MISTAKE_BOOK_DB_VERSION = 11
+const val MISTAKE_BOOK_DB_VERSION = 12
 
 @Database(
     entities = [
@@ -40,7 +39,6 @@ const val MISTAKE_BOOK_DB_VERSION = 11
         ChatSession::class,
         ChatMessage::class,
         ChatAttachment::class,
-        Memory::class,
         PomodoroTask::class,
         PomodoroSession::class,
         WeeklyReport::class,
@@ -65,8 +63,6 @@ abstract class MistakeBookDatabase : RoomDatabase() {
     abstract fun notebookDao(): NotebookDao
 
     abstract fun chatDao(): ChatDao
-
-    abstract fun memoryDao(): MemoryDao
 
     abstract fun pomodoroDao(): PomodoroDao
 
@@ -351,10 +347,9 @@ abstract class MistakeBookDatabase : RoomDatabase() {
          * 就是「未归档」，不需要给老行填默认值。
          */
         /**
-         * 10 -> 11：新增记忆库（v0.0.108）。
-         *
-         * 建表 SQL 与 `Memory` 实体逐字对应：`fromModel` 是 Boolean，
-         * Room 里存 INTEGER NOT NULL。
+         * 10 -> 11：新增记忆库表（v0.0.108）。
+         * 11 -> 12：记忆改成单文档模型后（v0.0.112，存 DataStore），这张表退役。
+         * DROP 前保留 10->11 的迁移链——老库要一步一步走到 12。
          */
         val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -369,6 +364,12 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
+            }
+        }
+
+        val MIGRATION_11_12 = object : androidx.room.migration.Migration(11, 12) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `memories`")
             }
         }
 
@@ -420,7 +421,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                     MIGRATION_7_8,
                     MIGRATION_8_9,
                     MIGRATION_9_10,
-                    MIGRATION_10_11
+                    MIGRATION_10_11,
+                    MIGRATION_11_12
                 )
                 .build()
     }

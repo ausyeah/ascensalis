@@ -1,100 +1,95 @@
 package com.mistakebook.data.repos
 
 import com.mistakebook.data.chat.MemoryPrompts
-import com.mistakebook.data.local.ChatDao
-import com.mistakebook.data.local.MemoryDao
-import com.mistakebook.data.local.entities.Memory
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.ReasoningEffort
+import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.net.ApiResult
 import com.mistakebook.net.llm.ChatCompletionStream
-import com.mistakebook.net.llm.ChatRequest
 import com.mistakebook.net.llm.ChatMessage as LlmChatMessage
+import com.mistakebook.net.llm.ChatRequest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * 记忆库（v0.0.108）。
+ * 长期记忆（v0.0.112，单文档模型）。
  *
  * ## 它解决什么
  * 每次新对话都从零开始，用户被迫重复交代同一件事（「我在准备考研」
- * 「不要用 emoji」）。记忆把这类**长期有效**的信息存成短句，注入系统提示词。
+ * 「不要用 emoji」）。记忆把这类**长期有效**的信息存成一篇文章，
+ * 按主题分节，整体注入系统提示词。
  *
- * ## 为什么让模型整理，而不是全部自动收集
- * 对话里 95% 的内容是一次性的（这道题怎么做、这段代码报什么错），
- * 全记住等于往上下文里灌噪音。整理是一次显式的、用户主动触发的动作：
- * 挑出「下次还用得上」的那几条，剩下的丢掉。
+ * ## 为什么是「一篇文章」而不是一条条记录
+ * 记忆的消费方只有两个：注入提示词、给用户看。模型**改写**时能前后
+ * 照应——把「用户在准备考研」和「每天背 20 个单词」归进同一节、
+ * 把矛盾的说法换成新的；一条条记录要做到这些得先做条目级 diff，
+ * 复杂度全在代码里，收益却只是文档更整齐。
  *
- * ## 为什么整理的输入只有最近的对话
- * 记忆要的是反复出现的东西。翻遍全部历史既慢又容易被一次性的旧话题带偏，
- * 最近这些内容已经足够看出「他最近在干什么、在意什么」。
+ * ## 「整理」与「请求改写」共用一条链路
+ * 界面上无论用户是说要记住什么（「我叫黄浩，在准备考研」）、要忘掉什么，
+ * 还是点「整理」把杂乱内容重排成分节条目，走的都是同一次模型改写：
+ * 当前全文 + 请求 → 全新全文。差别只在请求文本由谁提供。
  */
 class MemoryRepository(
-    private val memoryDao: MemoryDao,
-    private val chatDao: ChatDao,
+    private val settingsStore: SettingsStore,
     private val stream: ChatCompletionStream,
     private val usageStatsStore: UsageStatsStore
 ) {
 
-    fun observeAll(): Flow<List<Memory>> = memoryDao.observeAll()
+    /** 记忆全文的订阅流（空串 = 还没有记忆）。 */
+    val document: Flow<String> = settingsStore.memoryDocument
 
-    /**
-     * 手动加一条（也供整理结果落库）。
-     *
-     * @return false 表示空、太长被裁成空、或与已有记忆重复。
-     */
-    suspend fun add(text: String, fromModel: Boolean = false): Boolean {
-        val content = text.trim().replace(Regex("\\s+"), " ").take(MemoryPrompts.MAX_ITEM_CHARS)
-        if (content.isEmpty()) return false
-        val existing = memoryDao.allOnce().map { it.content }
-        if (MemoryPrompts.removeDuplicates(listOf(content), existing).isEmpty()) return false
-        val now = System.currentTimeMillis()
-        memoryDao.insert(
-            Memory(content = content, fromModel = fromModel, createdAt = now, updatedAt = now)
-        )
-        return true
+    suspend fun documentNow(): String = settingsStore.memoryDocumentNow()
+
+    suspend fun versionNow(): Int = settingsStore.memoryVersionNow()
+
+    suspend fun updatedAtNow(): Long = settingsStore.memoryUpdatedAtNow()
+
+    /** 手动编辑：用户在编辑框里直接改全文。空文本允许（= 清空记忆）。 */
+    suspend fun saveManually(text: String) {
+        settingsStore.saveMemoryDocument(text.trim())
     }
 
-    suspend fun delete(id: Long) = memoryDao.delete(id)
+    /**
+     * 用户在输入框里说要记住 / 忘记什么，交给模型改写全文。
+     *
+     * @return 新版本号；失败时 [RewriteResult.error] 带原因。
+     */
+    suspend fun applyRequest(request: String, profile: LlmProfile?): RewriteResult {
+        if (request.isBlank()) return RewriteResult(versionNow(), "请求是空的")
+        return rewrite(MemoryPrompts.rewriteUserPrompt(documentNow(), request), profile)
+    }
+
+    /** 把现有内容整理成分节条目的清晰形式（不改事实，只重排）。 */
+    suspend fun organize(profile: LlmProfile?): RewriteResult =
+        rewrite(MemoryPrompts.rewriteUserPrompt(documentNow(), MemoryPrompts.ORGANIZE_REQUEST), profile)
 
     /** 注入系统提示词的那段文本；没有记忆时是空串（不注入空标题）。 */
-    suspend fun blockText(): String =
-        MemoryPrompts.injectBlock(memoryDao.allOnce().map { it.content })
+    suspend fun blockText(): String = MemoryPrompts.injectDocument(documentNow())
 
-    /**
-     * 让默认模型从最近的对话里整理一批新记忆。
-     *
-     * @return 新增条数与失败原因（成功时 error 为 null）。
-     */
-    suspend fun organize(profile: LlmProfile?): OrganizeResult {
+    private suspend fun rewrite(userPrompt: String, profile: LlmProfile?): RewriteResult {
         if (profile == null || !profile.isConfigured()) {
-            return OrganizeResult(added = 0, error = "还没有配置默认模型")
+            return RewriteResult(versionNow(), error = "还没有配置默认模型")
         }
-
-        val recent = chatDao.recentSpoken(TRANSCRIPT_MESSAGES)
-        if (recent.isEmpty()) return OrganizeResult(added = 0, error = "还没有聊过天，没东西可整理")
-
-        val existing = memoryDao.allOnce().map { it.content }
-        val prompt = MemoryPrompts.extractPrompt(
-            transcript = buildTranscript(recent),
-            existing = existing
-        )
         val request = ChatRequest(
             model = profile.model,
-            messages = listOf(LlmChatMessage(role = "user", content = JsonPrimitive(prompt))),
+            messages = listOf(
+                LlmChatMessage(role = "system", content = JsonPrimitive(MemoryPrompts.REWRITE_SYSTEM)),
+                LlmChatMessage(role = "user", content = JsonPrimitive(userPrompt))
+            ),
             temperature = 0.2,
-            max_tokens = EXTRACT_MAX_TOKENS,
+            // 记忆全文的改写（+推理模型的思考）预算必须给足；
+            // 给小了正文被思考吃光，返回空串——对话标题那已经踩过一遍。
+            max_tokens = 2048,
             responseFormat = null,
             stream = false
         )
-
         return when (
             val result = stream.completeOnce(
                 profile,
                 request,
-                // 整理要判断「哪些信息值得长期记住」，这是理解题而不是填空，
-                // 但也不必顶格思考——这类判断一次想清就够了。
+                // 改写要通读全文、归并矛盾，是理解题；但也不必顶格思考。
                 effort = ReasoningEffort.LOW,
                 onDone = { done ->
                     usageStatsStore.recordLlm(
@@ -106,63 +101,43 @@ class MemoryRepository(
             )
         ) {
             is ApiResult.Success -> {
-                val candidates = MemoryPrompts.onlyAboutUser(
-                    MemoryPrompts.parseCandidates(result.data)
-                )
-                val fresh = MemoryPrompts.removeDuplicates(candidates, existing)
-                val now = System.currentTimeMillis()
-                fresh.forEach { content ->
-                    memoryDao.insert(
-                        Memory(
-                            content = content,
-                            fromModel = true,
-                            createdAt = now,
-                            updatedAt = now
-                        )
-                    )
+                val doc = cleanRewrite(result.data)
+                if (doc.isEmpty()) {
+                    RewriteResult(versionNow(), error = "模型没有返回内容")
+                } else {
+                    settingsStore.saveMemoryDocument(doc)
+                    RewriteResult(settingsStore.memoryVersionNow(), error = null)
                 }
-                OrganizeResult(added = fresh.size, error = null)
             }
 
-            is ApiResult.Failure -> OrganizeResult(
-                added = 0,
+            is ApiResult.Failure -> RewriteResult(
+                versionNow(),
                 error = result.error.serverMessage.ifBlank { result.error.kind.name }
             )
         }
     }
 
     /**
-     * 把最近的发言拼成一段可读的对话记录。
+     * 收拾模型输出：剥掉客套开场白、截掉超长跑题的部分。
      *
-     * 按时间正序写（模型读因果更顺），并且**从旧到新**累加到字数上限——
-     * 超预算时丢掉最久远的那几轮，而不是拦腰截断一句话。
+     * 「（空）」表示改写后什么都没有了——按空文档保存。
      */
-    private fun buildTranscript(recent: List<com.mistakebook.data.local.RecentSpoken>): String {
-        val lines = recent.asReversed().mapNotNull { spoken ->
-            val text = spoken.content.trim().take(MAX_MESSAGE_CHARS)
-            if (text.isEmpty()) return@mapNotNull null
-            val speaker = if (spoken.role == "USER") "用户" else "AI"
-            "$speaker：$text"
+    private fun cleanRewrite(raw: String): String {
+        var text = raw.trim()
+        if (text.isEmpty()) return ""
+        // 常见开场白：到第一个换行为止的客套话里带着「好的/以下是/这是」
+        val firstLine = text.lineSequence().firstOrNull().orEmpty()
+        if (text.lineSequence().count() > 1 &&
+            (firstLine.contains("以下是") || firstLine.contains("好的") || firstLine.contains("这是"))
+        ) {
+            text = text.substringAfter('\n').trim()
         }
-        val kept = ArrayDeque<String>()
-        var used = 0
-        // 从最新往回挑，挑满预算后再正序输出
-        for (line in lines.asReversed()) {
-            if (used + line.length > TRANSCRIPT_CHARS) break
-            kept.addFirst(line)
-            used += line.length + 1
+        if (text.length > MemoryPrompts.MAX_DOC_CHARS) {
+            text = text.take(MemoryPrompts.MAX_DOC_CHARS)
         }
-        return kept.joinToString("\n")
+        return if (text == "（空）" || text == "(空)") "" else text.trim()
     }
 
-    /** 整理结果。 */
-    data class OrganizeResult(val added: Int, val error: String?)
-
-    private companion object {
-        /** 最多看这么多条发言：够看出最近在做什么，又不至于把旧话题翻出来。 */
-        const val TRANSCRIPT_MESSAGES = 120
-        const val TRANSCRIPT_CHARS = 6000
-        const val MAX_MESSAGE_CHARS = 300
-        const val EXTRACT_MAX_TOKENS = 600
-    }
+    /** 改写结果：新版本号 + 失败原因（成功时 error 为 null）。 */
+    data class RewriteResult(val version: Int, val error: String?)
 }
