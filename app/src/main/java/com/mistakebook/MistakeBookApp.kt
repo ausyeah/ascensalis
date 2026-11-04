@@ -37,6 +37,11 @@ class MistakeBookApp : Application() {
         container.appScope.launch {
             runCatching { container.chatRepository.purgeTemporarySessions() }
         }
+        // 空会话的兜底清理（v0.0.107）：老版本「点开就建行」，退出后那行还在。
+        // 列表已经过滤掉了，但库里的空行没有意义——启动时顺手收拾干净。
+        container.appScope.launch {
+            runCatching { container.chatRepository.purgeEmptySessions() }
+        }
         // T10 徽章判定：启动时跑一轮轻量判定，把新解锁徽章持久化
         container.appScope.launch {
             runCatching { container.badgeRepository.evaluateAndStore() }

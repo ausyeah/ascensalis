@@ -145,6 +145,30 @@ class ChatRepository(
     }
 
     /**
+     * 退出会话时调用：一条消息都没发过就整条删掉（v0.0.107）。
+     *
+     * 用户的意思很直白：点开一个新对话、看一眼、返回，那不是一段记录。
+     * 空会话没有标题也没有内容，留在列表里只是一串「新对话」的噪音。
+     *
+     * @return 真的删掉了返回 true（调用方据此清掉这条会话的草稿）。
+     *   临时对话有自己的丢弃路径，这里不碰。
+     */
+    suspend fun discardIfEmpty(id: Long): Boolean {
+        val session = chatDao.findSession(id) ?: return false
+        if (session.temporary) return false
+        val deleted = chatDao.deleteIfEmpty(id) > 0
+        if (deleted) appFiles.deleteRecursively(appFiles.chatDir(id))
+        return deleted
+    }
+
+    /**
+     * 启动兜底：清掉老版本攒下的空会话（列表已不显示，但数据没道理留着）。
+     *
+     * @return 清掉的会话数（日志用）。
+     */
+    suspend fun purgeEmptySessions(): Int = chatDao.deleteEmptySessions()
+
+    /**
      * 启动时清理上次被杀进程留下的临时对话。
      *
      * 正常退出当场就删了，这条兜底只为「进程没了」这一种情况——

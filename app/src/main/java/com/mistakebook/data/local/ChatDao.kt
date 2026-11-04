@@ -57,7 +57,8 @@ interface ChatDao {
     @Query(
         """SELECT s.* FROM chat_sessions s
            WHERE s.questionId IS NULL AND s.deletedAt IS NULL AND s.temporary = 0
-             AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.sessionId = s.id)
+             AND NOT EXISTS (SELECT 1 FROM chat_messages m
+                             WHERE m.sessionId = s.id AND m.role <> 'SYSTEM')
            ORDER BY s.updatedAt DESC LIMIT 1"""
     )
     suspend fun findEmptyFreeSession(): ChatSession?
@@ -67,10 +68,16 @@ interface ChatDao {
      *
      * 带 `questionId` 便于列表直接显示「哪道题」——否则用户面对十几个
      * 长得差不多的会话根本分不清。
+     *
+     * `EXISTS(有消息)` 是 v0.0.107 加的：点开「新对话」看一眼又返回，
+     * 数据库里就留下一行没有标题、没有内容的空会话，列表里一串「新对话」。
+     * 那不是记录，是垃圾——没说过话的会话不该出现在记录里。
      */
     @Query(
         """SELECT * FROM chat_sessions
            WHERE deletedAt IS NULL AND temporary = 0 AND archivedAt IS NULL
+             AND EXISTS (SELECT 1 FROM chat_messages m
+                         WHERE m.sessionId = chat_sessions.id AND m.role <> 'SYSTEM')
            ORDER BY pinned DESC, updatedAt DESC"""
     )
     fun observeSessions(): Flow<List<ChatSession>>
@@ -91,6 +98,34 @@ interface ChatDao {
     /** 列出全部临时对话（清理附件文件前要先知道有哪些）。 */
     @Query("SELECT * FROM chat_sessions WHERE temporary = 1")
     suspend fun listTemporarySessions(): List<ChatSession>
+
+    /**
+     * 一条消息都没有就整条删掉（v0.0.107）。
+     *
+     * 删除条件写进 SQL 而不是「先查再删」：查完到删之间用户可能刚发出
+     * 第一条消息，那时删掉就是真的把记录弄丢了。
+     */
+    @Query(
+        """DELETE FROM chat_sessions
+           WHERE id = :id
+             AND NOT EXISTS (SELECT 1 FROM chat_messages m
+                             WHERE m.sessionId = :id AND m.role <> 'SYSTEM')"""
+    )
+    suspend fun deleteIfEmpty(id: Long): Int
+
+    /**
+     * 启动兜底：清掉历史版本攒下的空会话。
+     *
+     * 老版本是「点开就建行」，用户退出时那行还在。列表已经过滤掉了，
+     * 但数据一直躺在库里没有意义，顺手收拾干净。
+     */
+    @Query(
+        """DELETE FROM chat_sessions
+           WHERE deletedAt IS NULL AND temporary = 0 AND archivedAt IS NULL
+             AND NOT EXISTS (SELECT 1 FROM chat_messages m
+                             WHERE m.sessionId = chat_sessions.id AND m.role <> 'SYSTEM')"""
+    )
+    suspend fun deleteEmptySessions(): Int
 
     /** 清掉上次进程被杀时残留的临时对话，返回清掉的行数。 */
     @Query("DELETE FROM chat_sessions WHERE temporary = 1")
