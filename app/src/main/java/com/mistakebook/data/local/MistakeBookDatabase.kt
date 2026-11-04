@@ -25,7 +25,7 @@ import com.mistakebook.data.local.entities.BadgeRecord
  * 高版本备份恢复进低版本 App，Room 下次启动会因找不到迁移而启动崩循环，
  * 只能清数据自救（v0.0.60 起在恢复入口直接拒绝）。
  */
-const val MISTAKE_BOOK_DB_VERSION = 9
+const val MISTAKE_BOOK_DB_VERSION = 10
 
 @Database(
     entities = [
@@ -340,6 +340,19 @@ abstract class MistakeBookDatabase : RoomDatabase() {
          * 8 → 9（v0.0.98）：错题加「置顶」列。同 7→8 的口径：
          * NOT NULL DEFAULT 0，老题升级后顺序逐行不变。
          */
+        /**
+         * 9 → 10（v0.0.104）：题目与会话各加一列归档时间。
+         *
+         * 都是**可空**列：老数据一律是「没归档」，查询里 `archivedAt IS NULL`
+         * 就是「未归档」，不需要给老行填默认值。
+         */
+        val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `questions` ADD COLUMN `archivedAt` INTEGER")
+                db.execSQL("ALTER TABLE `chat_sessions` ADD COLUMN `archivedAt` INTEGER")
+            }
+        }
+
         val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL(
@@ -379,7 +392,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
-                    MIGRATION_8_9
+                    MIGRATION_8_9,
+                    MIGRATION_9_10
                 )
                 .build()
     }

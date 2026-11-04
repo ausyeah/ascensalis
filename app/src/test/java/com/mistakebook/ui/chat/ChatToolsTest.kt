@@ -150,7 +150,8 @@ class ChatToolsTest {
         val blocks = sheet.substring(sheet.indexOf("SwipeActionBlock("), sheet.indexOf("// 上层：卡片内容"))
         assertTrue("第一块是置顶", blocks.contains("R.string.swipe_unpin_action") && blocks.contains("R.string.swipe_pin_action"))
         assertTrue("第二块是重命名", blocks.contains("R.string.chat_rename"))
-        assertTrue("最后一块才是删除", blocks.lastIndexOf("R.string.swipe_delete_hint") > blocks.lastIndexOf("R.string.chat_rename"))
+        // v0.0.104：主列表不再直接删除，最后一块改成归档（删除只在「已归档」页里）
+        assertTrue("最后一块是归档", blocks.lastIndexOf("R.string.archive_action") > blocks.lastIndexOf("R.string.chat_rename"))
     }
 
     @Test

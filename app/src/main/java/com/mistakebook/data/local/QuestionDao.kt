@@ -54,7 +54,7 @@ interface QuestionDao {
     @Query(
         """
         SELECT * FROM questions
-        WHERE deletedAt IS NULL
+        WHERE deletedAt IS NULL AND archivedAt IS NULL
           AND (:statusName = '' OR status = :statusName)
           AND (:subjectFilter = 0 OR subjectId = :subjectFilter)
           AND (:notebookFilter = 0 OR notebookId = :notebookFilter)
@@ -113,7 +113,7 @@ interface QuestionDao {
     @Query(
         """
         SELECT * FROM questions
-        WHERE deletedAt IS NULL AND status != 'MASTERED' AND nextReviewAt <= :today
+        WHERE deletedAt IS NULL AND archivedAt IS NULL AND status != 'MASTERED' AND nextReviewAt <= :today
         ORDER BY nextReviewAt
         """
     )
@@ -128,13 +128,13 @@ interface QuestionDao {
      * 不返回整个 [Question]：题干、解析、原图路径全都不需要，
      * 而会话列表每次重组都会重新发射一次全表。
      */
-    @Query("SELECT id, title FROM questions WHERE deletedAt IS NULL")
+    @Query("SELECT id, title FROM questions WHERE deletedAt IS NULL AND archivedAt IS NULL")
     fun observeTitles(): Flow<List<QuestionTitleRow>>
 
     @Query(
         """
         SELECT * FROM questions
-        WHERE deletedAt IS NULL AND status != 'MASTERED' AND nextReviewAt <= :today
+        WHERE deletedAt IS NULL AND archivedAt IS NULL AND status != 'MASTERED' AND nextReviewAt <= :today
         ORDER BY nextReviewAt
         LIMIT :limit
         """
@@ -151,6 +151,41 @@ interface QuestionDao {
 
     @Query("SELECT COUNT(*) FROM questions WHERE deletedAt IS NULL")
     fun observeTotalCount(): Flow<Int>
+
+    /**
+     * 已归档的题目（v0.0.104）：按归档时间倒序，最新归档的排最前。
+     *
+     * 过滤条件与 [observeFiltered] 同一套（标签=学科/错因、掌握程度=status、关键词），
+     * 归档页要能按这些筛——「上次那个数学的错题在哪」是最常见的找法。
+     */
+    @Query(
+        """SELECT * FROM questions
+           WHERE deletedAt IS NULL AND archivedAt IS NOT NULL
+             AND (:statusName = '' OR status = :statusName)
+             AND (:subjectFilter = 0 OR subjectId = :subjectFilter)
+             AND (:reasonName = '' OR errorReason = :reasonName)
+             AND (
+               :keyword = ''
+               OR stem LIKE '%' || :keyword || '%' ESCAPE '\'
+               OR title LIKE '%' || :keyword || '%' ESCAPE '\'
+               OR answer LIKE '%' || :keyword || '%' ESCAPE '\'
+               OR note LIKE '%' || :keyword || '%' ESCAPE '\'
+             )
+           ORDER BY archivedAt DESC"""
+    )
+    fun observeArchivedFiltered(
+        statusName: String,
+        subjectFilter: Long,
+        reasonName: String,
+        keyword: String
+    ): Flow<List<Question>>
+
+    /** 归档 / 取消归档。归档只是挪走，不进回收站。 */
+    @Query("UPDATE questions SET archivedAt = :at, updatedAt = :at WHERE id = :id")
+    suspend fun setArchived(id: Long, at: Long)
+
+    @Query("UPDATE questions SET archivedAt = NULL, updatedAt = :at WHERE id = :id")
+    suspend fun clearArchived(id: Long, at: Long)
 
     @Query("SELECT COUNT(*) FROM questions WHERE deletedAt IS NULL AND subjectId = :subjectId")
     fun observeCountBySubject(subjectId: Long): Flow<Int>

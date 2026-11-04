@@ -233,6 +233,25 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         questionOrder.value = merged
         viewModelScope.launch { container.settingsStore.saveHomeQuestionOrder(merged) }
     }
+    /**
+     * 归档（v0.0.104）：主列表里的「删除」换成它。
+     * 归档只是收起来，随时能在设置里拿回来——不占回收站的 30 天倒计时。
+     */
+    fun archive(question: Question) {
+        viewModelScope.launch {
+            repository.archive(question.id)
+            refreshWidget()
+        }
+    }
+
+    /** 撤销归档（v0.0.104）。 */
+    fun unarchive(question: Question) {
+        viewModelScope.launch {
+            repository.unarchive(question.id)
+            refreshWidget()
+        }
+    }
+
     fun delete(question: Question) {
         viewModelScope.launch {
             repository.softDelete(question.id)

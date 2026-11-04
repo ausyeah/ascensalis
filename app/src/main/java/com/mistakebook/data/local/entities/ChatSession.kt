@@ -64,6 +64,11 @@ data class ChatSession(
      * 用户永远不该看见一条本该消失的对话。
      */
     val temporary: Boolean = false,
+    /**
+     * 归档时间（v0.0.104）。语义同 [com.mistakebook.data.local.entities.Question.archivedAt]：
+     * 归档是「收起来，随时拿回」，删除是「扔掉进回收站」。
+     */
+    val archivedAt: Long? = null,
 
     val createdAt: Long,
     val updatedAt: Long,

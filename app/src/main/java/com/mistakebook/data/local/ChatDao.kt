@@ -70,7 +70,7 @@ interface ChatDao {
      */
     @Query(
         """SELECT * FROM chat_sessions
-           WHERE deletedAt IS NULL AND temporary = 0
+           WHERE deletedAt IS NULL AND temporary = 0 AND archivedAt IS NULL
            ORDER BY pinned DESC, updatedAt DESC"""
     )
     fun observeSessions(): Flow<List<ChatSession>>
@@ -106,6 +106,23 @@ interface ChatDao {
      */
     @Query("SELECT * FROM chat_sessions WHERE deletedAt IS NULL")
     suspend fun observeSessionsOnce(): List<ChatSession>
+
+    /**
+     * 已归档的会话（v0.0.104）：按归档时间倒序，最近归档的排最前。
+     * 归档会话不参与「置顶」——归档本来就是收起来的意思。
+     */
+    @Query(
+        """SELECT * FROM chat_sessions
+           WHERE deletedAt IS NULL AND temporary = 0 AND archivedAt IS NOT NULL
+           ORDER BY archivedAt DESC"""
+    )
+    fun observeArchivedSessions(): Flow<List<ChatSession>>
+
+    @Query("UPDATE chat_sessions SET archivedAt = :at, updatedAt = :at WHERE id = :id")
+    suspend fun setArchived(id: Long, at: Long)
+
+    @Query("UPDATE chat_sessions SET archivedAt = NULL, updatedAt = :at WHERE id = :id")
+    suspend fun clearArchived(id: Long, at: Long)
 
     @Query("UPDATE chat_sessions SET deletedAt = :at, updatedAt = :at WHERE id = :id")
     suspend fun softDeleteSession(id: Long, at: Long)

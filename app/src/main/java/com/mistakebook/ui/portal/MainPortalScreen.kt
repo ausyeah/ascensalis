@@ -72,6 +72,9 @@ fun MainPortalScreen(
     onOpenNotebooks: () -> Unit = {},
     onOpenQuestion: (Long) -> Unit,
     onNewChat: () -> Unit = {},
+    /** 已归档题目 / 会话入口（v0.0.104），设置页要用。 */
+    onOpenArchivedQuestions: () -> Unit = {},
+    onOpenArchivedSessions: () -> Unit = {},
     onSnapAsk: () -> Unit = {},
     onStartReview: () -> Unit = {},
     /** 资料库管理页（T6）：门户设置 Tab 的内嵌设置页经此进子页面。 */
@@ -188,7 +191,9 @@ fun MainPortalScreen(
                         onBack = {},
                         embedded = true,
                         onOpenLibrary = onOpenLibrary,
-                        onOpenBadgeWall = onOpenBadgeWall
+                        onOpenBadgeWall = onOpenBadgeWall,
+                        onOpenArchivedQuestions = onOpenArchivedQuestions,
+                        onOpenArchivedSessions = onOpenArchivedSessions
                     )
                 }
             }

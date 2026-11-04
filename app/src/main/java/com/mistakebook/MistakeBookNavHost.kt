@@ -64,6 +64,8 @@ object Routes {
 
     /** 自由会话的 questionId 哨兵值。0 是数据库自增起点，不能拿来当「无」。 */
     const val CHAT_FREE = -1L
+    const val ARCHIVED_QUESTIONS = "archivedQuestions"
+    const val ARCHIVED_SESSIONS = "archivedSessions"
 
     /**
      * 聊天页路由。
@@ -254,7 +256,9 @@ fun MistakeBookNavHost(
                 // 必须经 NavHost 路由打开（v0.0.52：内嵌页此前没接导航回调，
                 // 两个入口点了没反应）
                 onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
-                onOpenBadgeWall = { navController.navigate(Routes.BADGE_WALL) }
+                onOpenBadgeWall = { navController.navigate(Routes.BADGE_WALL) },
+                onOpenArchivedQuestions = { navController.navigate(Routes.ARCHIVED_QUESTIONS) },
+                onOpenArchivedSessions = { navController.navigate(Routes.ARCHIVED_SESSIONS) }
             )
         }
 
@@ -285,6 +289,22 @@ fun MistakeBookNavHost(
                 onBack = { navController.popBackStack() },
                 onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
                 onOpenBadgeWall = { navController.navigate(Routes.BADGE_WALL) }
+            )
+        }
+
+        composable(Routes.ARCHIVED_QUESTIONS) {
+            com.mistakebook.ui.settings.ArchivedItemsScreen(
+                container = container,
+                kind = com.mistakebook.ui.settings.ArchivedKind.QUESTIONS,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.ARCHIVED_SESSIONS) {
+            com.mistakebook.ui.settings.ArchivedItemsScreen(
+                container = container,
+                kind = com.mistakebook.ui.settings.ArchivedKind.SESSIONS,
+                onBack = { navController.popBackStack() }
             )
         }
 

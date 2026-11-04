@@ -187,6 +187,22 @@ class ChatRepository(
     }
 
     /**
+     * 归档（v0.0.104）：从历史里收起来，**不进回收站**，随时能拿回来。
+     * 语义与题目的归档一致，见 QuestionRepository.archive。
+     */
+    suspend fun archiveSession(id: Long) {
+        chatDao.setArchived(id, System.currentTimeMillis())
+    }
+
+    /** 从归档里拿回来。 */
+    suspend fun unarchiveSession(id: Long) {
+        chatDao.clearArchived(id, System.currentTimeMillis())
+    }
+
+    /** 已归档的会话，按归档时间倒序（最近归档的排最前）。 */
+    fun observeArchivedSessions() = chatDao.observeArchivedSessions()
+
+    /**
      * 回收站定期清理（v0.0.71）：软删超过 [RETENTION_DAYS] 天的会话
      * 连同附件文件一起物理清掉。App 启动时跑一次。
      *

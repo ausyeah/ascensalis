@@ -335,7 +335,7 @@ private fun PdfViaBrowserHint() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SubjectDropdown(
+internal fun SubjectDropdown(
     subjects: List<Subject>,
     selectedId: Long?,
     onSelect: (Long?) -> Unit,

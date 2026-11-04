@@ -77,8 +77,18 @@ class ChatListViewModel(
         viewModelScope.launch { repository.renameSession(id, title) }
     }
 
+    /** 归档（v0.0.104）：主历史列表的「删除」换成它，可在设置里恢复。 */
+    fun archive(id: Long) {
+        viewModelScope.launch { repository.archiveSession(id) }
+    }
+
     fun delete(id: Long) {
         viewModelScope.launch { repository.softDeleteSession(id) }
+    }
+
+    /** 撤销归档（v0.0.104）：把刚收起来的会话原样拿回来。 */
+    fun unarchive(id: Long) {
+        viewModelScope.launch { repository.unarchiveSession(id) }
     }
 
     /** 撤销删除（v0.0.66）：软删不再删附件，恢复即完整还原。 */

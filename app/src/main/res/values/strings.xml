@@ -13,6 +13,20 @@
     <string name="edit_audit">检查</string>
     <string name="action_undo">撤销</string>
     <string name="chat_session_deleted">会话已删除</string>
+    <!-- 已归档内容（v0.0.104）：归档 = 收起来，不是删除 -->
+    <string name="settings_group_archived">已归档内容</string>
+    <string name="settings_archived_questions">已归档题目</string>
+    <string name="settings_archived_sessions">已归档会话</string>
+    <string name="archived_questions_title">已归档题目</string>
+    <string name="archived_sessions_title">已归档会话</string>
+    <string name="archived_empty_questions">还没有归档的题目</string>
+    <string name="archived_empty_sessions">还没有归档的会话</string>
+    <string name="archived_restore">恢复</string>
+    <string name="archived_delete">删除</string>
+    <string name="archived_filter_all">全部</string>
+    <string name="archived_at">归档于 %1$s</string>
+    <string name="archive_action">归档</string>
+    <string name="archive_done">已归档，可在设置里恢复</string>
     <!-- 关于与更新（v0.0.99）：版本号 / 检查更新 / 去 star -->
     <string name="settings_group_about">关于与更新</string>
     <string name="settings_about_version">当前版本</string>

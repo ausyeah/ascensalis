@@ -228,6 +228,26 @@ class QuestionRepository(
 
     suspend fun restore(id: Long) = questionDao.restore(id, System.currentTimeMillis())
 
+    /**
+     * 归档（v0.0.104）：从列表里收起来，**不进回收站**，随时能拿回来。
+     *
+     * 与 [softDelete] 的区别是这一轮改动的全部要点：
+     * 删除是「扔掉」，30 天后物理清理；归档是「我收起来了」。
+     * 用户要的是后者——一道题不该因为嫌乱就消失得找不回来。
+     */
+    suspend fun archive(id: Long) = questionDao.setArchived(id, System.currentTimeMillis())
+
+    /** 从归档里拿回来。 */
+    suspend fun unarchive(id: Long) = questionDao.clearArchived(id, System.currentTimeMillis())
+
+    /** 已归档的题目，按归档时间倒序。 */
+    fun observeArchived(
+        statusName: String,
+        subjectFilter: Long,
+        reasonName: String,
+        keyword: String
+    ) = questionDao.observeArchivedFiltered(statusName, subjectFilter, reasonName, keyword)
+
     suspend fun listDeletedBefore(daysAgo: Int): List<Question> {
         val before = System.currentTimeMillis() - daysAgo * 24L * 3600 * 1000
         return questionDao.listDeletedBefore(before)

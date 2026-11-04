@@ -283,7 +283,7 @@ internal fun ChatHistorySheet(
                     onDelete = {
                         // 删除可撤销（v0.0.66）：软删保留附件，撤销即完整还原
                         val sessionId = item.session.id
-                        viewModel.delete(sessionId)
+                        viewModel.archive(sessionId)
                         scope.launch {
                             val result = snackbarHostState.showSnackbar(
                                 message = deletedText,
@@ -291,7 +291,7 @@ internal fun ChatHistorySheet(
                                 duration = androidx.compose.material3.SnackbarDuration.Short
                             )
                             if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
-                                viewModel.restore(sessionId)
+                                viewModel.unarchive(sessionId)
                             }
                         }
                     }
@@ -449,7 +449,7 @@ private fun SwipeableChatRow(
                 else MaterialTheme.colorScheme.onErrorContainer,
                 icon = Icons.Default.Delete,
                 label = if (confirmingDelete) stringResource(R.string.swipe_delete_confirm)
-                else stringResource(R.string.swipe_delete_hint),
+                else stringResource(R.string.archive_action),
                 enabled = revealed,
                 onClick = {
                     if (confirmingDelete) {

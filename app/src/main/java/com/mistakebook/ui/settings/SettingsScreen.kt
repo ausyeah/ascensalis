@@ -13,6 +13,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,6 +56,10 @@ fun SettingsScreen(
     onOpenLibrary: () -> Unit = {},
     /** 成就墙入口（T10）。 */
     onOpenBadgeWall: () -> Unit = {},
+    /** 已归档题目入口（v0.0.104）。 */
+    onOpenArchivedQuestions: () -> Unit = {},
+    /** 已归档会话入口（v0.0.104）。 */
+    onOpenArchivedSessions: () -> Unit = {},
     /**
      * 内嵌模式（门户第 4 页）：不画自己的顶栏与返回箭头——
      * 门户顶部 Tab 行就是它的导航，从任何一页都能一步切回来。
@@ -256,6 +262,22 @@ fun SettingsScreen(
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_about), nested = true) {
                     // 版本号 / 检查更新 / 去 star
                     AboutUpdateSection()
+                }
+
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_archived), nested = true) {
+                    // 归档不是删除：主列表里「删掉一道题」现在只是把它收起来，
+                    // 这里就是把它再拿回来的地方。
+                    ArchivedEntrySection(
+                        titleRes = R.string.settings_archived_questions,
+                        icon = Icons.Default.Archive,
+                        onOpen = onOpenArchivedQuestions
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    ArchivedEntrySection(
+                        titleRes = R.string.settings_archived_sessions,
+                        icon = Icons.Default.Forum,
+                        onOpen = onOpenArchivedSessions
+                    )
                 }
 
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_wordbook_data), nested = true) {

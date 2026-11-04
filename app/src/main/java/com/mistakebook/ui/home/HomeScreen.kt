@@ -514,15 +514,18 @@ fun HomeScreen(
                             onClick = { onOpenQuestion(question.id) },
                             onPin = { viewModel.setPinned(question.id, !question.pinned) },
                             onDelete = {
-                                viewModel.delete(question)
+                                viewModel.archive(question)
+                                // 文案在组合期取好：showSnackbar 的回调不是组合上下文
+                                val doneText = context.getString(R.string.archive_done)
+                                val undoText = context.getString(R.string.action_undo)
                                 scope.launch {
                                     val result = snackbarHostState.showSnackbar(
-                                        message = "已删除「${question.displayTitle}」",
-                                        actionLabel = "撤销",
+                                        message = doneText,
+                                        actionLabel = undoText,
                                         duration = androidx.compose.material3.SnackbarDuration.Short
                                     )
                                     if (result == SnackbarResult.ActionPerformed) {
-                                        viewModel.undoDelete(question)
+                                        viewModel.unarchive(question)
                                     }
                                 }
                             }
@@ -865,12 +868,12 @@ private fun SwipeableQuestionCard(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
-                        contentDescription = stringResource(R.string.swipe_delete_action),
+                        contentDescription = stringResource(R.string.archive_action),
                         tint = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.size(26.dp)
                     )
                     Text(
-                        text = stringResource(R.string.swipe_delete_hint),
+                        text = stringResource(R.string.archive_action),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1
