@@ -25,4 +25,12 @@ interface LlmApi {
         @Url url: String,
         @Header("Authorization") authorization: String
     ): Response<ModelsResponse>
+
+    /** 向量嵌入（资料库语义检索用，v0.0.113）：OpenAI 兼容 /v1/embeddings。 */
+    @POST
+    suspend fun embeddings(
+        @Url url: String,
+        @Header("Authorization") authorization: String,
+        @Body request: EmbeddingRequest
+    ): Response<EmbeddingResponse>
 }

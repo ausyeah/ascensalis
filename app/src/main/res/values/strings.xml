@@ -64,6 +64,20 @@
     <string name="memory_edit">编辑记忆</string>
     <string name="memory_edit_hint">直接编辑记忆全文</string>
     <string name="memory_edit_save">保存</string>
+    <!-- 资料库向量检索（v0.0.113） -->
+    <string name="library_index_title">向量检索</string>
+    <string name="library_index_model_label">向量化模型（如 text-embedding-v3 / bge-m3）</string>
+    <string name="library_index_model_hint">使用当前大模型配置的接口地址与 Key</string>
+    <string name="library_index_action">建立索引</string>
+    <string name="library_index_running">正在索引 %1$d / %2$d…</string>
+    <string name="library_index_ready">已索引 %1$d 份资料 · %2$d 块</string>
+    <string name="library_index_done">索引完成：%1$d 份资料 · %2$d 块</string>
+    <string name="library_index_failed">索引失败：%1$s</string>
+    <string name="library_index_empty">资料库为空，导入资料后建立索引</string>
+    <string name="library_search_hint">搜索资料内容…</string>
+    <string name="library_search_section">语义搜索结果</string>
+    <string name="library_search_empty">没有匹配的内容</string>
+    <string name="library_search_need_model">填写向量化模型并建立索引后，可按含义搜索</string>
     <string name="chat_temporary_banner">临时对话：退出后内容会直接归档，可在「设置 → 已归档会话」找回</string>
     <!-- 前台服务通知（v0.0.98 收进资源）：标题与停止按钮 -->
     <string name="chat_service_generating">正在生成回复…</string>

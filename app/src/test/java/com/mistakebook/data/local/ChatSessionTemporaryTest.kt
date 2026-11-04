@@ -22,7 +22,7 @@ class ChatSessionTemporaryTest {
     fun `迁移 7 到 8 加两列且默认零`() {
         val db = readSource("src/main/java/com/mistakebook/data/local/MistakeBookDatabase.kt")
 
-        assertTrue("版本号必须至少到 12（11→12 记忆表退役）", db.contains("MISTAKE_BOOK_DB_VERSION = 12"))
+        assertTrue("版本号必须至少到 13（12→13 资料库向量索引）", db.contains("MISTAKE_BOOK_DB_VERSION = 13"))
         assertTrue("必须有 MIGRATION_7_8", db.contains("val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8)"))
         assertTrue(
             "pinned 必须 NOT NULL DEFAULT 0——老会话默认不置顶",
@@ -32,7 +32,7 @@ class ChatSessionTemporaryTest {
             "temporary 必须 NOT NULL DEFAULT 0——老会话默认全是正式对话",
             db.contains("ADD COLUMN `temporary` INTEGER NOT NULL DEFAULT 0")
         )
-        assertTrue("最新迁移必须注册进 addMigrations", db.contains("MIGRATION_10_11,\n                    MIGRATION_11_12\n                )"))
+        assertTrue("最新迁移必须注册进 addMigrations", db.contains("MIGRATION_11_12,\n                    MIGRATION_12_13\n                )"))
     }
 
     @Test

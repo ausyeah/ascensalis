@@ -319,6 +319,7 @@ fun MistakeBookNavHost(
 
         composable(Routes.LIBRARY) {
             com.mistakebook.ui.library.LibraryScreen(
+                container = container,
                 filesDir = container.files.rootDir,
                 onBack = { navController.popBackStack() }
             )

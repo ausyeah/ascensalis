@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.mistakebook.data.local.entities.CaptureTask
 import com.mistakebook.data.local.entities.ChatAttachment
+import com.mistakebook.data.local.entities.LibraryChunkEntity
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.local.entities.ChatSession
 import com.mistakebook.data.local.entities.Notebook
@@ -25,7 +26,7 @@ import com.mistakebook.data.local.entities.BadgeRecord
  * 高版本备份恢复进低版本 App，Room 下次启动会因找不到迁移而启动崩循环，
  * 只能清数据自救（v0.0.60 起在恢复入口直接拒绝）。
  */
-const val MISTAKE_BOOK_DB_VERSION = 12
+const val MISTAKE_BOOK_DB_VERSION = 13
 
 @Database(
     entities = [
@@ -39,6 +40,7 @@ const val MISTAKE_BOOK_DB_VERSION = 12
         ChatSession::class,
         ChatMessage::class,
         ChatAttachment::class,
+        LibraryChunkEntity::class,
         PomodoroTask::class,
         PomodoroSession::class,
         WeeklyReport::class,
@@ -63,6 +65,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
     abstract fun notebookDao(): NotebookDao
 
     abstract fun chatDao(): ChatDao
+
+    abstract fun libraryChunkDao(): LibraryChunkDao
 
     abstract fun pomodoroDao(): PomodoroDao
 
@@ -373,6 +377,36 @@ abstract class MistakeBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 12 -> 13：资料库向量索引块（v0.0.113）。
+         *
+         * 建表 SQL 与 `LibraryChunkEntity` 逐字对应：vector 是 BLOB
+         * （typeAffinity BLOB），docName 上有索引（按文档清理用）。
+         */
+        val MIGRATION_12_13 = object : androidx.room.migration.Migration(12, 13) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `library_chunks` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `docName` TEXT NOT NULL,
+                        `chunkIndex` INTEGER NOT NULL,
+                        `contentHash` TEXT NOT NULL,
+                        `text` TEXT NOT NULL,
+                        `dim` INTEGER NOT NULL,
+                        `model` TEXT NOT NULL,
+                        `vector` BLOB NOT NULL,
+                        `updatedAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_library_chunks_docName` " +
+                        "ON `library_chunks` (`docName`)"
+                )
+            }
+        }
+
         val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `questions` ADD COLUMN `archivedAt` INTEGER")
@@ -422,7 +456,8 @@ abstract class MistakeBookDatabase : RoomDatabase() {
                     MIGRATION_8_9,
                     MIGRATION_9_10,
                     MIGRATION_10_11,
-                    MIGRATION_11_12
+                    MIGRATION_11_12,
+                    MIGRATION_12_13
                 )
                 .build()
     }

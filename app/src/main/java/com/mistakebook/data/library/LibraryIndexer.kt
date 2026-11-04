@@ -1,0 +1,229 @@
+package com.mistakebook.data.library
+
+import com.mistakebook.data.local.LibraryChunkDao
+import com.mistakebook.data.local.entities.LibraryChunkEntity
+import com.mistakebook.data.prefs.LlmProfile
+import com.mistakebook.data.prefs.SettingsStore
+import com.mistakebook.math.VectorMath
+import com.mistakebook.net.ApiResult
+import com.mistakebook.net.llm.EmbeddingClient
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+/**
+ * 资料库向量索引器（v0.0.113）。
+ *
+ * ## 流程（照 zvec 的小规模姿势）
+ * 每份资料 → 提正文 → [LibraryChunker.chunk] → 与库里已有块按
+ * (chunkIndex, contentHash) 对齐 → **只有新增/修改的块**发嵌入请求 →
+ * 写回。hash 没变的块直接复用，同一份资料反复重建不产生重复流量。
+ *
+ * ## 为什么按文档做检查点
+ * 嵌入要联网，一次索引可能发几十个请求。逐块写库 = 逐块 checkpoint：
+ * 中途断网/杀进程，已完成的部分留在库里，下次重跑只补剩下的——
+ * 这就是 zvec「WAL + 检查点」在单机小场景下的等价简化。
+ *
+ * ## 单写者
+ * 与 zvec 相同的约束：**不支持并发写**。所有重建走一把互斥锁，
+ * 重复点击「建立索引」只会排队或直接看到进行中的进度。
+ *
+ * @param libraryRoot 资料库目录（files/library）。
+ */
+class LibraryIndexer(
+    private val libraryRoot: java.io.File,
+    private val chunkDao: LibraryChunkDao,
+    private val embeddingClient: EmbeddingClient,
+    private val settingsStore: SettingsStore
+) {
+
+    /** 索引进度（Idle = 从未跑过；Failed 带原因；Ready 带块数）。 */
+    data class Progress(
+        val running: Boolean = false,
+        val done: Int = 0,
+        val total: Int = 0,
+        val docs: Int = 0,
+        val chunks: Int = 0,
+        val lastError: String? = null
+    )
+
+    private val mutex = Mutex()
+    private val _progress = MutableStateFlow(Progress())
+    val progress: StateFlow<Progress> = _progress.asStateFlow()
+
+    /**
+     * 全量重建索引（增量：未变化的块不重新嵌入）。
+     *
+     * @param activeProfile 当前生效的大模型配置（嵌入请求走它的 baseUrl/key）
+     * @param model 嵌入模型名；空串直接失败——这是用户没配，不是网络问题
+     */
+    suspend fun reindex(activeProfile: LlmProfile?, model: String): Progress {
+        _progress.value = Progress(running = true)
+        val result = mutex.withLock {
+            runCatching { reindexLocked(activeProfile, model.trim()) }.getOrElse { error ->
+                Progress(
+                    chunks = chunkDao.count(),
+                    lastError = error.message ?: error.javaClass.simpleName
+                )
+            }
+        }
+        _progress.value = result
+        return result
+    }
+
+    private suspend fun reindexLocked(profile: LlmProfile?, model: String): Progress {
+        if (profile == null || !profile.isConfigured()) {
+            return Progress(chunks = chunkDao.count(), lastError = "还没有配置大模型")
+        }
+        if (model.isEmpty()) {
+            return Progress(chunks = chunkDao.count(), lastError = "还没有填写向量化模型")
+        }
+
+        val files = LibraryStore.list(libraryRoot)
+        if (files.isEmpty()) {
+            chunkDao.clear()
+            return Progress(docs = 0, chunks = 0)
+        }
+
+        var done = 0
+        // 总块数要先全部切出来才知道；文本提取也在这一步做（IO）。
+        data class DocChunks(val name: String, val chunks: List<String>)
+        val docs = ArrayList<DocChunks>()
+        files.forEach { file ->
+            val detailed = runCatching { LibraryStore.readDetailed(file) }.getOrNull()
+            val text = detailed?.text.orEmpty()
+            // 扫描 PDF/空文档切不出块：不算失败，只是没有可检索的内容
+            if (detailed != null && !detailed.scannedPdf) {
+                docs.add(DocChunks(file.name, LibraryChunker.chunk(file.name, text)))
+            }
+        }
+        val total = docs.sumOf { it.chunks.size }
+
+        val modelTag = model
+        docs.forEach { doc ->
+            val existing = chunkDao.byDoc(doc.name)
+                .associateBy { it.chunkIndex to it.contentHash }
+            val keep = mutableListOf<LibraryChunkEntity>()
+            val pending = mutableListOf<Pair<Int, String>>() // (chunkIndex, text)
+
+            doc.chunks.forEachIndexed { index, text ->
+                val hash = LibraryChunker.contentHash(text)
+                val hit = existing[index to hash]
+                if (hit != null && hit.model == modelTag) {
+                    keep.add(hit)
+                } else {
+                    pending.add(index + 1 to text)
+                }
+            }
+
+            // 没有变化也要清理：文档被截断（块变少）时，旧的多余块要删
+            chunkDao.deleteDoc(doc.name)
+
+            // 先落「未变化」的块（checkpoint），失败的批次不影响它们
+            if (keep.isNotEmpty()) chunkDao.insert(keep)
+
+            pending.chunked(embeddingClient.batchSize).forEach { batch ->
+                val embedded = when (
+                    val result = embeddingClient.embed(profile, modelTag, batch.map { it.second })
+                ) {
+                    is ApiResult.Success -> result.data
+                    is ApiResult.Failure -> throw IllegalStateException(
+                        result.error.serverMessage.ifBlank { result.error.kind.name }
+                    )
+                }
+                if (embedded.size != batch.size) {
+                    throw IllegalStateException("嵌入返回条数与请求不一致")
+                }
+                val now = System.currentTimeMillis()
+                val rows = batch.mapIndexed { i, (_, text) ->
+                    LibraryChunkEntity(
+                        docName = doc.name,
+                        chunkIndex = batch[i].first,
+                        contentHash = LibraryChunker.contentHash(text),
+                        text = text,
+                        dim = embedded[i].size,
+                        model = modelTag,
+                        vector = VectorMath.pack(embedded[i]),
+                        updatedAt = now
+                    )
+                }
+                chunkDao.insert(rows)
+                done += rows.size
+                _progress.value = Progress(running = true, done = done, total = total, docs = docs.size)
+            }
+            // 该文档无新块时也要推进进度（done 按「已对齐块数」计）
+            if (pending.isEmpty()) {
+                done += keep.size
+                _progress.value = Progress(running = true, done = done, total = total, docs = docs.size)
+            }
+        }
+
+        // 清掉已删除文档的残留块
+        val liveNames = docs.map { it.name }.toSet()
+        chunkDao.allOnce()
+            .filter { it.docName !in liveNames }
+            .map { it.docName }
+            .distinct()
+            .forEach { chunkDao.deleteDoc(it) }
+
+        return Progress(done = total, total = total, docs = docs.size, chunks = chunkDao.count())
+    }
+
+    /**
+     * 语义检索：查询文本嵌入后对全库块做余弦，再与关键词命中做 RRF 融合。
+     *
+     * 嵌入模型未配置 / 查询嵌入失败时返回空列表（上层回退纯关键词检索）。
+     */
+    suspend fun search(
+        query: String,
+        profile: LlmProfile?,
+        model: String,
+        topK: Int = 8
+    ): List<LibrarySearchFusion.Hit> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+
+        val rows = chunkDao.allOnce()
+        if (rows.isEmpty()) return emptyList()
+
+        // 关键词路：整串包含（大小写不敏感）即命中，按命中长度占比排
+        val keywordRanked = rows
+            .mapNotNull { row ->
+                val at = row.text.indexOf(trimmed, ignoreCase = true)
+                if (at < 0) null else LibrarySearchFusion.Hit(
+                    docName = row.docName,
+                    chunkIndex = row.chunkIndex,
+                    text = row.text,
+                    score = (trimmed.length.toDouble() / row.text.length)
+                )
+            }
+            .sortedByDescending { it.score }
+
+        // 向量路：查询嵌入失败就只留关键词路（功能降级，不报错打断用户）
+        val vectorRanked = if (profile != null && profile.isConfigured() && model.isNotBlank()) {
+            val queryVector = when (
+                val result = embeddingClient.embed(profile, model, listOf(trimmed))
+            ) {
+                is ApiResult.Success -> result.data.firstOrNull()
+                is ApiResult.Failure -> null
+            }
+            if (queryVector != null && queryVector.isNotEmpty()) {
+                rows.mapNotNull { row ->
+                    val stored = VectorMath.unpack(row.vector)
+                    if (stored.isEmpty() || stored.size != queryVector.size) return@mapNotNull null
+                    LibrarySearchFusion.Hit(
+                        docName = row.docName,
+                        chunkIndex = row.chunkIndex,
+                        text = row.text,
+                        score = VectorMath.cosine(queryVector, stored).toDouble()
+                    )
+                }.sortedByDescending { it.score }
+                    .take(topK * 2)
+            } else emptyList()
+        } else emptyList()
+
+        return LibrarySearchFusion.fuse(vectorRanked, keywordRanked, topK)
+    }
+}

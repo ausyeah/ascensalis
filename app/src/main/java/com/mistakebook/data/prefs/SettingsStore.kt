@@ -515,6 +515,21 @@ class SettingsStore(context: Context) {
      * 系统提示词注入和用户阅读，一次改写就是一份自洽的新文档；
      * 版本号让界面能说清「现在是第几版」，改坏了也知道退过几步。
      */
+    // ===== 资料库向量化（v0.0.113）=====
+
+    private val KEY_EMBEDDING_MODEL = stringPreferencesKey("library_embedding_model")
+
+    /** 资料库向量化用的嵌入模型名（空 = 未启用向量检索）。 */
+    suspend fun embeddingModelNow(): String =
+        appContext.settingsDataStore.data.first()[KEY_EMBEDDING_MODEL].orEmpty()
+
+    suspend fun setEmbeddingModel(model: String) {
+        appContext.settingsDataStore.edit { prefs ->
+            val trimmed = model.trim()
+            if (trimmed.isEmpty()) prefs.remove(KEY_EMBEDDING_MODEL) else prefs[KEY_EMBEDDING_MODEL] = trimmed
+        }
+    }
+
     suspend fun saveMemoryDocument(text: String) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[KEY_MEMORY_DOC] = text

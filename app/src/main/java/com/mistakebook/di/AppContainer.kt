@@ -365,6 +365,19 @@ class AppContainer(context: Context) {
         com.mistakebook.data.chat.ChatTitleGenerator(chatCompletionStream, usageStatsStore)
     }
 
+    val embeddingClient: com.mistakebook.net.llm.EmbeddingClient by lazy {
+        com.mistakebook.net.llm.EmbeddingClient(llmApi)
+    }
+
+    val libraryIndexer: com.mistakebook.data.library.LibraryIndexer by lazy {
+        com.mistakebook.data.library.LibraryIndexer(
+            libraryRoot = com.mistakebook.data.library.LibraryStore.ensureDir(files.rootDir),
+            chunkDao = database.libraryChunkDao(),
+            embeddingClient = embeddingClient,
+            settingsStore = settingsStore
+        )
+    }
+
     val memoryRepository: com.mistakebook.data.repos.MemoryRepository by lazy {
         com.mistakebook.data.repos.MemoryRepository(
             settingsStore = settingsStore,

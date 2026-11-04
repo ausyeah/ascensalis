@@ -45,6 +45,13 @@ class LlmMaxTokensDowngradeTest {
             authorization: String
         ): Response<com.mistakebook.net.llm.ModelsResponse> =
             Response.success(com.mistakebook.net.llm.ModelsResponse())
+
+        override suspend fun embeddings(
+            url: String,
+            authorization: String,
+            request: com.mistakebook.net.llm.EmbeddingRequest
+        ): Response<com.mistakebook.net.llm.EmbeddingResponse> =
+            error("本测试不涉及向量嵌入")
     }
 
     private fun ok(content: String = "{\"questions\":[]}"): Response<ChatResponse> = Response.success(

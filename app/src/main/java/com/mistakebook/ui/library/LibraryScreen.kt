@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -60,6 +61,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
+import com.mistakebook.data.library.LibrarySearchFusion
 import com.mistakebook.data.library.LibraryStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -68,6 +70,12 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.background
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 
 /**
  * 资料库管理页（v0.0.51 T6，v0.0.55 反馈补 docx/pdf 与导入文件名修复）。
@@ -84,6 +92,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
+    container: com.mistakebook.di.AppContainer,
     filesDir: File,
     onBack: () -> Unit
 ) {
@@ -98,8 +107,44 @@ fun LibraryScreen(
     var newName by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf<String?>(null) }
 
+    // 向量检索（v0.0.113）：查询词非空时列表区切换成语义搜索结果
+    var query by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<LibrarySearchFusion.Hit>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    val indexProgress by container.libraryIndexer.progress.collectAsState()
+    var embeddingModel by remember { mutableStateOf("") }
+
     fun refresh() {
         files = LibraryStore.list(root)
+    }
+
+    // 进入页面拉一次已保存的向量化模型名
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        embeddingModel = container.settingsStore.embeddingModelNow()
+    }
+
+    fun runSearch(text: String) {
+        query = text
+        if (text.isBlank()) {
+            searchResults = emptyList()
+            return
+        }
+        scope.launch {
+            searching = true
+            val profile = runCatching { container.settingsStore.snapshotNow().activeProfile }.getOrNull()
+            val model = container.settingsStore.embeddingModelNow()
+            searchResults = container.libraryIndexer.search(text, profile, model)
+            searching = false
+        }
+    }
+
+    fun reindex() {
+        if (indexProgress.running) return
+        scope.launch {
+            val profile = runCatching { container.settingsStore.snapshotNow().activeProfile }.getOrNull()
+            container.settingsStore.setEmbeddingModel(embeddingModel)
+            container.libraryIndexer.reindex(profile, embeddingModel)
+        }
     }
 
     // 从内容提供方查文件显示名；查不到返回 null，由调用方回退 lastPathSegment。
@@ -178,6 +223,84 @@ fun LibraryScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
+
+            // 向量检索卡片（v0.0.113）：模型名 + 建立索引 + 进度/状态
+            LibraryIndexCard(
+                model = embeddingModel,
+                onModelChange = { embeddingModel = it },
+                progress = indexProgress,
+                onIndex = { reindex() }
+            )
+
+            // 语义搜索框：非空时列表区切换为搜索结果
+            OutlinedTextField(
+                value = query,
+                onValueChange = { runSearch(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                placeholder = { Text(stringResource(R.string.library_search_hint)) },
+                singleLine = true,
+                trailingIcon = {
+                    if (searching) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+            )
+
+            if (query.isNotBlank()) {
+                // 搜索结果区
+                when {
+                    searching -> Unit
+                    searchResults.isEmpty() -> {
+                        Text(
+                            text = stringResource(
+                                if (indexProgress.chunks == 0) R.string.library_search_need_model
+                                else R.string.library_search_empty
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(24.dp)
+                        )
+                    }
+                    else -> {
+                        Text(
+                            text = stringResource(R.string.library_search_section),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(searchResults, key = { it.docName + "#" + it.chunkIndex }) { hit ->
+                                ListItem(
+                                    headlineContent = {
+                                        Text(
+                                            text = hit.docName + " · #" + hit.chunkIndex,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    supportingContent = {
+                                        Text(
+                                            text = hit.text,
+                                            maxLines = 6,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    modifier = Modifier.clickable {
+                                        editing = java.io.File(root, hit.docName)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                return@Column
+            }
+
             if (files.isEmpty()) {
                 Text(
                     text = stringResource(R.string.library_empty),
@@ -494,4 +617,76 @@ private fun formatLibrarySize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
     else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+}
+
+
+/**
+ * 向量检索卡：嵌入模型名 + 「建立索引」+ 进度/状态行。
+ *
+ * 为什么放在资料库页而不是设置：向量化是**资料库自己的动作**——
+ * 模型名、索引状态、搜索都在同一个语境里，跳到设置再回来是两套心智。
+ * 接口地址与 Key 沿用当前大模型配置（见 [EmbeddingClient] 的 KDoc），
+ * 这里只需要多一个模型名。
+ */
+@Composable
+private fun LibraryIndexCard(
+    model: String,
+    onModelChange: (String) -> Unit,
+    progress: com.mistakebook.data.library.LibraryIndexer.Progress,
+    onIndex: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.library_index_title),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = model,
+            onValueChange = onModelChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.library_index_model_label)) },
+            supportingText = { Text(stringResource(R.string.library_index_model_hint)) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val statusText = when {
+                progress.running ->
+                    stringResource(R.string.library_index_running, progress.done, progress.total)
+                progress.lastError != null ->
+                    stringResource(R.string.library_index_failed, progress.lastError)
+                progress.chunks > 0 ->
+                    stringResource(R.string.library_index_ready, progress.docs, progress.chunks)
+                else ->
+                    stringResource(R.string.library_index_empty)
+            }
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (progress.lastError != null) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onIndex, enabled = !progress.running && model.isNotBlank()) {
+                Text(stringResource(R.string.library_index_action))
+            }
+        }
+    }
 }
