@@ -9,9 +9,14 @@ import org.junit.Test
  *
  * 纯 JVM：两个函数都只是浮点换算，不依赖 Android。
  *
- * ## v0.0.102 改了什么
- * 用户原话：「单词绝对不能换行啊……是让你把它们的空间位置留充足
- * 而不是限制单词的长度」。
+ * ## v0.0.109：宽度不再扣、改成往下让
+ * 用户原话：「英语背单词单词要居中的只是我说个上面 UI 的底部要错开。
+ * 也就是单词宽度无限，上顶部在右上角 UI 下边界的下面就不会重合了，
+ * 你这个横向错位是错的」。
+ *
+ * 所以可用宽度就是整行宽度，单词水平居中；右上角那排图标靠
+ * WORD_HEADLINE_TOP_CLEARANCE_DP 让出垂直空间——横向扣减那版会把
+ * 单词挤得偏左，看着像排版歪了。
  *
  * 之前的两条规矩把这件事做反了：
  * 1. 可用宽度**左右各扣** 96dp 的工具带——右边是真占用，左边空着也扣，
@@ -40,18 +45,18 @@ class WordHeadlineSizeTest {
     private val narrowContent = 288f
 
     @Test
-    fun `可用宽度只扣右边那一条工具带`() {
-        // 320 - 96 = 224：右边是真实占用（星标/喇叭/收藏），
-        // 左边空着凭什么也扣一条带子——那正是单词被逼到折行的原因
-        assertEquals(224f, wordHeadlineMaxWidthDp(phoneContent), 0f)
+    fun `可用宽度就是整行宽度`() {
+        // 图标挪到了「顶部让位」里，横向不再占用任何宽度：
+        // 单词用满整行并居中，长单词也才有地方站
+        assertEquals(phoneContent, wordHeadlineMaxWidthDp(phoneContent), 0f)
     }
 
     @Test
     fun `窄屏兜底不低于九十六dp`() {
-        assertEquals(192f, wordHeadlineMaxWidthDp(narrowContent), 0f)
+        assertEquals(narrowContent, wordHeadlineMaxWidthDp(narrowContent), 0f)
         // 再窄也不该吐负数或零宽——那会让题干直接不显示
         assertEquals(96f, wordHeadlineMaxWidthDp(0f), 0f)
-        assertEquals(96f, wordHeadlineMaxWidthDp(100f), 0f)
+        assertEquals(100f, wordHeadlineMaxWidthDp(100f), 0f)
     }
 
     @Test

@@ -596,31 +596,31 @@ internal fun StudyView(
                             // 右端直接压住右上角的星标/喇叭/收藏。用户截图报的
                             // 「长单词显示和上方UI冲突」就是这一处。
                             //
-                            // 修法：单词仍然居中，但可用宽度左右各扣掉一个右上角
-                            // 工具带（左侧一并让出是为了保持居中，只让右边的话
-                            // 长单词会整体歪向左边），字号「塞得下就 36sp、塞不下
-                            // 按比例缩」，外面再叠一层 widthIn 硬钳——字体度量
-                            // 估算有偏差、或用户把系统字号调到 1.3x 时，宁可折行
-                            // 也绝不压到图标（双保险，同 RichText 的取宽思路）。
+                            // 修法（v0.0.109 用户拍板）：单词**水平居中、用满整行**，
+                            // 右上角那排图标靠「内容整体下移」让开，而不是靠宽度扣减。
+                            //
+                            // 上一版是「扣掉右边一条带子、单词在剩下的区域里居中」——
+                            // 用户一眼看出那是错的：单词被挤得偏左，看着像排版歪了。
+                            // 图标只在**顶部一条**，只要正文从它们下边界以下开始，
+                            // 横向根本不冲突，宽度也就没有理由扣。
                             //
                             // 单词**绝不换行**（v0.0.102 用户原话：「单词绝对不能换行」）：
                             // 折成两行的单词看着就是显示坏了，用户会以为 App 出问题。
                             //
                             // 做法是三件事一起：
-                            // 1. 只给**右边**的图标带留位——左边空着，凭什么也扣掉？
-                            //    之前左右各扣 96dp，单词被塞进一条比它还窄的带子里，
-                            //    于是「hammer」这种 6 个字母的词都放不下，只能折行；
-                            // 2. 单词在「卡片宽度减去右边那条带子」的区域内居中，
-                            //    整体向左错开一点（= 用户说的「错位一点」），
-                            //    这样长单词的右端也够不到星标/喇叭/收藏；
+                            // 1. 可用宽度 = 卡片内容区全宽，单词在其中居中；
+                            // 2. 整块题干顶部让出 WORD_HEADLINE_TOP_CLEARANCE_DP，
+                            //    顶边落在图标下边界之下——这才是「空间位置留充足」；
                             // 3. 估算的字号只是初值，真正兜底的是**实测宽度**：
-                            //    排版完拿 onTextLayout 的 maxIntrinsicWidth 与可用宽度比，
+                            //    排版完拿 textMeasurer 量出的真实宽度与可用宽度比，
                             //    超出就整体等比缩到刚好放得下。
                             //    估算总有偏差（字体度量、系统字号放大），
-                            //    只有实测才保证「不折行也不压图标」两件事同时成立。
+                            //    只有实测才保证「不折行、也不出界」同时成立。
                             BoxWithConstraints(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentAlignment = Alignment.CenterStart
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = WORD_HEADLINE_TOP_CLEARANCE_DP.dp),
+                                contentAlignment = Alignment.Center
                             ) {
                                 val safeWidthDp = wordHeadlineMaxWidthDp(maxWidth.value)
                                 val density = LocalDensity.current
@@ -1398,13 +1398,17 @@ internal const val OPTION_MEANING_SLOT_QUIZ = 40
 internal const val OPTION_MEANING_SLOT_SENSE = 36
 
 /**
- * 单词卡右上角工具带的宽度（dp）：星标 + 发音 + 收藏三个 32dp IconButton。
+ * 题干往下让出的高度（dp），给右上角那排图标让位（v0.0.109）。
  *
- * 单独拎成常量，是因为它是题干可用宽度的**扣减项**——三颗按钮改尺寸或
- * 增删一颗，题干的 safe 宽度必须跟着变；写死在 UI 里就会漏改，
- * 于是长单词又开始压图标。
+ * 三个 32dp 按钮贴在卡片顶缘，卡片内边距是 16dp——所以内容的第一个元素
+ * 默认正好钻到图标底下。加 20dp（16 + 4 的间隙）之后，单词的**顶边**
+ * 一定落在图标下边界之下。
+ *
+ * 为什么用「往下让」而不是「往左让」：用户的判断是对的——单词要**居中**，
+ * 横向错位看着就是排版歪了；而横向空间本来就不该被图标吃掉，
+ * 长单词现在可以用满整行宽度。
  */
-internal const val WORD_CARD_TOOL_BAND_DP = 96f
+internal const val WORD_HEADLINE_TOP_CLEARANCE_DP = 20f
 
 /** 题干（单词本身）的最大字号：设计稿基准值，短单词一律用满。 */
 internal const val WORD_HEADLINE_MAX_SP = 36f
@@ -1436,10 +1440,10 @@ internal const val WORD_HEADLINE_EM_PER_CHAR = 0.58f
  * 96dp，已超出本项目的设计包络（内边距写死 16/20dp、题干写死 36sp）。
  */
 internal fun wordHeadlineMaxWidthDp(cardContentWidthDp: Float): Float =
-    // 只扣**右边**那条工具带（星标/喇叭/收藏真占着的地方）。
-    // 之前左右各扣一条，右侧那条是对的，左侧那条是凭空扣的——
-    // 单词被塞进一半宽的带子里，「hammer」都放不下，只好折行。
-    (cardContentWidthDp - WORD_CARD_TOOL_BAND_DP).coerceAtLeast(96f)
+    // v0.0.109：可用宽度就是整行（卡片内容区全宽）。
+    // 右上角的图标不再从宽度里扣——它们靠「内容整体下移」让开，
+    // 单词才能保持水平居中、长单词也才有整行可用。
+    cardContentWidthDp.coerceAtLeast(96f)
 
 /**
  * 按可用宽度给题干选字号（sp）。
