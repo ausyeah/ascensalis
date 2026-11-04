@@ -1,6 +1,5 @@
 package com.mistakebook.ui.settings
 
-import android.content.pm.PackageManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +17,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,10 +31,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mistakebook.R
 import com.mistakebook.data.update.AppUpdate
+import com.mistakebook.data.update.UpdateState
 import kotlinx.coroutines.launch
-import java.io.File
 
 /**
  * 「关于与更新」区块：当前版本、检查更新、给 star。
@@ -60,9 +65,19 @@ internal fun AboutUpdateSection() {
     var release by remember { mutableStateOf<AppUpdate.Release?>(null) }
     var checkError by remember { mutableStateOf<String?>(null) }
 
-    var downloading by remember { mutableStateOf(false) }
-    var downloadProgress by remember { mutableStateOf(0f) }
-    var downloadError by remember { mutableStateOf<String?>(null) }
+    // 下载/待安装状态活在 AppUpdate 里，不在 Composable 里：安装器是另一个
+    // Activity，跳过去再回来页面会被重建，进度和「已下好」都得还在。
+    val update by AppUpdate.state.collectAsState()
+
+    // 从「允许安装未知应用」回来时，授权了就直接续上安装
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) AppUpdate.installAfterPermission(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -83,7 +98,7 @@ internal fun AboutUpdateSection() {
                 )
             }
             TextButton(
-                enabled = !checking && !downloading,
+                enabled = !checking && update !is UpdateState.Downloading,
                 onClick = {
                     scope.launch {
                         checking = true
@@ -96,6 +111,8 @@ internal fun AboutUpdateSection() {
                             checkError = error.message ?: error.javaClass.simpleName
                             null
                         }
+                        // 上一个版本已经下好过（比如刚被安装器弹回来）：直接接回状态
+                        found?.let { AppUpdate.restoreDownloaded(context, it.versionName) }
                         release = found
                         checked = true
                         checking = false
@@ -124,73 +141,96 @@ internal fun AboutUpdateSection() {
             }
 
             release != null -> {
+                val current = release!!
+                val readyFor = (update as? UpdateState.Ready)
+                    ?.takeIf { it.version == current.versionName }
+                val downloadingFor = (update as? UpdateState.Downloading)
+                    ?.takeIf { it.version == current.versionName }
+
+                // 下好就自动把安装器拉起来：用户点的是「下载并安装」，那就一次点完。
+                // 自动只拉一次（见 AppUpdate.requestInstall），否则从安装器返回会被再弹走。
+                LaunchedEffect(readyFor) {
+                    readyFor?.let {
+                        AppUpdate.requestInstall(context, it.version, it.file, auto = true)
+                    }
+                }
+
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = stringResource(R.string.settings_about_new_version, release!!.versionName),
+                    text = stringResource(R.string.settings_about_new_version, current.versionName),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
                 )
-                if (release!!.notes.isNotBlank()) {
+                if (current.notes.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = release!!.notes.take(300),
+                        text = current.notes.take(300),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Spacer(Modifier.height(8.dp))
-                if (downloading) {
-                    Column {
-                        LinearProgressIndicator(
-                            progress = { downloadProgress },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = stringResource(
-                                R.string.settings_about_downloading,
-                                (downloadProgress * 100).toInt()
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else {
-                    TextButton(onClick = {
-                        scope.launch {
-                            downloading = true
-                            downloadError = null
-                            val target = File(context.cacheDir, "updates/app-update.apk")
-                            val ok = AppUpdate.download(release!!.apkUrl, target) { done, total ->
-                                downloadProgress = if (total > 0) {
-                                    (done.toFloat() / total).coerceIn(0f, 1f)
-                                } else {
-                                    0f
-                                }
-                            }
-                            downloading = false
-                            if (!ok) {
-                                downloadError = "网络中断"
-                                return@launch
-                            }
-                            downloadError = null
-                            // 没有「安装未知应用」权限时，系统会直接拒收安装器——
-                            // 先跳到授权页，别让用户对着一个毫无反应的界面
-                            if (context.packageManager.canRequestPackageInstalls()) {
-                                AppUpdate.install(context, target)
-                            } else {
-                                AppUpdate.openInstallPermissionSettings(context)
-                            }
+                when {
+                    downloadingFor != null -> {
+                        Column {
+                            LinearProgressIndicator(
+                                progress = { downloadingFor.progress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = stringResource(
+                                    R.string.settings_about_downloading,
+                                    (downloadingFor.progress * 100).toInt()
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                    }) {
-                        Text(stringResource(R.string.settings_about_download))
+                    }
+
+                    // 已经下好：只给「安装」。让人再下一次是最没道理的一种浪费
+                    readyFor != null -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                AppUpdate.requestInstall(
+                                    context,
+                                    current.versionName,
+                                    readyFor.file,
+                                    auto = false
+                                )
+                            }) {
+                                Text(stringResource(R.string.settings_about_install))
+                            }
+                            Spacer(Modifier.size(8.dp))
+                            Text(
+                                text = stringResource(R.string.settings_about_ready),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    else -> {
+                        TextButton(onClick = {
+                            AppUpdate.startDownload(
+                                context,
+                                current.versionName,
+                                current.apkUrl
+                            )
+                        }) {
+                            Text(stringResource(R.string.settings_about_download))
+                        }
                     }
                 }
-                if (downloadError != null) {
+                (update as? UpdateState.Failed)?.let { failure ->
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = stringResource(R.string.settings_about_download_failed, downloadError.orEmpty()),
+                        text = stringResource(
+                            R.string.settings_about_download_failed,
+                            failure.message
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )

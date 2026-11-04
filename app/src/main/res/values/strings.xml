@@ -38,7 +38,8 @@
     <string name="settings_about_downloading">正在下载 %1$d%%</string>
     <string name="settings_about_download_failed">下载失败：%1$s</string>
     <string name="settings_about_check_failed">检查失败：%1$s</string>
-    <string name="settings_about_install_hint">请在系统设置里允许「安装未知应用」后重试</string>
+    <string name="settings_about_install">安装</string>
+    <string name="settings_about_ready">安装包已下载好</string>
     <string name="settings_about_star">给这个项目点个 Star</string>
     <string name="settings_about_star_desc">一键打开 GitHub 仓库页</string>
     <string name="settings_about_star_action">去 Star</string>

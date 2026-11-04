@@ -5,13 +5,18 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
@@ -30,6 +35,12 @@ import java.util.concurrent.TimeUnit
  *
  * ## 为什么不做「Play 商店」那套
  * 这是国内直装的 App，没有商店上架这一环。
+ *
+ * ## 为什么安装一定要「跳出去」
+ * 安卓不允许一个应用静默安装另一个包，这是系统级限制，没有权限可以绕过。
+ * 能做的只有一件事：把包交出去，让系统安装器接管——用户在安装器里点「安装」，
+ * 系统再用它自己的身份落盘。所以这里的 [requestInstall] 只负责唤起安装器，
+ * 绝不自己装。
  */
 object AppUpdate {
 
@@ -42,6 +53,9 @@ object AppUpdate {
     private const val TAG = "AppUpdate"
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
 
+    /** 下载目录：缓存区即可，装完系统会自己清。 */
+    private const val UPDATE_DIR = "updates"
+
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     private val client: OkHttpClient by lazy {
@@ -50,6 +64,25 @@ object AppUpdate {
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
     }
+
+    /**
+     * 下载活在**进程**里，不挂在页面作用域上。
+     *
+     * 页面一退出就取消下载，是这个功能最难受的地方：用户跳去装个别的应用再回来，
+     * 进度已经从 0 开始重来了。作用域放在 object 里，界面只订阅进度。
+     */
+    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
+
+    /** 界面订阅它：进度不随页面销毁归零。 */
+    val state: StateFlow<UpdateState> = _state.asStateFlow()
+
+    /** 自动拉起过安装器的版本：同一版本只自动拉一次，免得从安装器回来又被弹走。 */
+    private var autoInstalledVersion: String? = null
+
+    /** 正在等「允许安装未知应用」授权的版本：授权回来直接续上安装。 */
+    private var awaitingPermissionVersion: String? = null
 
     /** 一个可安装的更新。 */
     data class Release(
@@ -133,45 +166,131 @@ object AppUpdate {
         )
     }
 
+    /** 更新包的文件名按版本分开：换一个版本就是另一个文件，不会拿旧包去装。 */
+    internal fun apkFileName(version: String): String = "app-update-$version.apk"
+
+    /** 磁盘上已经下好的包（要求非空）。 */
+    fun downloadedApk(context: Context, version: String): File? {
+        val file = File(File(context.cacheDir, UPDATE_DIR), apkFileName(version))
+        return file.takeIf { it.isFile && it.length() > 0 }
+    }
+
     /**
-     * 下载 APK 到 [target]。
+     * 把磁盘上已经下好的包接回状态。
      *
-     * @param onProgress 已下载字节 / 总字节。
-     * @return 成功返回 true。
+     * 从安装器/授权页回来时页面会被重建，`remember` 里的「已下载」全没了；
+     * 文件还在，所以状态要能从文件重新长出来——否则用户就得再下一遍。
      */
-    suspend fun download(
-        url: String,
-        target: File,
-        onProgress: (downloaded: Long, total: Long) -> Unit
-    ): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            val request = Request.Builder().url(url).build()
-            val ok = client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use false
-                val body = response.body ?: return@use false
-                val total = body.contentLength()
-                target.parentFile?.mkdirs()
-                body.byteStream().use { input ->
-                    target.outputStream().use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var downloaded = 0L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            output.write(buffer, 0, read)
-                            downloaded += read
-                            onProgress(downloaded, total)
-                        }
-                    }
+    fun restoreDownloaded(context: Context, version: String) {
+        val current = _state.value
+        if (current is UpdateState.Downloading || current is UpdateState.Ready) return
+        downloadedApk(context, version)?.let { _state.value = UpdateState.Ready(version, it) }
+    }
+
+    /**
+     * 开始下载，并把进度写进 [state]。
+     *
+     * 已经下好同一版本就直接进入待安装，不重复下载；已经在下的忽略重复点击。
+     */
+    fun startDownload(context: Context, version: String, url: String) {
+        val current = _state.value
+        if (current is UpdateState.Downloading) return
+        if (current is UpdateState.Ready && current.version == version) return
+
+        downloadedApk(context, version)?.let {
+            _state.value = UpdateState.Ready(version, it)
+            return
+        }
+
+        val target = File(File(context.cacheDir, UPDATE_DIR), apkFileName(version))
+        _state.value = UpdateState.Downloading(version, 0f)
+        downloadScope.launch {
+            val ok = runCatching {
+                writeTo(url, target) { done, total ->
+                    val progress = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
+                    _state.value = UpdateState.Downloading(version, progress)
                 }
-                true
+            }.getOrElse { error ->
+                Log.w(TAG, "更新包下载失败", error)
+                false
             }
-            ok
-        }.getOrElse {
-            Log.w(TAG, "更新包下载失败", it)
-            false
+            _state.value = if (ok) {
+                UpdateState.Ready(version, target)
+            } else {
+                UpdateState.Failed("网络中断")
+            }
         }
     }
+
+    /**
+     * 下载到 `*.part`，完整收到才改名。
+     *
+     * 直接写正式文件名的话，中途断掉会留下一个半截 APK：它看起来「已经下好」，
+     * 拿去安装却是一个坏包。改名是这里唯一需要的原子性。
+     */
+    private fun writeTo(url: String, target: File, onProgress: (Long, Long) -> Unit): Boolean {
+        val request = Request.Builder().url(url).build()
+        val part = File(target.path + ".part")
+        target.parentFile?.mkdirs()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return false
+            val body = response.body ?: return false
+            val total = body.contentLength()
+            body.byteStream().use { input ->
+                part.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var downloaded = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        onProgress(downloaded, total)
+                    }
+                }
+            }
+        }
+        if (target.exists() && !target.delete()) return false
+        return part.renameTo(target)
+    }
+
+    /**
+     * 把包交给系统安装器。
+     *
+     * @param auto true 由「下载完自动跳转」调用：同一版本只自动拉一次。
+     *   否则从安装器返回时页面重建、[state] 仍是 Ready，自动逻辑会再弹一次，
+     *   用户就永远回不到 App 里。
+     */
+    fun requestInstall(context: Context, version: String, file: File, auto: Boolean) {
+        if (auto) {
+            if (autoInstalledVersion == version) return
+            autoInstalledVersion = version
+        }
+        if (installPermissionGranted(context)) {
+            install(context, file)
+        } else {
+            // 没有「安装未知应用」授权：先去授权页，授权回来由 [installAfterPermission] 续上
+            awaitingPermissionVersion = version
+            openInstallPermissionSettings(context)
+        }
+    }
+
+    /**
+     * 从授权页回来时调一次：真的授权了就接着装。
+     *
+     * 用户已经下好包、也已经点过「同意」，不该再要求他回来点第二次。
+     */
+    fun installAfterPermission(context: Context) {
+        val version = awaitingPermissionVersion ?: return
+        if (!installPermissionGranted(context)) return
+        awaitingPermissionVersion = null
+        val file = downloadedApk(context, version) ?: return
+        install(context, file)
+    }
+
+    /** 是否已允许本应用安装 APK（minSdk 26，不需要版本判断）。 */
+    fun installPermissionGranted(context: Context): Boolean =
+        context.packageManager.canRequestPackageInstalls()
 
     /**
      * 调系统安装器安装 [apk]。
@@ -236,4 +355,24 @@ object AppUpdate {
 
     private fun JsonObject.string(key: String): String? =
         this[key]?.jsonPrimitive?.contentOrNull
+}
+
+/**
+ * 更新包的状态。
+ *
+ * 放在进程里而不是 Composable 里：安装器是另一个 Activity，跳过去再回来
+ * 页面可能已经被重建，进度和「已下好」这件事都得还在。
+ */
+sealed interface UpdateState {
+
+    /** 没在下载，也没有下好的包。 */
+    data object Idle : UpdateState
+
+    /** 正在下载，[progress] 是 0..1。 */
+    data class Downloading(val version: String, val progress: Float) : UpdateState
+
+    /** 已下好、等待安装。[file] 在，就不该再让人下一次。 */
+    data class Ready(val version: String, val file: File) : UpdateState
+
+    data class Failed(val message: String) : UpdateState
 }
