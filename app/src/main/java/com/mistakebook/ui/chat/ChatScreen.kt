@@ -598,6 +598,7 @@ fun ChatScreen(
                             viewModel.notifyCopied()
                         },
                         onRetry = { id -> viewModel.retry(id) },
+                        onContinue = { id -> viewModel.continueGeneration(id) },
                         onDelete = { id ->
                             pendingDeleteId = id
                             showDeleteDialog = true
@@ -702,7 +703,8 @@ fun ChatScreen(
             providers = state.providerOptions,
             activeProviderId = state.activeProviderId,
             currentEffort = state.reasoningEffort,
-            enabled = !state.isStreaming,
+            // 生成中也能换模型：换的只是下一轮，正在跑的这一轮不受影响
+            enabled = true,
             searchEnabled = state.chatSearchEnabled,
             searchProvider = state.chatSearchProvider,
             onSelect = viewModel::selectModel,

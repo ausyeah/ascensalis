@@ -173,6 +173,8 @@ internal fun MessageList(
     // 重试必须带上被点消息的 id：重试按钮挂在每条失败消息上，
     // 无 id 的「重试最后一轮」在历史里有旧失败消息时会删错目标。
     onRetry: (Long) -> Unit,
+    /** 停止后的「继续」：接着写，不重新开头。 */
+    onContinue: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：批改结果「存入题目备注」入口；自由会话传 null 不展示。 */
     onSaveToNote: ((Long) -> Unit)? = null,
@@ -234,6 +236,7 @@ internal fun MessageList(
                 onImageClick = onImageClick,
                 onCopy = onCopy,
                 onRetry = onRetry,
+                onContinue = onContinue,
                 onDelete = onDelete,
                 onSaveToNote = onSaveToNote,
                 onToggleThinking = onToggleThinking

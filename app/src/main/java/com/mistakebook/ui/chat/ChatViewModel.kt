@@ -1054,6 +1054,35 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 「继续」：把手动停止的那条回答接着往下写（v0.0.109）。
+     *
+     * 实现上就是**发一句「继续」**——但通过 retry 的 pendingText 通道：
+     * 不插入用户消息、不落库，所以界面上看不到这句话，模型看得到。
+     * 用户要的就是这个：不想为了让它接着写，还得自己在输入框里打两个字。
+     *
+     * 与 [retry] 的分工：继续保留已经写出来的部分（那也是有价值的内容），
+     * 重试删掉重答。
+     */
+    fun continueGeneration(stoppedMessageId: Long) {
+        val current = _state.value
+        if (current.isStreaming || generationActive) return
+        val stopped = current.messages.lastOrNull {
+            it.id == stoppedMessageId && it.role == ChatRole.ASSISTANT
+        } ?: return
+        // 还在往出吐的那条没有「继续」可言：它本来就在继续
+        if (stopped.status == MessageStatus.STREAMING) return
+
+        viewModelScope.launch {
+            val profile = settingsStore.settings.first().activeProfile
+            if (profile == null || !profile.isConfigured()) {
+                _state.value = _state.value.copy(needsApiKey = true)
+                return@launch
+            }
+            runOnce(profile, ChatPrompts.CONTINUE, emptyList(), isRetry = true)
+        }
+    }
+
     fun stop() {
         // 生成跑在服务里：停止 = 让服务取消这次任务（内容保留、状态记为已取消）
         ChatGenerationService.stop(appContext)

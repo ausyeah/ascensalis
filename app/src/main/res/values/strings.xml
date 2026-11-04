@@ -572,6 +572,7 @@
     <!-- 流式中输入框有字时的主按钮：打断当前回答并发送这一轮 -->
     <string name="chat_steer">打断并发送</string>
     <string name="chat_retry">重试</string>
+    <string name="chat_continue">继续</string>
     <string name="chat_copy">复制</string>
     <string name="chat_copied">已复制</string>
     <string name="chat_delete_message">删除这条</string>

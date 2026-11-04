@@ -24,6 +24,14 @@ object ChatPrompts {
      * 与 [HEAD_INTRO] 成对：卡片把这两句剔掉，剩下的才是题目本身。
      */
     const val QUESTION_TAIL = "请基于以上内容回答用户的问题。"
+    /**
+     * 「继续」用的隐藏用户消息（v0.0.109）。
+     *
+     * 就是「继续」两个字——用户点一下那个按钮，等价于他自己打这两个字
+     * 再发送；区别只在**不落库、不进气泡**（走 retry 的 pendingText 通道）。
+     */
+    const val CONTINUE = "继续"
+
 
     /**
      * 手写过程批改指令（T13）。

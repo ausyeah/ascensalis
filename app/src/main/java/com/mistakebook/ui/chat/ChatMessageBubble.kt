@@ -176,6 +176,8 @@ internal fun MessageBubble(
     onImageClick: (String) -> Unit = {},
     onCopy: (String) -> Unit,
     onRetry: (Long) -> Unit,
+    /** 「继续」：把手动停止的回答接着写（v0.0.109）。 */
+    onContinue: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：把助手回复存入题目备注。null = 当前会话不展示该入口（自由会话）。 */
     onSaveToNote: ((Long) -> Unit)? = null,
@@ -391,6 +393,7 @@ internal fun MessageBubble(
             isUser = isUser,
             onCopy = onCopy,
             onRetry = onRetry,
+            onContinue = onContinue,
             onDelete = onDelete,
             onSaveToNote = onSaveToNote
         )
@@ -550,6 +553,7 @@ internal fun StatusRow(
     isUser: Boolean,
     onCopy: (String) -> Unit,
     onRetry: (Long) -> Unit,
+    onContinue: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：非空时对完成态助手消息展示「存入题目备注」入口。 */
     onSaveToNote: ((Long) -> Unit)? = null
@@ -574,12 +578,33 @@ internal fun StatusRow(
                 }
             }
 
+            // 手动停止（v0.0.109）：和发送失败一样给出口。
+            // 「继续」是接着写，「重试」是重答——停止之后用户想要的
+            // 无非就是这两个，不该逼他去输入框再打一遍字。
             message.status == MessageStatus.CANCELED -> {
                 Text(
                     text = stringResource(R.string.chat_stopped_badge),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                TextButton(
+                    onClick = { onContinue(message.id) },
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.chat_continue),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                TextButton(
+                    onClick = { onRetry(message.id) },
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.chat_retry),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
 
             message.status == MessageStatus.DONE && !isUser -> {

@@ -299,11 +299,16 @@ internal fun ChatInputBar(
 
                 // 模型选择入口：圆形图标 + 当前模型名 + 下拉箭头。
                 // 一个 provider 常供应几十个模型，点这里弹出完整列表。
+                //
+                // 生成中**也允许换**（v0.0.109）：换的是「下一轮用哪个模型」，
+                // 正在跑的这一轮由服务拿着已经发出去的请求，改也改不了、也不该改。
+                // 之前禁用等于让用户干等整段回答结束才能切——而这个动作本来就
+                // 不需要等。
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .clip(MaterialTheme.shapes.large)
-                        .clickable(enabled = !streaming, onClick = onPickModel)
+                        .clickable(onClick = onPickModel)
                         .padding(horizontal = 6.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
