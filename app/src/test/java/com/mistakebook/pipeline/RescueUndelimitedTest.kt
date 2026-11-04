@@ -74,6 +74,21 @@ class RescueUndelimitedTest {
     }
 
     @Test
+    fun paragraphContainingInlineDollarMathIsNotHijacked() {
+        // v0.0.111 真机踩坑原文：以 `$` 收尾、不在叙述标点名单里，
+        // 命令密度又够——整段被劫持成 display math，渲染出
+        // 「f left(½ left(x+y right)right)」。带 `$` 的一律不救。
+        assertNull(
+            LatexSanitizer.rescueUndelimited(
+                "嵌套括号配平：\$f\\left(\\frac{1}{2}\\left(x+y\\right)\\right)\$"
+            )
+        )
+        assertNull(LatexSanitizer.rescueUndelimited("答案是 \$x=1\$"))
+        // 圆括号定界符同理
+        assertNull(LatexSanitizer.rescueUndelimited("结果为 \\(x+y\\)"))
+    }
+
+    @Test
     fun blankAndTinyInputAreRejected() {
         assertNull(LatexSanitizer.rescueUndelimited(""))
         assertNull(LatexSanitizer.rescueUndelimited("  "))

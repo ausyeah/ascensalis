@@ -804,20 +804,37 @@ class MathRenderer(context: Context) {
 
     /** 抓整张「公式长卷」，一次 draw 拿到所有公式。 */
     private suspend fun captureSheet(view: WebView, width: Int, height: Int): Bitmap? {
-        waitFrames(BATCH_FRAME_WAIT)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        view.draw(canvas)
-        // 同样是采样判定，理由见 [capture] 里的注释
-        if (isBlankBySampling(bitmap.width, bitmap.height) { x, y ->
-                bitmap.getPixel(x, y) ushr 24
+        // 「空白」几乎总是**还没画完**而不是画不出来：relayoutForBatch 把视口
+        // 撑到长卷高度之后，WebView 要重新光栅化整个高页面，BATCH_FRAME_WAIT
+        // 两帧在低端机 / 系统负载高 / 冷 WebView 时经常不够——一次空白就把
+        // **整批**公式判死，用户看到的就是一大片「公式无法渲染」
+        // （真机复现：同一批公式重进消息就全好了）。
+        //
+        // 所以这里逐次加倍等待帧数重试；重试前先往 scratch 画一帧，
+        // 逼未挂载的 WebView 产出合成内容。重试耗尽才放弃（回退源码）。
+        var waitFrames = BATCH_FRAME_WAIT
+        repeat(BATCH_CAPTURE_ATTEMPTS) { attempt ->
+            waitFrames(waitFrames)
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            view.draw(canvas)
+            // 同样是采样判定，理由见 [capture] 里的注释
+            if (!isBlankBySampling(bitmap.width, bitmap.height) { x, y ->
+                    bitmap.getPixel(x, y) ushr 24
+                }
+            ) {
+                return bitmap
             }
-        ) {
             bitmap.recycle()
-            Log.w(TAG, "批量长卷为空白 ${width}x$height")
-            return null
+            Log.w(
+                TAG,
+                "批量长卷空白(${attempt + 1}/$BATCH_CAPTURE_ATTEMPTS) ${width}x$height，加帧重试"
+            )
+            waitFrames = (waitFrames * 2).coerceAtMost(12)
+            runCatching { view.draw(Canvas(scratchFor(view))) }
         }
-        return bitmap
+        Log.w(TAG, "批量长卷为空白 ${width}x$height，重试耗尽")
+        return null
     }
 
     /**
@@ -936,10 +953,17 @@ class MathRenderer(context: Context) {
         private const val VIEWPORT_HEIGHT = 1600
 
         /**
-         * 批量渲染后等待的帧数。
-         * 2 帧足够 KaTeX 完成排版与光栅化；再多只是白等。
+         * 批量渲染后**首次**等待的帧数。
+         * 2 帧通常够 KaTeX 完成排版与光栅化；不够时由
+         * [captureSheet] 的重试链逐次加倍，不再整批判死。
          */
         private const val BATCH_FRAME_WAIT = 2
+
+        /**
+         * 长卷抓取的最大尝试次数。帧数按 2 → 4 → 8 → 12 逐次加倍/封顶，
+         * 全部空白才放弃（回退源码）。
+         */
+        private const val BATCH_CAPTURE_ATTEMPTS = 4
 
         /**
          * 批量渲染单次最多处理多少个公式。

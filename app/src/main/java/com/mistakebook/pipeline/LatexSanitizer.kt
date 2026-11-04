@@ -96,8 +96,14 @@ object LatexSanitizer {
     fun rescueUndelimited(text: String): String? {
         val line = text.trim()
         if (line.length < 6 || line.length > 400) return null
-        // 已带任何一种公式定界符的不归这里管
-        if (line.contains("$$") || line.contains("\\[")) return null
+        // 已带任何一种公式定界符的不归这里管——**单个 `$` 也算**（v0.0.111）。
+        //
+        // 真机踩过：段落「嵌套括号配平：$f\left(\frac{1}{2}\left(x+y\right)\right)$」
+        // 以 `$` 收尾、不在叙述标点名单里，命令密度又够，于是整段被当裸公式
+        // 包上 `$$` 劫持成 display math——中文进了 KaTeX，界面上渲染出
+        // 「f left(½ left(x+y right)right)」这种半坏文本。
+        // 带 `$` 说明这段本来就是（或含有）行内公式，交给 parseInline 处理。
+        if (line.contains('$') || line.contains("\\(") || line.contains("\\[")) return null
         // 正文的行会以叙述标点收尾；公式行不会
         if (line.endsWith("。") || line.endsWith("，") || line.endsWith("？") ||
             line.endsWith("！") || line.endsWith("；") || line.endsWith(":") ||

@@ -362,9 +362,11 @@ internal fun MessageBubble(
                         mathRenderer = mathRenderer,
                         modifier = if (isStreaming) Modifier.animateContentSize() else Modifier,
                         streaming = isStreaming,
-                        // 聊天里绝不回退 LaTeX 源码（v0.0.57）：用户反馈
-                        // 「流式正常、结束后显示原始源码」。给「公式无法渲染」提示。
-                        showFailedMathSource = false,
+                        // v0.0.111 用户改口：渲染不出来的公式**把源码亮出来**，
+                        // 不然「这里为什么是空的/一句话提示」根本没法定位是哪条
+                        // 公式出了问题。流式期间仍然只留占位（不闪源码），
+                        // 结束后才回退——RichText 里那条时序规则不变。
+                        showFailedMathSource = true,
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (isUser) {
                             MaterialTheme.colorScheme.onPrimaryContainer
