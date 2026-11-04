@@ -11,9 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -53,8 +50,6 @@ import com.mistakebook.print.ExportFormat
 import com.mistakebook.ui.common.EmptyState
 import com.mistakebook.ui.common.QuestionThumb
 import com.mistakebook.ui.common.ReorderDragHandle
-import com.mistakebook.ui.common.moveItem
-import com.mistakebook.ui.common.orderByIds
 import com.mistakebook.ui.settings.BlankHeightRow
 
 @Composable
@@ -259,91 +254,7 @@ fun PrintOptionsPanel(
 }
 
 @Composable
-fun PrintQuestionList(
-    questions: List<Question>,
-    selectedIds: Set<Long>,
-    subjectNames: Map<Long, String>,
-    onToggleSelect: (Long) -> Unit,
-    onReorderFinished: (List<Long>) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    if (questions.isEmpty()) {
-        EmptyState(
-            title = stringResource(R.string.print_empty),
-            subtitle = ""
-        )
-    } else {
-        val questionListState = rememberLazyListState()
-        var arrangedQuestionIds by remember { mutableStateOf<List<Long>?>(null) }
-        var draggedQuestionId by remember { mutableStateOf<Long?>(null) }
-        var dragOffsetPx by remember { mutableFloatStateOf(0f) }
-
-        val displayQuestions = remember(questions, arrangedQuestionIds) {
-            arrangedQuestionIds?.let { orderByIds(questions, it) { question -> question.id } }
-                ?: questions
-        }
-
-        fun beginQuestionDrag(id: Long) {
-            draggedQuestionId = id
-            dragOffsetPx = 0f
-            arrangedQuestionIds = displayQuestions.map { it.id }
-        }
-
-        fun updateQuestionDrag(delta: Float) {
-            val draggedId = draggedQuestionId ?: return
-            dragOffsetPx += delta
-            val layout = questionListState.layoutInfo
-            val draggedItem = layout.visibleItemsInfo.firstOrNull { it.key == draggedId } ?: return
-            val center = draggedItem.offset + draggedItem.size / 2f + dragOffsetPx
-            val target = layout.visibleItemsInfo.firstOrNull { item ->
-                val top = item.offset.toFloat()
-                val key = item.key as? Long
-                key != null && center >= top && center < top + item.size
-            } ?: return
-            val targetId = target.key as? Long ?: return
-            val order = arrangedQuestionIds ?: displayQuestions.map { it.id }
-            val fromIndex = order.indexOf(draggedId)
-            val toIndex = order.indexOf(targetId)
-            if (fromIndex >= 0 && toIndex >= 0 && fromIndex != toIndex) {
-                arrangedQuestionIds = moveItem(order, fromIndex, toIndex)
-                dragOffsetPx = 0f
-            }
-        }
-
-        fun finishQuestionDrag() {
-            arrangedQuestionIds?.let(onReorderFinished)
-            draggedQuestionId = null
-            dragOffsetPx = 0f
-        }
-
-        LazyColumn(
-            state = questionListState,
-            modifier = modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 12.dp, end = 12.dp, bottom = 96.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            itemsIndexed(displayQuestions, key = { _, item -> item.id }) { index, question ->
-                val subjectName = subjectNames[question.subjectId]
-                PrintRow(
-                    question = question,
-                    subjectName = subjectName,
-                    index = index + 1,
-                    checked = question.id in selectedIds,
-                    dragging = draggedQuestionId == question.id,
-                    onToggle = { onToggleSelect(question.id) },
-                    onReorderStart = { beginQuestionDrag(question.id) },
-                    onReorder = ::updateQuestionDrag,
-                    onReorderEnd = ::finishQuestionDrag
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PrintRow(
+internal fun PrintRow(
     question: Question,
     subjectName: String?,
     index: Int,
