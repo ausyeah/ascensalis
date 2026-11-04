@@ -596,7 +596,7 @@ internal fun StudyView(
                             // 右端直接压住右上角的星标/喇叭/收藏。用户截图报的
                             // 「长单词显示和上方UI冲突」就是这一处。
                             //
-                            // 修法（v0.0.109 用户拍板）：单词**水平居中、用满整行**，
+                            // 修法（v0.0.108 用户拍板）：单词**水平居中、用满整行**，
                             // 右上角那排图标靠「内容整体下移」让开，而不是靠宽度扣减。
                             //
                             // 上一版是「扣掉右边一条带子、单词在剩下的区域里居中」——
@@ -1398,7 +1398,7 @@ internal const val OPTION_MEANING_SLOT_QUIZ = 40
 internal const val OPTION_MEANING_SLOT_SENSE = 36
 
 /**
- * 题干往下让出的高度（dp），给右上角那排图标让位（v0.0.109）。
+ * 题干往下让出的高度（dp），给右上角那排图标让位（v0.0.108）。
  *
  * 三个 32dp 按钮贴在卡片顶缘，卡片内边距是 16dp——所以内容的第一个元素
  * 默认正好钻到图标底下。加 20dp（16 + 4 的间隙）之后，单词的**顶边**
@@ -1440,7 +1440,7 @@ internal const val WORD_HEADLINE_EM_PER_CHAR = 0.58f
  * 96dp，已超出本项目的设计包络（内边距写死 16/20dp、题干写死 36sp）。
  */
 internal fun wordHeadlineMaxWidthDp(cardContentWidthDp: Float): Float =
-    // v0.0.109：可用宽度就是整行（卡片内容区全宽）。
+    // v0.0.108：可用宽度就是整行（卡片内容区全宽）。
     // 右上角的图标不再从宽度里扣——它们靠「内容整体下移」让开，
     // 单词才能保持水平居中、长单词也才有整行可用。
     cardContentWidthDp.coerceAtLeast(96f)

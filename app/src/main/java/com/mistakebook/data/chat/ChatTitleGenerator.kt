@@ -59,7 +59,7 @@ class ChatTitleGenerator(
             stream = true
         )
 
-        // **走流式而不是 completeOnce**（v0.0.109 实测）：同一把 key、同一个模型，
+        // **走流式而不是 completeOnce**（v0.0.108 实测）：同一把 key、同一个模型，
         // 对话流式有内容，非流式的 message.content 却是空的——推理型服务在
         // 非流式路径上不吐正文。标题要的是「拿到字」，路径选错就永远是空的。
         val out = StringBuilder()
