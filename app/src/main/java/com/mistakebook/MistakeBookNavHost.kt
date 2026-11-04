@@ -24,6 +24,7 @@ import com.mistakebook.di.PendingTool
 import com.mistakebook.ui.capture.CaptureScreen
 import com.mistakebook.data.chat.ChatToolPrompts
 import com.mistakebook.ui.chat.ChatScreen
+import com.mistakebook.ui.chat.ChatTool
 import com.mistakebook.ui.crop.CropScreen
 import com.mistakebook.ui.detail.DetailScreen
 import com.mistakebook.ui.edit.EditScreen
@@ -241,10 +242,8 @@ fun MistakeBookNavHost(
                         val id = container.chatRepository.openFreeSession()
                         container.pendingTool = PendingTool(
                             sessionId = id,
-                            instruction = ChatToolPrompts.ASK,
-                            camera = true,
-                            autoSend = true,
-                            essay = false
+                            tool = ChatTool.PHOTO,
+                            instruction = ChatToolPrompts.ASK
                         )
                         navController.navigate(Routes.chat(null, id))
                     }

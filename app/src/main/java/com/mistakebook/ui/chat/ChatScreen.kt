@@ -338,12 +338,13 @@ fun ChatScreen(
     }
 
     // ② 拍题 / 作文批改要先拍照：会话就绪后自动拉起相机。
-    //    「拉起相机」**用掉即焚**：留着的话，下次进这条会话会凭空再弹一次相机——
-    //    用户点「英语翻译」却开了相机，就是这么来的。
+    //    **开不开相机由入口本身决定**（mine.tool.needsCamera），不是某个抄过来的开关——
+    //    用户点「英语翻译」却开了相机，根因就是「开不开相机」这件事被写了两遍。
+    //    「拉起相机」用掉即焚：留着的话，下次进这条会话会凭空再弹一次相机。
     LaunchedEffect(pendingTool, state.sessionId, state.loading) {
         val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
-        if (!mine.camera || state.loading) return@LaunchedEffect
-        container.pendingTool = mine.copy(camera = false)
+        if (!mine.tool.needsCamera || state.loading) return@LaunchedEffect
+        container.pendingTool = mine.copy(instruction = mine.instruction)
         if (state.pendingAttachments.isNotEmpty()) return@LaunchedEffect
         onOpenCamera()
     }
@@ -353,12 +354,13 @@ fun ChatScreen(
     //    用户自己按了发送——否则之后随手选一张图就会被静默发出去。
     LaunchedEffect(pendingTool, state.pendingAttachments) {
         val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
-        if (!mine.autoSend) return@LaunchedEffect
+        // 自动发送只属于「拍完就发」的入口（拍题 / 作文批改）
+        if (!mine.tool.needsCamera) return@LaunchedEffect
         val pending = state.pendingAttachments
         if (pending.isEmpty()) return@LaunchedEffect
         when {
             pending.any { it.status == AttachmentStatus.FAILED } ->
-                container.pendingTool = mine.copy(autoSend = false)
+                container.pendingTool = null
             pending.all { it.status == AttachmentStatus.READY } -> {
                 container.pendingTool = null
                 viewModel.send()
@@ -568,10 +570,8 @@ fun ChatScreen(
                         onSnapAsk = {
                             container.pendingTool = PendingTool(
                                 sessionId = state.sessionId,
-                                instruction = ChatToolPrompts.ASK,
-                                camera = true,
-                                autoSend = true,
-                                essay = false
+                                tool = ChatTool.PHOTO,
+                                instruction = ChatToolPrompts.ASK
                             )
                         }
                     )
@@ -668,10 +668,12 @@ fun ChatScreen(
                 onRemoveLibraryInjection = viewModel::removeLibraryInjection,
                 onTextChange = viewModel::onInputChange,
                 onSend = {
-                    // 手动发送 = 自动发送意图作废（审查修正：否则稍后选图会被静默发出）
+                    // 手动发送 = 自动发送意图作废（否则稍后选图会被静默发出）。
+                    // 没有「只关自动发送」这个开关可关了——那件事由入口本身决定，
+                    // 所以这里直接把整包交接清掉：入口是它自己带来的。
                     val mine = container.pendingTool
                     if (mine != null && mine.sessionId == state.sessionId) {
-                        container.pendingTool = mine.copy(autoSend = false)
+                        container.pendingTool = null
                     }
                     viewModel.send()
                 },

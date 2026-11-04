@@ -6,6 +6,7 @@ import com.mistakebook.data.ImageImporter
 import com.mistakebook.data.backup.BackupManager
 import com.mistakebook.data.local.MistakeBookDatabase
 import com.mistakebook.data.prefs.SettingsStore
+import com.mistakebook.ui.chat.ChatTool
 import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.data.repos.CaptureTaskRepository
 import com.mistakebook.data.repos.NotebookRepository
@@ -498,7 +499,7 @@ class AppContainer(context: Context) {
      * 生命周期：指令在会话装载时消费（置 null，但保留其余意图）；
      * 自动发送完成或用户手动发送时整包清掉。
      */
-    var pendingTool: PendingTool? by mutableStateOf(null)
+    internal var pendingTool: PendingTool? by mutableStateOf(null)
 
     /**
      * 对话连拍（T2）已裁完成果的暂存队列。
@@ -567,20 +568,20 @@ class AppContainer(context: Context) {
 /**
  * 功能入口的交接包，见 [AppContainer.pendingTool]。
  *
- * [camera] 与 [autoSend] 是**两个独立、用掉即焚**的意图，不是同一个开关：
- * - 「先拍照」在相机拉起的那一刻就作废。留着的话，下次进这条会话
- *   （或误入别的会话）会凭空再弹一次相机——用户点「英语翻译」却开了相机，
- *   就是这么来的；
- * - 「拍完自动发送」在真发出去（或发不了）时才作废。
+ * ## 为什么只有「哪个入口」，没有「要不要开相机」这种开关（v0.0.101 改）
+ *
+ * 原来这里有两个布尔量（camera / autoSend），由调用方从 `tool.needsCamera`
+ * 抄一份过来。抄错的代价很直接：**点「英语翻译」却拉开了相机**——
+ * 因为「开不开相机」这件事在两个地方各写了一遍，只要有一处没跟上，
+ * 纯文字入口就会去碰相机。
+ *
+ * 现在只带入口本身，「开不开相机」「要不要自动发送」一律从
+ * `ChatTool.needsCamera` 推导：入口是唯一真相，抄写这个动作本身消失了。
  */
-data class PendingTool(
+internal data class PendingTool(
     val sessionId: Long,
+    /** 哪个功能入口带进来的。 */
+    val tool: ChatTool,
     /** 以 SYSTEM 消息注入的隐藏指令；装载后置 null，其余意图继续有效。 */
-    val instruction: String?,
-    /** 要先拍照：对话页就绪后自动拉起相机。拉起即作废。 */
-    val camera: Boolean,
-    /** 拍完自动发送：附件全部就绪即发送。发送或失败后作废。 */
-    val autoSend: Boolean,
-    /** 作文批改的两段式拍摄提示（先题目后作文）。 */
-    val essay: Boolean
+    val instruction: String?
 )

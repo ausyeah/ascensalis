@@ -593,7 +593,7 @@ fun CaptureScreen(
                 text = stringResource(
                     when {
                         // 作文批改是两段式：先题目要求再作文，不提示用户会只拍一张
-                        container.pendingTool?.essay == true -> R.string.capture_hint_essay
+                        container.pendingTool?.tool == com.mistakebook.ui.chat.ChatTool.ESSAY -> R.string.capture_hint_essay
                         isChatPurpose -> R.string.capture_hint_chat
                         else -> R.string.capture_hint_question
                     }
