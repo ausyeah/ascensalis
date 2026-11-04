@@ -36,8 +36,13 @@
         </intent>
     </queries>
 
+    <!-- 允许明文 HTTP：本应用只连**用户自己填的**端点，而本地大模型服务
+         （Ollama / LM Studio 等）只有 http://127.0.0.1 或局域网地址。
+         平台默认禁止明文会让这类配置在传输层静默失败（NETWORK），
+         用户无从排查。https 依然是文档里推荐的形式。 -->
     <application
         android:name=".MistakeBookApp"
+        android:usesCleartextTraffic="true"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
