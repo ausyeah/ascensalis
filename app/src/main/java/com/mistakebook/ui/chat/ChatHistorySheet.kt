@@ -69,6 +69,7 @@ import com.mistakebook.R
 import com.mistakebook.di.AppContainer
 import com.mistakebook.di.PendingTool
 import com.mistakebook.ui.common.containerViewModel
+import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.ui.common.SwipeRevealSpring
 import com.mistakebook.ui.common.swipeRevealContentAlpha
@@ -490,46 +491,6 @@ private fun SwipeableChatRow(
                 onRename = onRename,
                 onDelete = onDelete,
                 onTogglePin = onTogglePin
-            )
-        }
-    }
-}
-
-/** 右滑露出的一块操作（图标 + 文字）。 */
-@Composable
-private fun SwipeActionBlock(
-    width: androidx.compose.ui.unit.Dp,
-    color: androidx.compose.ui.graphics.Color,
-    contentColor: androidx.compose.ui.graphics.Color,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .width(width)
-            .fillMaxHeight()
-            .background(color)
-            // 滑开前点不到这里（被卡片挡住），显式禁用更保险
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = contentColor,
-                modifier = Modifier.size(24.dp)
-            )
-            Text(
-                text = label,
-                color = contentColor,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1
             )
         }
     }

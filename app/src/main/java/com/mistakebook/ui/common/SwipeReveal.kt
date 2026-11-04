@@ -1,10 +1,26 @@
 package com.mistakebook.ui.common
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.ui.unit.Dp
-import kotlin.math.abs
-import androidx.compose.ui.unit.dp
 
 /**
  * 左滑露出操作区的公共口径（错题卡片与对话历史共用）。
@@ -53,4 +69,50 @@ internal fun swipeRevealProgress(offsetPx: Float, revealWidthPx: Float): Float {
 internal fun swipeRevealContentAlpha(progress: Float): Float {
     val start = SwipeRevealFadeInStart
     return ((progress - start) / (1f - start)).coerceIn(0f, 1f)
+}
+
+/**
+ * 滑动露出的**操作块**：整块色底 + 居中的图标和一行小字。
+ *
+ * 错题卡片、对话历史、归档页三处共用同一颗组件——同一套交互在不同页面
+ * 各画一份，颜色、字号、图标大小迟早各长各样（用户就是对着对话历史的
+ * 版本说「其他页面的太丑了」）。
+ */
+@Composable
+internal fun SwipeActionBlock(
+    width: Dp,
+    color: Color,
+    contentColor: Color,
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .width(width)
+            .fillMaxHeight()
+            .background(color)
+            // 滑开前点不到这里（被卡片挡住），显式禁用更保险
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = contentColor,
+                modifier = Modifier.size(24.dp)
+            )
+            Text(
+                text = label,
+                color = contentColor,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+        }
+    }
 }

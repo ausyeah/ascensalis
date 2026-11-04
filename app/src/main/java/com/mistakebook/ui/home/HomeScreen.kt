@@ -115,6 +115,7 @@ import com.mistakebook.ui.common.ReorderDragHandle
 import com.mistakebook.ui.common.moveItem
 import com.mistakebook.ui.common.orderByIds
 import com.mistakebook.ui.common.containerViewModel
+import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.ui.common.SwipeRevealSpring
 import com.mistakebook.ui.common.swipeRevealContentAlpha
@@ -815,71 +816,30 @@ private fun SwipeableQuestionCard(
                     alpha = swipeRevealContentAlpha(progress)
                 }
         ) {
-            // 置顶：与对话历史的左滑三选项同一套语义。常翻的题不该被新题冲走。
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(SwipeActionBlockWidth)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .clickable(enabled = revealed, onClick = { close(); onPin() }),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PushPin,
-                        contentDescription = stringResource(
-                            if (question.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
-                        ),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(26.dp)
-                    )
-                    Text(
-                        text = stringResource(
-                            if (question.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
-                    )
+            // 置顶：与对话历史的左滑同一颗组件、同一套观感（v0.0.112 用户拍板）。
+            SwipeActionBlock(
+                width = SwipeActionBlockWidth,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                icon = Icons.Default.PushPin,
+                label = stringResource(
+                    if (question.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
+                ),
+                enabled = revealed,
+                onClick = { close(); onPin() }
+            )
+            SwipeActionBlock(
+                width = SwipeActionBlockWidth,
+                color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                icon = Icons.Default.Delete,
+                label = stringResource(R.string.archive_action),
+                enabled = revealed,
+                onClick = {
+                    close()
+                    onDelete()
                 }
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(SwipeActionBlockWidth)
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .clickable(
-                        // 滑开前点不到这里（被卡片挡住），但显式禁用更保险：
-                        // 万一将来层级调整，也不会变成「随手一点就删」。
-                        enabled = revealed,
-                        onClick = {
-                            close()
-                            onDelete()
-                        }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = stringResource(R.string.archive_action),
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.size(26.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.archive_action),
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
-                    )
-                }
-            }
+            )
         }
 
         // 上层：卡片，跟随手势位移。

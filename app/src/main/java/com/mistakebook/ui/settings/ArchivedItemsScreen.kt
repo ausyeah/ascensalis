@@ -57,6 +57,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
+import com.mistakebook.ui.common.SwipeActionBlock
+import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.data.local.entities.Question
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.MasteryStatus
@@ -286,7 +288,7 @@ private fun ArchiveSwipeRow(
     content: @Composable () -> Unit
 ) {
     val density = LocalDensity.current
-    val revealWidthPx = with(density) { (SwipeActionWidth * 2).toPx() }
+    val revealWidthPx = with(density) { (SwipeActionBlockWidth * 2).toPx() }
     // 用纯 State + 横向手势，不用 Animatable：
     // 松手直接归位（开或关），少一层动画状态机，也就少一类「手势与动画抢状态」的坑。
     var offset by remember { mutableFloatStateOf(0f) }
@@ -297,21 +299,25 @@ private fun ArchiveSwipeRow(
             modifier = Modifier.align(Alignment.CenterEnd),
             horizontalArrangement = Arrangement.End
         ) {
-            ArchiveAction(
-                container = MaterialTheme.colorScheme.primaryContainer,
-                content = MaterialTheme.colorScheme.onPrimaryContainer,
+            SwipeActionBlock(
+                width = SwipeActionBlockWidth,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 icon = Icons.Default.Restore,
                 label = stringResource(R.string.archived_restore),
+                enabled = true,
                 onClick = {
                     offset = 0f
                     scope.launch { onRestore() }
                 }
             )
-            ArchiveAction(
-                container = MaterialTheme.colorScheme.errorContainer,
-                content = MaterialTheme.colorScheme.onErrorContainer,
+            SwipeActionBlock(
+                width = SwipeActionBlockWidth,
+                color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 icon = Icons.Default.Delete,
                 label = stringResource(R.string.archived_delete),
+                enabled = true,
                 onClick = {
                     offset = 0f
                     scope.launch { onDelete() }
@@ -337,41 +343,6 @@ private fun ArchiveSwipeRow(
         }
     }
 }
-
-@Composable
-private fun ArchiveAction(
-    container: Color,
-    content: Color,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(SwipeActionWidth)
-            .fillMaxSize()
-            .background(container)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = content,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = label,
-            color = content,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1
-        )
-    }
-}
-
-private val SwipeActionWidth = 68.dp
 
 private val ARCHIVE_TIME_FMT: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm")
