@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RateReview
@@ -83,14 +82,6 @@ internal enum class ChatTool(
         needsLlm = true,
         needsOcr = false
     ),
-    DIAGNOSE(
-        labelRes = R.string.chat_tool_diagnose,
-        icon = Icons.Default.BugReport,
-        instruction = ChatToolPrompts.DIAGNOSE,
-        needsCamera = true,
-        needsLlm = true,
-        needsOcr = true
-    )
 }
 
 /**

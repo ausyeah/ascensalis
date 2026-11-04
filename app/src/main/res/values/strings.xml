@@ -553,7 +553,6 @@
     <string name="chat_tool_translate">英语翻译</string>
     <string name="chat_tool_essay">作文批改</string>
     <string name="chat_tool_diagram">绘图生图</string>
-    <string name="chat_tool_diagnose">错因诊断</string>
     <string name="home_snap_ask">拍题讲解</string>
     <string name="swipe_pin_action">置顶</string>
     <string name="swipe_unpin_action">取消置顶</string>

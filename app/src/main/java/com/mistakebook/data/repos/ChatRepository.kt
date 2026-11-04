@@ -546,7 +546,7 @@ class ChatRepository(
         val systemContext = buildString {
             if (questionId != null) append(buildQuestionContext(questionId).orEmpty())
             // 功能入口的隐藏指令（v0.0.99）：拍题讲解 / 英语翻译 / 作文批改 /
-            // 绘图生图 / 错因诊断各自的规则。
+            // 绘图生图等各个功能的规则。
             //
             // 必须在这里显式拼进去——assemble() 会把历史里的 SYSTEM 消息滤掉，
             // injected 的行也查不到，指令光躺在库里是到不了模型的。

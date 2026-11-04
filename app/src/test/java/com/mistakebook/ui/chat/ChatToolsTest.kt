@@ -20,21 +20,24 @@ import com.mistakebook.R
 class ChatToolsTest {
 
     @Test
-    fun `五个入口一个不多一个不少`() {
-        assertEquals(5, ChatTool.entries.size)
-        // 用户点名的六个
+    fun `四个入口一个不多一个不少`() {
+        assertEquals(4, ChatTool.entries.size)
+        // 用户点名的几个（错因诊断已按用户要求删掉）
         listOf(
             R.string.chat_tool_photo,
             R.string.chat_tool_translate,
             R.string.chat_tool_essay,
-            R.string.chat_tool_diagram,
-            R.string.chat_tool_diagnose
+            R.string.chat_tool_diagram
         ).forEach { res ->
             assertTrue(
                 "入口文案必须在清单里（res=$res）",
                 ChatTool.entries.any { it.labelRes == res }
             )
         }
+        assertFalse(
+            "错因诊断已按用户要求删掉，不许复活",
+            ChatTool.entries.any { it.name == "DIAGNOSE" }
+        )
     }
 
     @Test
@@ -62,11 +65,11 @@ class ChatToolsTest {
     }
 
     @Test
-    fun `要拍照的入口就三个`() {
-        // 拍题讲解 / 作文批改 / 错因诊断都从一张照片开始；
+    fun `要拍照的入口就两个`() {
+        // 拍题讲解 / 作文批改都从一张照片开始；
         // 翻译和绘图生图是纯文字/纯生成，不该拉起相机
         assertEquals(
-            setOf(ChatTool.PHOTO, ChatTool.ESSAY, ChatTool.DIAGNOSE),
+            setOf(ChatTool.PHOTO, ChatTool.ESSAY),
             ChatTool.entries.filter { it.needsCamera }.toSet()
         )
     }
@@ -81,7 +84,7 @@ class ChatToolsTest {
     @Test
     fun `配了模型没配识别时只有拍题受影响`() {
         // 翻译 / 批改 / 绘图生图都不依赖 OCR，识别没配不该连坐；
-        // 拍题讲解与错因诊断都要读照片，识别没配就是真的用不了
+        // 拍题讲解要读照片，识别没配就是真的用不了
         ChatTool.entries.filter { !it.needsOcr }.forEach { tool ->
             assertEquals(ChatToolBlock.READY, tool.blockReason(llmConfigured = true, ocrConfigured = false))
         }
