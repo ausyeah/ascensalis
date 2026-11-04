@@ -19,12 +19,13 @@
 
 ## 这是个什么 App
 
-给埋头苦读的人做的一个学习工具箱，目前有四件趁手的工具：
+给埋头苦读的人做的一个学习工具箱，目前有五件趁手的工具：
 
 | 工具 | 干什么用 |
 |---|---|
 | **错题本** | 拍张照、选好题目，App 自动认出文字和公式，大模型顺手帮你整理成标准题型；攒着随时翻，勾选几下就能排版成 A4 打印重做 |
 | **AI 对话** | 题目看不懂？直接问。支持多家大模型、能发图片和文档，回答边想边流出；也可以开自由会话随便聊 |
+| **记忆** | 让它长期记住你的背景、目标和偏好：一句话交给模型改写成分节文档，每轮对话自动带上 |
 | **背单词** | 四种考法随机出题（认词、选义、拼写、辨析），答错的自动收进复习队列，跟着记忆曲线安排下次见面 |
 | **番茄钟** | 专注计时 + 白噪音，按学科记录每次专注；今天学多久、这周什么走势、哪科投入最多，图表一看就知道 |
 
@@ -34,24 +35,20 @@
 
 ## 截图
 
-> 均为真实设备截图。
+> 均为 Android 模拟器实拍，示例内容为虚构数据。
 
-### 错题本：从拍照到打印
+### 错题本：拍照识别 → 题库 → 打印
 
 <table>
 <tr>
-<td align="center"><img src="docs/screenshots/home.jpg" width="320" alt="主页"><br><sub><b>主页</b> · 拍照 / 相册 / PDF / 手动录入</sub></td>
+<td align="center"><img src="docs/screenshots/home.jpg" width="320" alt="主页"><br><sub><b>主页</b> · 考试倒计时 / 搜索 / 拍题入口</sub></td>
+<td align="center"><img src="docs/screenshots/home-questions.jpg" width="320" alt="题库列表"><br><sub><b>题库</b> · 筛选 / 搜索 / 左滑置顶与归档</sub></td>
+<td align="center"><img src="docs/screenshots/question-detail.jpg" width="320" alt="题目详情"><br><sub><b>详情</b> · 原题图 / 题干 / 答案 / 解析</sub></td>
+</tr>
+<tr>
 <td align="center"><img src="docs/screenshots/crop-demo.jpg" width="320" alt="框选题目与裁切"><br><sub><b>裁切</b> · 拖框选题目、框外压暗、涂鸦遮蔽</sub></td>
-<td align="center"><img src="docs/screenshots/upload-1.jpg" width="320" alt="上传处理"><br><sub><b>解析中</b> · 上传 → 识别公式表格 → AI 整理</sub></td>
-</tr>
-<tr>
 <td align="center"><img src="docs/screenshots/edit-result-1.jpg" width="320" alt="识别结果编辑"><br><sub><b>核对</b> · 识别结果逐条编辑</sub></td>
-<td align="center"><img src="docs/screenshots/edit-result-2.jpg" width="320" alt="题目编辑"><br><sub><b>补全</b> · 知识点 / 错因 / 难度自己填</sub></td>
-<td align="center"><img src="docs/screenshots/question-detail.jpg" width="320" alt="题目详情"><br><sub><b>详情</b> · 题干 / 答案 / 解析对照</sub></td>
-</tr>
-<tr>
-<td align="center"><img src="docs/screenshots/home-questions.jpg" width="320" alt="主页题目排布"><br><sub><b>题库</b> · 筛选 / 搜索 / 撤销</sub></td>
-<td align="center"><img src="docs/screenshots/final-pdf.jpg" width="320" alt="最终 PDF"><br><sub><b>打印</b> · A4 排版完整呈现</sub></td>
+<td align="center"><img src="docs/screenshots/print-options.jpg" width="320" alt="打印选项"><br><sub><b>打印</b> · 字号字体 / 答案 / 留白重做</sub></td>
 </tr>
 </table>
 
@@ -59,22 +56,19 @@
 
 <table>
 <tr>
-<td align="center"><img src="docs/screenshots/chat-conversation.jpg" width="320" alt="AI 对话界面"><br><sub><b>对话</b> · 流式回复，可附图片和文档</sub></td>
-<td align="center"><img src="docs/screenshots/chat-history.jpg" width="320" alt="对话记录"><br><sub><b>会话</b> · 每题固定会话 + 自由会话</sub></td>
+<td align="center"><img src="docs/screenshots/chat-conversation.jpg" width="320" alt="AI 对话界面"><br><sub><b>对话</b> · 流式回复，公式逐条渲染</sub></td>
+<td align="center"><img src="docs/screenshots/temp-chat.jpg" width="320" alt="临时对话"><br><sub><b>临时对话</b> · 退出即归档，可再找回</sub></td>
+<td align="center"><img src="docs/screenshots/chat-history.jpg" width="320" alt="历史对话抽屉"><br><sub><b>历史</b> · 抽屉式列表，左滑置顶 / 重命名 / 归档</sub></td>
 </tr>
 </table>
 
-### 设置与打印预览
+### 记忆：让模型记住你的背景与偏好
 
 <table>
 <tr>
-<td align="center"><img src="docs/screenshots/settings-api.jpg" width="320" alt="API 配置"><br><sub><b>配置</b> · 填自己的 API Key</sub></td>
-<td align="center"><img src="docs/screenshots/settings-options.jpg" width="320" alt="其他设置"><br><sub><b>其他</b> · 图片处理 / 打印默认项 / 提醒</sub></td>
-<td align="center"><img src="docs/screenshots/print-options.jpg" width="320" alt="打印选项"><br><sub><b>打印选项</b> · 含原图 / 答案解析 / 留白重做</sub></td>
-</tr>
-<tr>
-<td align="center"><img src="docs/screenshots/browser-preview.jpg" width="320" alt="浏览器预览"><br><sub><b>预览</b> · 打印前先看排版</sub></td>
-<td align="center"><img src="docs/screenshots/system-print-1.jpg" width="320" alt="系统打印"><br><sub><b>打印</b> · 走系统打印，边距缩放可调</sub></td>
+<td align="center"><img src="docs/screenshots/memory.jpg" width="320" alt="记忆库"><br><sub><b>记忆库</b> · 整篇分节文档，输入一句话由模型改写</sub></td>
+<td align="center"><img src="docs/screenshots/archived-sessions.jpg" width="320" alt="已归档会话"><br><sub><b>已归档</b> · 归档会话可恢复 / 删除</sub></td>
+<td align="center"><img src="docs/screenshots/settings-options.jpg" width="320" alt="设置"><br><sub><b>设置</b> · 三类分组，可折叠</sub></td>
 </tr>
 </table>
 
@@ -132,7 +126,7 @@ app/src/main/java/com/mistakebook/
 
 ```bash
 ./gradlew assembleDebug        # 构建 Debug 包
-./gradlew testDebugUnitTest    # 跑单元测试（687 个用例）
+./gradlew testDebugUnitTest    # 跑单元测试（1500+ 用例）
 ./gradlew assembleRelease      # 构建正式签名包（需 local.properties 配好签名信息）
 ```
 
@@ -155,7 +149,8 @@ app/src/main/java/com/mistakebook/
 - **不预置任何 API Key**：公开安装包里没有任何人的密钥，Key 由使用者自己填；
 - **Key 只存本机**：加密存储，不进日志、不随备份外泄；
 - **仓库里没有密钥文件**：签名密钥本体只在维护者本地与 CI Secrets 里，仓库内只有占位模板；
-- **升级不丢数据**：正式签名发布，新旧版本直接覆盖安装。
+- **升级不丢数据**：正式签名发布，新旧版本直接覆盖安装；
+- **记忆只在本机**：记忆文档存在本地 DataStore，随卸载一并消失，不上传任何服务器。
 
 ## 许可证
 

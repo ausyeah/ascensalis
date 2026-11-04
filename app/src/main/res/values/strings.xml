@@ -51,7 +51,7 @@
     <string name="settings_memory_entry">记忆库</string>
     <string name="memory_title">记忆库</string>
     <string name="memory_empty">还没有记忆。
-在下面说要记住什么（如「我叫黄浩，在准备考研」），点右上角「整理」可以把杂乱内容重排成清晰的分节条目。</string>
+在下面说要记住什么（如「我叫小明，在准备考研」），点右上角「整理」可以把杂乱内容重排成清晰的分节条目。</string>
     <string name="memory_hint">告诉它要记住什么…</string>
     <string name="memory_add">记住</string>
     <string name="memory_delete">删除这条记忆</string>

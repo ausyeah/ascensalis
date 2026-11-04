@@ -58,12 +58,12 @@ class MemoryPromptsTest {
     fun `改写请求带当前全文与用户请求`() {
         val prompt = MemoryPrompts.rewriteUserPrompt(
             currentDoc = "个人背景\n- 用户是通信工程大四学生",
-            request = "记住：我叫黄浩"
+            request = "记住：我叫小明"
         )
         assertTrue("当前记忆要给全", prompt.contains("- 用户是通信工程大四学生"))
-        assertTrue("用户的请求要原样带上", prompt.contains("记住：我叫黄浩"))
+        assertTrue("用户的请求要原样带上", prompt.contains("记住：我叫小明"))
         // 空文档也要有明确的占位说明，模型才知道是从零建
-        val empty = MemoryPrompts.rewriteUserPrompt("", "记住：我叫黄浩")
+        val empty = MemoryPrompts.rewriteUserPrompt("", "记住：我叫小明")
         assertTrue(empty.contains("（还没有任何记忆）"))
     }
 
