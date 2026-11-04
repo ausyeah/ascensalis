@@ -564,12 +564,22 @@ class AppContainer(context: Context) {
     }
 }
 
-/** 功能入口的交接包，见 [AppContainer.pendingTool]。 */
+/**
+ * 功能入口的交接包，见 [AppContainer.pendingTool]。
+ *
+ * [camera] 与 [autoSend] 是**两个独立、用掉即焚**的意图，不是同一个开关：
+ * - 「先拍照」在相机拉起的那一刻就作废。留着的话，下次进这条会话
+ *   （或误入别的会话）会凭空再弹一次相机——用户点「英语翻译」却开了相机，
+ *   就是这么来的；
+ * - 「拍完自动发送」在真发出去（或发不了）时才作废。
+ */
 data class PendingTool(
     val sessionId: Long,
     /** 以 SYSTEM 消息注入的隐藏指令；装载后置 null，其余意图继续有效。 */
     val instruction: String?,
-    /** 要先拍照：对话页就绪后自动拉起相机，拍完自动发送。 */
+    /** 要先拍照：对话页就绪后自动拉起相机。拉起即作废。 */
+    val camera: Boolean,
+    /** 拍完自动发送：附件全部就绪即发送。发送或失败后作废。 */
     val autoSend: Boolean,
     /** 作文批改的两段式拍摄提示（先题目后作文）。 */
     val essay: Boolean

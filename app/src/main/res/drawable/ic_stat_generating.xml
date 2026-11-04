@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  前台服务通知的小图标（v0.0.99）。
+
+  ## 为什么不用桌面那张山景
+  通知小图标只有 24dp，系统还会把它当蒙版只取 alpha——那幅带雪线、云和星芒的
+  细节图缩到 24dp 就是一团糊。所以这里单独画一枚**纯剪影**的山：
+  三角形 + 一道山脊缺口，缩到 24dp 仍读得出是「山峰」。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2.5 L21.5,20.5 L2.5,20.5 Z M12,9.5 L8.6,15.5 L15.4,15.5 Z" />
+</vector>

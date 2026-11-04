@@ -326,32 +326,31 @@ fun ChatScreen(
     // 功能入口的交接包按 sessionId 认领（v0.0.98 审查修正）：屏幕上可能
     // 还挂着上一条会话，不认 id 的话指令会注错地方。
     val pendingTool = container.pendingTool
+
+    // ① 隐藏指令：会话就绪且一条消息都没有时落成 SYSTEM 消息。
+    //    只消费指令本身，拍照/自动发送两个意图留着——它们在拍摄回来后才用得上。
     LaunchedEffect(pendingTool, state.sessionId, state.loading) {
         val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
-        if (state.loading) return@LaunchedEffect
-        if (state.messages.isNotEmpty()) return@LaunchedEffect
-        // 只消费指令本身；拍照/自动发送意图留到拍完回来再用
+        if (state.loading || state.messages.isNotEmpty()) return@LaunchedEffect
+        if (mine.instruction.isNullOrBlank()) return@LaunchedEffect
         container.pendingTool = mine.copy(instruction = null)
-        viewModel.installInstruction(mine.instruction.orEmpty())
+        viewModel.installInstruction(mine.instruction)
     }
 
-    // 拍题 / 作文批改要先拍照：会话就绪后自动拉起相机，一次组合只拉一次。
-    var cameraAutoOpened by rememberSaveable(state.sessionId) { mutableStateOf(false) }
+    // ② 拍题 / 作文批改要先拍照：会话就绪后自动拉起相机。
+    //    「拉起相机」**用掉即焚**：留着的话，下次进这条会话会凭空再弹一次相机——
+    //    用户点「英语翻译」却开了相机，就是这么来的。
     LaunchedEffect(pendingTool, state.sessionId, state.loading) {
         val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
-        if (!mine.autoSend || cameraAutoOpened) return@LaunchedEffect
-        if (state.loading) return@LaunchedEffect
+        if (!mine.camera || state.loading) return@LaunchedEffect
+        container.pendingTool = mine.copy(camera = false)
         if (state.pendingAttachments.isNotEmpty()) return@LaunchedEffect
-        cameraAutoOpened = true
         onOpenCamera()
     }
 
-    // 拍完裁切回来、附件就绪即自动发送——「拍完直接发送」就该一步到位，
-    // 再让用户按一次发送等于把刚才省掉的步骤又加回去。
-    // 两个审查修出来的漏洞：
-    // - 有附件准备**失败**时 all{READY} 永不成立，发送意图必须撤防，
-    //   否则之后随手选一张图就会被静默发出去；
-    // - 用户手动按了发送，意图也应作废。
+    // ③ 拍完裁切回来、附件就绪即自动发送——「拍完直接发送」就该一步到位。
+    //    两种情况必须撤防：附件准备失败（all{READY} 永不成立）、
+    //    用户自己按了发送——否则之后随手选一张图就会被静默发出去。
     LaunchedEffect(pendingTool, state.pendingAttachments) {
         val mine = pendingTool?.takeIf { it.sessionId == state.sessionId } ?: return@LaunchedEffect
         if (!mine.autoSend) return@LaunchedEffect
@@ -359,7 +358,7 @@ fun ChatScreen(
         if (pending.isEmpty()) return@LaunchedEffect
         when {
             pending.any { it.status == AttachmentStatus.FAILED } ->
-                container.pendingTool = null
+                container.pendingTool = mine.copy(autoSend = false)
             pending.all { it.status == AttachmentStatus.READY } -> {
                 container.pendingTool = null
                 viewModel.send()
@@ -473,6 +472,10 @@ fun ChatScreen(
         )
     }
 
+    // 收键盘用：点左上角开抽屉时先把输入法收掉（用户反馈「键盘不会自动消失」）
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
     // 历史抽屉（v0.0.96）：右滑边缘或点左上角滑出，盖住大半屏。
     // ModalNavigationDrawer 自带边缘手势，不用自己写拖拽判定。
     val drawerState = rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
@@ -512,7 +515,15 @@ fun ChatScreen(
                 navigationIcon = {
                     // 左上角进历史（v0.0.96，用户指定的 ChatGPT 手机端布局）。
                     // 退出会话改由系统返回键/手势承担——顶栏这一格让给了更高频的「翻历史」。
-                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                    IconButton(
+                        onClick = {
+                            // 抽屉是「离开输入」的动作：先收键盘再拉开。
+                            // 不收的话键盘会留在抽屉下面，用户以为界面卡住了。
+                            keyboard?.hide()
+                            focusManager.clearFocus()
+                            scope.launch { drawerState.open() }
+                        }
+                    ) {
                         Icon(
                             Icons.Default.History,
                             contentDescription = stringResource(R.string.chat_list_title)
@@ -558,6 +569,7 @@ fun ChatScreen(
                             container.pendingTool = PendingTool(
                                 sessionId = state.sessionId,
                                 instruction = ChatToolPrompts.ASK,
+                                camera = true,
                                 autoSend = true,
                                 essay = false
                             )
@@ -656,7 +668,10 @@ fun ChatScreen(
                 onTextChange = viewModel::onInputChange,
                 onSend = {
                     // 手动发送 = 自动发送意图作废（审查修正：否则稍后选图会被静默发出）
-                    container.pendingTool = null
+                    val mine = container.pendingTool
+                    if (mine != null && mine.sessionId == state.sessionId) {
+                        container.pendingTool = mine.copy(autoSend = false)
+                    }
                     viewModel.send()
                 },
                 onStop = viewModel::stop,

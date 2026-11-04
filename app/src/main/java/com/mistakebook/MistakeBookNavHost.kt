@@ -242,6 +242,7 @@ fun MistakeBookNavHost(
                         container.pendingTool = PendingTool(
                             sessionId = id,
                             instruction = ChatToolPrompts.ASK,
+                            camera = true,
                             autoSend = true,
                             essay = false
                         )
@@ -650,6 +651,11 @@ fun MistakeBookNavHost(
                     // 删除是异步的，而 pop 之后 ChatScreen 的 rememberCoroutineScope
                     // 立刻被取消——在这里删（NavHost 的组合作用域比它活得久）才删得完。
                     val leaving = rawSession.takeIf { it != Routes.CHAT_FREE }
+                    // 退出时把这条会话的功能入口交接包作废：
+                    // 留着的话，下次进这条会话会凭空再弹一次相机
+                    container.pendingTool?.let { mine ->
+                        if (mine.sessionId == leaving) container.pendingTool = null
+                    }
                     if (leaving == null) {
                         popToHome()
                     } else {

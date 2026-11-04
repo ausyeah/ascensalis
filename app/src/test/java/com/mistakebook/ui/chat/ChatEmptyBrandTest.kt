@@ -20,25 +20,22 @@ import java.io.File
 class ChatEmptyBrandTest {
 
     @Test
-    fun `标志必须是纯白矢量而不是位图`() {
-        val mark = readSource("src/main/res/drawable/ic_app_mark.xml")
+    fun `标志是带透明通道的黑白剪影`() {
+        val mark = readSource("src/main/res/drawable-nodpi/ic_app_mark.png")
 
-        assertTrue("标志必须是 <vector>：位图换主题色时发灰、放大就糊", mark.contains("<vector"))
-        assertFalse("标志不许再用位图", mark.contains("<bitmap"))
-
-        // 纯白填充 + 运行时 tint：颜色是界面给的，不是画在素材里的。
-        // 逐个取出来验，而不是「文件里出现过白」——后者就算混进一个红色也照样通过。
-        val colors = Regex("android:(?:fill|stroke)Color=\"(#[0-9A-Fa-f]{8})\"")
-            .findAll(mark)
-            .map { it.groupValues[1] }
-            .toList()
-        assertTrue("标志里必须有填充或描边", colors.isNotEmpty())
-        colors.forEach { color ->
-            assertTrue(
-                "标志必须是单色（纯白或全透明），实际出现 $color —— 混入任何别的颜色，tint 就染不干净了",
-                color == "#FFFFFFFF" || color == "#00000000"
-            )
-        }
+        // 位图而非矢量：v0.0.99 换成用户指定的山景线稿——这种带雪线、云与
+        // 星芒的插画手写成路径不现实。资源仍是「黑 + alpha」，
+        // 界面按主题染色（浅色墨黑、深色纸白）。
+        assertTrue("标志必须是 PNG 资源", mark.isNotEmpty())
+        assertFalse(
+            "矢量版本已换成山景位图，两边同时存在会变成重复资源",
+            File("src/main/res/drawable/ic_app_mark.xml").exists() ||
+                File("app/src/main/res/drawable/ic_app_mark.xml").exists()
+        )
+        assertTrue(
+            "桌面图标前景必须是同一枚山的白标版本",
+            File("src/main/res/drawable-nodpi/ic_launcher_foreground.png").exists()
+        )
     }
 
     @Test

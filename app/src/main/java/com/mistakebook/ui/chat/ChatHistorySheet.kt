@@ -228,6 +228,9 @@ internal fun ChatHistorySheet(
                             container.pendingTool = PendingTool(
                                 sessionId = sessionId,
                                 instruction = tool.instruction,
+                                // 只有「要先拍照」的入口才带相机与自动发送；
+                                // 英语翻译 / 绘图生图是纯文字，绝不能碰相机
+                                camera = tool.needsCamera,
                                 autoSend = tool.needsCamera,
                                 essay = tool == ChatTool.ESSAY
                             )

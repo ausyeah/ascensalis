@@ -536,6 +536,10 @@ class ChatViewModel(
                     val overflow = isContextOverflowError(snap.errorText)
                     _state.value = current.copy(
                         isStreaming = false,
+                        // 终态要把 id 一起清掉：留着它，下一轮的总线快照会被
+                        // 「只认同一条消息」的守卫当成别人的快照丢掉——
+                        // 表现是「正在生成，却看不到停止按钮」。
+                        streamingMessageId = null,
                         streamingContent = snap.content,
                         generationStage = null,
                         truncated = snap.truncated,
@@ -1160,6 +1164,11 @@ class ChatViewModel(
         // 记下起点：助手消息是服务启动后才插库的，这里给「迟迟没进库」
         // 的兜底判定一个参照点。
         streamingStartedAt = System.currentTimeMillis()
+        // **乐观置位 isStreaming**：主按钮的图标完全由它决定——
+        // 不置的话，从点发送到第一条总线快照送达（几百毫秒到几秒）之间，
+        // 按钮显示的是灰色的「发送」，用户看着像没反应；
+        // 真出问题时下面的 onFailure 会把它复位。
+        _state.value = _state.value.copy(isStreaming = true)
         runCatching {
             ChatGenerationService.start(
                 context = appContext,

@@ -220,6 +220,27 @@ interface ChatDao {
     @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId AND injected = 1 LIMIT 1")
     suspend fun findInjectedMessage(sessionId: Long): ChatMessage?
 
+    /**
+     * 找已注入的**功能指令**消息（v0.0.99）。
+     *
+     * 与 [findInjectedMessage] 的区别：那条取的是「第一条注入消息」，
+     * 可能是题目上下文。这里要的是**没有题目 id 的那条**——功能入口注入的
+     * 隐藏指令（【…模式】开头）。
+     *
+     * ## 为什么需要单独一条查询
+     * 功能指令必须**进请求**：assemble() 会把历史里的 SYSTEM 消息全滤掉
+     * （它们是「给模型看」而不是「用户说的话」），[messagesExcludingInjected]
+     * 也把 injected 的行排除。所以指令光入库是**永远到不了模型**的——
+     * 用户点「作文批改」，模型回一句「我的系统设定里没有批改作文专用」，
+     * 就是这个洞造成的。指令必须由 buildContext 显式取出来拼进 system。
+     */
+    @Query(
+        """SELECT * FROM chat_messages
+           WHERE sessionId = :sessionId AND injected = 1 AND questionId IS NULL
+           ORDER BY id DESC LIMIT 1"""
+    )
+    suspend fun findInjectedToolInstruction(sessionId: Long): ChatMessage?
+
     // ------------------------------------------------------------ 附件
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

@@ -641,7 +641,8 @@ class ChatGenerationService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            // 通知小图标用纯剪影的山：桌面那张带雪线云星，缩到 24dp 只会糊成一团
+            .setSmallIcon(R.drawable.ic_stat_generating)
             .setContentTitle(getString(R.string.chat_service_generating))
             .setContentText(getString(R.string.chat_service_background_hint))
             // 常驻、静默：它是用户主动发起的持续任务，不是一条「通知」

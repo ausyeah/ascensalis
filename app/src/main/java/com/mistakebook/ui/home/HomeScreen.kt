@@ -316,10 +316,15 @@ fun HomeScreen(
                     // v0.0.84 曾以「提示字会被裁掉」为由去掉；v0.0.98 用户点名要回
                     // 「搜索」二字。这次只放两个字，远比原来那句短，不存在裁切问题。
                     placeholder = {
+                        // maxLines=1 + softWrap=false 是硬约束：不加的话
+                        // 「搜索」两个字会被挤成上下两行（竖排），看着像渲染坏了。
                         Text(
                             text = stringResource(R.string.home_search_hint),
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                            style = MaterialTheme.typography.bodyMedium
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     },
                     leadingIcon = {
@@ -356,7 +361,7 @@ fun HomeScreen(
                 )
                 // 拍题讲解（v0.0.98）：紧挨搜索框——「看不懂一道题」和「搜一道题」
                 // 是同一个动作的两个分支，入口就该并排。
-                IconButton(onClick = onSnapAsk, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = onSnapAsk, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.PhotoCamera,
                         contentDescription = stringResource(R.string.home_snap_ask),
@@ -364,7 +369,7 @@ fun HomeScreen(
                         modifier = Modifier.size(22.dp)
                     )
                 }
-                IconButton(onClick = onOpenPrint, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = onOpenPrint, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.Print,
                         contentDescription = stringResource(R.string.home_action_print),
@@ -375,7 +380,7 @@ fun HomeScreen(
                 // 会话：一颗带加号的对话气泡，点下去直接进新对话（ChatGPT 手机端的做法）。
                 // 以前这颗进的是「对话记录」，用户得先看一页列表再点新对话——
                 // 两步都落不到「我要问点东西」这个唯一目的上。
-                IconButton(onClick = onNewChat, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = onNewChat, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.AddComment,
                         contentDescription = stringResource(R.string.chat_new_conversation),
@@ -384,7 +389,7 @@ fun HomeScreen(
                     )
                 }
                 // AI 学习周报：诊断 + 建议，与打印/对话并列的轻量入口
-                IconButton(onClick = { showWeeklyReport = true }, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = { showWeeklyReport = true }, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.Insights,
                         contentDescription = stringResource(R.string.weekly_report_title),
@@ -393,7 +398,7 @@ fun HomeScreen(
                     )
                 }
                 // 思维导图（F4）：知识体系 + 薄弱分支标红
-                IconButton(onClick = { showMindmap = true }, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = { showMindmap = true }, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.AccountTree,
                         contentDescription = stringResource(R.string.mindmap_title),
@@ -402,7 +407,7 @@ fun HomeScreen(
                     )
                 }
                 // 错题统计（F5）：错因/难度/学科/知识点分布
-                IconButton(onClick = { showStats = true }, modifier = Modifier.size(40.dp)) {
+                IconButton(onClick = { showStats = true }, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.BarChart,
                         contentDescription = stringResource(R.string.stats_title),
