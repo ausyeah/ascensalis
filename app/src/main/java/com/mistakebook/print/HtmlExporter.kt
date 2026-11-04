@@ -1,5 +1,7 @@
 package com.mistakebook.print
 
+import com.mistakebook.data.prefs.AppFont
+
 import android.graphics.BitmapFactory
 import android.util.Base64
 import com.mistakebook.math.MathRenderer
@@ -66,7 +68,7 @@ class HtmlExporter(private val mathRenderer: MathRenderer) {
                     append("""<link rel="stylesheet" href="katex.min.css">""")
                     append("""<script src="katex.min.js"></script>""")
                 }
-                append("<style>").append(CSS).append("</style>")
+                append("<style>").append(css(doc.options.fontScale.scale, doc.options.fontFamily)).append("</style>")
                 append("</head><body>")
                 append("<h1>").append(escape(doc.title)).append("</h1>")
                 append("<p class=\"meta\">共 ").append(doc.cards.size)
@@ -255,7 +257,9 @@ class HtmlExporter(private val mathRenderer: MathRenderer) {
         Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault())
             .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
 
-    private companion object {
+    // internal 而非 private：打印的字号/字体映射是**纯函数**，
+    // 单测要能直接断言「某个字体族映射到哪一族」「样式表里有没有漏掉的写死字号」。
+    internal companion object {
         const val DOCTYPE = "<!DOCTYPE html>"
 
         /**
@@ -291,50 +295,81 @@ class HtmlExporter(private val mathRenderer: MathRenderer) {
          * 打印友好是硬要求：错题本导出来多半是要打印的，
          * 所以默认隐藏答案解析栏由 CSS 控制，且分页时不把一道题切成两页。
          */
+        /**
+         * 打印字体栈（纯函数，单测见 PrintFontTest）。
+         *
+         * 每一档都从「系统里真有的字体」开始，末尾兜一个通用族——
+         * 打印机按名字找物理字体，找不到就退到后面的通用族，所以顺序有意义：
+         * 越具体越靠前。
+         */
+        internal fun htmlFontStack(font: AppFont): String = when (font) {
+            AppFont.SYSTEM ->
+                "-apple-system, \"PingFang SC\", \"Microsoft YaHei\", \"Source Han Sans SC\", sans-serif"
+            AppFont.SERIF ->
+                "\"Songti SC\", SimSun, \"Noto Serif CJK SC\", \"Source Han Serif SC\", serif"
+            AppFont.MONOSPACE ->
+                "\"SFMono-Regular\", Consolas, \"Courier New\", monospace"
+        }
+
+        /**
+         * 打印样式表。
+         *
+         * @param scale 字号倍数（1.0 = 原版式）。
+         * @param fontFamily 字体族。
+         *
+         * 字号走 CSS 变量 `--fs` 而不是逐条改 px：样式表里散着七八个字号，
+         * 逐条改迟早漏一个（漏掉的那个在「大」档下就会明显偏小）。
+         * 一个变量统管全局，漏不掉。
+         */
+        fun css(scale: Float, fontFamily: AppFont): String {
+            val factor = scale.toString()
+            return (":root { --fs: $factor; }\n" + CSS).replace("__FONT_STACK__", htmlFontStack(fontFamily))
+        }
+
         val CSS = """
             /* 打印提示：只在屏幕上出现，打印时藏起来 */
             .print-hint {
               color: #888;
-              font-size: 12px;
+              font-size: calc(12px * var(--fs));
               margin: 0 0 16px;
             }
 
             @page { size: A4; margin: 12mm 12mm; }
             * { box-sizing: border-box; }
             body {
-              font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", sans-serif;
+              font-family: __FONT_STACK__;
               /* v0.0.57：用户反馈打印出来「整体太大、一页装不下几道题」。
                  统一把字号/行高/间距压一档，仍是同一套 HTML→PDF（WYSIWYG）。 */
-              font-size: 13px; line-height: 1.5; color: #1a1a1a; margin: 0; padding: 14px;
+              font-size: calc(13px * var(--fs)); line-height: 1.5; color: #1a1a1a; margin: 0; padding: 14px;
               max-width: 720px;
             }
-            h1 { font-size: 18px; margin: 0 0 3px; }
-            .meta { color: #888; font-size: 11px; margin: 0 0 14px; }
+            h1 { font-size: calc(18px * var(--fs)); margin: 0 0 3px; }
+            .meta { color: #888; font-size: calc(11px * var(--fs)); margin: 0 0 14px; }
             .card {
               border: 1px solid #e6e6e6; border-left: 4px solid #d0d0d0;
               border-radius: 6px; padding: 10px 12px; margin: 0 0 12px;
               page-break-inside: avoid; break-inside: avoid;
             }
-            h2 { font-size: 13px; font-weight: 600; margin: 0 0 7px; color: #333; }
-            .stem { font-size: 13px; }
+            h2 { font-size: calc(13px * var(--fs)); font-weight: 600; margin: 0 0 7px; color: #333; }
+            .stem { font-size: calc(13px * var(--fs)); }
             .options { padding-left: 20px; margin: 6px 0; }
             .options li { margin: 2px 0; }
             .answer, .analysis {
               margin-top: 8px; padding-top: 6px; border-top: 1px dashed #e0e0e0;
-              font-size: 12.5px; color: #444;
+              font-size: calc(12.5px * var(--fs)); color: #444;
             }
             .tag {
-              display: inline-block; font-size: 10px; color: #fff; background: #8a8a8a;
+              display: inline-block; font-size: calc(10px * var(--fs)); color: #fff; background: #8a8a8a;
               border-radius: 3px; padding: 1px 6px; margin-right: 6px; vertical-align: 1px;
             }
             figure { margin: 8px 0; text-align: center; }
             figure img { max-width: 50%; }
-            figcaption { font-size: 10.5px; color: #999; margin-top: 3px; }
+            figcaption { font-size: calc(10.5px * var(--fs)); color: #999; margin-top: 3px; }
             .blank { margin-top: 8px; border-bottom: 1px dashed #ddd; }
             img.formula { vertical-align: middle; margin: 0 2px; }
             img.formula.block { display: block; margin: 6px auto; }
             code.latex {
-              font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px;
+              font-family: "SFMono-Regular", Consolas, monospace; font-size: calc(11px * var(--fs));
               background: #f6f6f6; padding: 1px 4px; border-radius: 3px;
             }
             math { font-size: 1em; }

@@ -616,6 +616,9 @@
     <string name="export_format_pdf_short">PDF</string>
     <string name="export_format_html">HTML（单文件·浏览器打开）</string>
     <string name="export_format_html_short">HTML</string>
+    <!-- 打印页的字号/字体（v0.0.99）：档位文案复用设置页那几条 -->
+    <string name="print_font_size">字号</string>
+    <string name="print_font_family">字体</string>
     <string name="print_export_format">导出格式</string>
 
     <!-- ========== 思考过程（v0.0.9） ========== -->

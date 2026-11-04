@@ -137,6 +137,9 @@ class SettingsStore(context: Context) {
             printShowAnswer = prefs[KEY_PRINT_ANSWER] ?: false,
             printBlankRedo = prefs[KEY_PRINT_BLANK] ?: true,
             printBlankHeightPt = prefs[KEY_PRINT_BLANK_PT] ?: 100,
+            // 打印专用：与屏幕上的字号/字体各存各的（见 SettingsSnapshot 的说明）
+            printFontScale = FontScale.fromKey(prefs[KEY_PRINT_FONT_SCALE]),
+            printFontFamily = AppFont.fromKey(prefs[KEY_PRINT_FONT_FAMILY]),
             ocrStrength = prefs[KEY_OCR_STRENGTH] ?: legacyStrength(prefs),
             reviewReminderEnabled = prefs[KEY_REMINDER_ON] ?: true,
             reminderHour = prefs[KEY_REMINDER_HOUR] ?: 20,
@@ -577,6 +580,12 @@ class SettingsStore(context: Context) {
 
     suspend fun setPrintBlankHeightPt(value: Int) = editInt(KEY_PRINT_BLANK_PT, value)
 
+    /** 打印专用字号（v0.0.99）。写入即生效：下次导出按新字号排版。 */
+    suspend fun setPrintFontScale(value: FontScale) = editString(KEY_PRINT_FONT_SCALE, value.name)
+
+    /** 打印专用字体（v0.0.99）。 */
+    suspend fun setPrintFontFamily(value: AppFont) = editString(KEY_PRINT_FONT_FAMILY, value.name)
+
     // ===== 复习提醒 =====
 
     suspend fun setReviewReminderEnabled(value: Boolean) = editBoolean(KEY_REMINDER_ON, value)
@@ -762,6 +771,12 @@ class SettingsStore(context: Context) {
         val KEY_OCR_STRENGTH = intPreferencesKey("ocr_strength")
         val KEY_PRINT_BLANK = booleanPreferencesKey("print_blank_redo")
         val KEY_PRINT_BLANK_PT = intPreferencesKey("print_blank_height_pt")
+
+        /** 打印专用字号（v0.0.99）：存枚举名，认不出回默认。 */
+        val KEY_PRINT_FONT_SCALE = stringPreferencesKey("print_font_scale")
+
+        /** 打印专用字体（v0.0.99）：存枚举名，认不出回默认。 */
+        val KEY_PRINT_FONT_FAMILY = stringPreferencesKey("print_font_family")
         val KEY_REMINDER_ON = booleanPreferencesKey("review_reminder_enabled")
         val KEY_REMINDER_HOUR = intPreferencesKey("reminder_hour")
         val KEY_REMINDER_MINUTE = intPreferencesKey("reminder_minute")

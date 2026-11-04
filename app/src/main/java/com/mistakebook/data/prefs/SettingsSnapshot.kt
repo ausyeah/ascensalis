@@ -149,6 +149,19 @@ data class SettingsSnapshot(
     val printShowAnswer: Boolean = false,
     val printBlankRedo: Boolean = true,
     val printBlankHeightPt: Int = 100,
+
+    /**
+     * **打印专用**的字号档（v0.0.99）。
+     *
+     * 为什么不用全局的 [FontScale]：屏幕上的「特大」是为了看着舒服，
+     * 打印出来却是给小孩练的卷子——纸上要的字号和手上看的字号根本不是一回事，
+     * 绑在一起就没法各调各的。档位与全局共用同一套词汇（小/标准/大/特大），
+     * 但值各存各的。
+     */
+    val printFontScale: FontScale = FontScale.DEFAULT,
+
+    /** **打印专用**的字体（无衬线 / 衬线 / 等宽）。理由同 [printFontScale]。 */
+    val printFontFamily: AppFont = AppFont.DEFAULT,
     /**
      * 拍照/导入时是否做 OCR 对比度增强。
      * 0=关闭 1=轻度 2=标准(默认) 3=强力。

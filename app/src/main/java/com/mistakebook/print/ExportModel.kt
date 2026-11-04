@@ -1,5 +1,8 @@
 package com.mistakebook.print
 
+import com.mistakebook.data.prefs.AppFont
+import com.mistakebook.data.prefs.FontScale
+
 import com.mistakebook.data.local.displayTitle
 import com.mistakebook.data.local.entities.Question
 import com.mistakebook.data.local.figurePaths
@@ -100,7 +103,16 @@ data class ExportOptions(
     val blankRedoMode: Boolean = true,
 
     /** 留白高度（pt）。 */
-    val blankHeightPt: Int = 100
+    val blankHeightPt: Int = 100,
+
+    /**
+     * 打印字号档（v0.0.99）。与屏幕上的字号**各存各的**：
+     * 手上看着舒服的字号，和纸上给孩子练的字号，不是一回事。
+     */
+    val fontScale: FontScale = FontScale.DEFAULT,
+
+    /** 打印字体族（无衬线 / 衬线 / 等宽），同样是打印专用的。 */
+    val fontFamily: AppFont = AppFont.DEFAULT
 )
 
 /**

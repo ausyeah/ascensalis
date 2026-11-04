@@ -80,7 +80,11 @@ fun PrintScreen(container: AppContainer, onBack: () -> Unit) {
                 onShowAnswer = viewModel::setShowAnswer,
                 onBlankRedo = viewModel::setBlankRedo,
                 onBlankHeight = viewModel::setBlankHeight,
-                onFormatChange = viewModel::setFormat
+                onFormatChange = viewModel::setFormat,
+                fontScale = state.fontScale,
+                fontFamily = state.fontFamily,
+                onFontScaleChange = viewModel::setFontScale,
+                onFontFamilyChange = viewModel::setFontFamily
             )
 
             PrintQuestionList(

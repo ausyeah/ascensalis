@@ -42,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
+import com.mistakebook.data.prefs.AppFont
+import com.mistakebook.data.prefs.FontScale
 import com.mistakebook.data.local.displayTitle
 import com.mistakebook.data.local.entities.Question
 import com.mistakebook.data.local.entities.Subject
@@ -150,7 +152,13 @@ fun PrintOptionsPanel(
     onShowAnswer: (Boolean) -> Unit,
     onBlankRedo: (Boolean) -> Unit,
     onBlankHeight: (Int) -> Unit,
-    onFormatChange: (ExportFormat) -> Unit
+    onFormatChange: (ExportFormat) -> Unit,
+    /** 打印专用字号（v0.0.99）。 */
+    fontScale: FontScale = FontScale.DEFAULT,
+    /** 打印专用字体（v0.0.99）。 */
+    fontFamily: AppFont = AppFont.DEFAULT,
+    onFontScaleChange: (FontScale) -> Unit = {},
+    onFontFamilyChange: (AppFont) -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -176,6 +184,51 @@ fun PrintOptionsPanel(
                             selected = format == f,
                             onClick = { onFormatChange(f) },
                             label = { Text(stringResource(f.shortLabelRes)) }
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            // 字号与字体（v0.0.99）：打印专用的两档，与屏幕上的字号/字体各存各的——
+            // 手上看着舒服的字号，和纸上给孩子练的字号，本来就不是一回事。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = stringResource(R.string.print_font_size),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FontScale.entries.forEach { scale ->
+                        FilterChip(
+                            selected = fontScale == scale,
+                            onClick = { onFontScaleChange(scale) },
+                            label = { Text(stringResource(scale.printLabelRes)) }
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = stringResource(R.string.print_font_family),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AppFont.entries.forEach { family ->
+                        FilterChip(
+                            selected = fontFamily == family,
+                            onClick = { onFontFamilyChange(family) },
+                            label = { Text(stringResource(family.printLabelRes)) }
                         )
                     }
                 }
@@ -415,3 +468,26 @@ private fun SubjectDropdown(
         }
     }
 }
+
+
+/**
+ * 打印页的字号档标签（v0.0.99）。
+ *
+ * **复用设置页那几条文案**：同一个概念（小/标准/大/特大）在两处就该是同一句话，
+ * 复制一份新字符串只会在以后改词时漏掉一处。
+ */
+internal val FontScale.printLabelRes: Int
+    get() = when (this) {
+        FontScale.SMALL -> R.string.settings_font_size_small
+        FontScale.STANDARD -> R.string.settings_font_size_standard
+        FontScale.LARGE -> R.string.settings_font_size_large
+        FontScale.EXTRA_LARGE -> R.string.settings_font_size_extra_large
+    }
+
+/** 打印页的字体标签（v0.0.99），同样复用设置页的文案。 */
+internal val AppFont.printLabelRes: Int
+    get() = when (this) {
+        AppFont.SYSTEM -> R.string.settings_font_family_system
+        AppFont.SERIF -> R.string.settings_font_family_serif
+        AppFont.MONOSPACE -> R.string.settings_font_family_monospace
+    }

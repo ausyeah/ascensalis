@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mistakebook.data.local.entities.Question
 import com.mistakebook.data.local.entities.Subject
+import com.mistakebook.data.prefs.AppFont
+import com.mistakebook.data.prefs.FontScale
 import com.mistakebook.data.prefs.SettingsSnapshot
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.ErrorReason
@@ -39,6 +41,10 @@ data class PrintUiState(
     val blankHeight: Int = 100,
     /** 选中的导出格式，默认直接输出 A4 PDF。 */
     val format: ExportFormat = ExportFormat.PDF,
+    /** 打印专用字号档（v0.0.99）：与屏幕上的字号各存各的。 */
+    val fontScale: FontScale = FontScale.DEFAULT,
+    /** 打印专用字体族（v0.0.99）。 */
+    val fontFamily: AppFont = AppFont.DEFAULT,
     val generating: Boolean = false,
     val result: ExportPublisher.Output? = null,
     val skipped: List<String> = emptyList(),
@@ -63,6 +69,12 @@ private data class ExportOutcome(
 // `debounce` 与 `flatMapLatest` 都还是实验 API。
 // 原来的 @OptIn 加在了 PrintUiState 上，ViewModel 类本身没加，
 // 于是编译器在类的第 89 行就报「需要 opt-in」——两处都留着容易以为已处理。
+/** 打印的字号 + 字体：合成一个流，避免多占一个 combine 槽位。 */
+private data class FontChoice(
+    val scale: FontScale = FontScale.DEFAULT,
+    val family: AppFont = AppFont.DEFAULT
+)
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 class PrintViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -78,6 +90,8 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
     private val blankRedo = MutableStateFlow(true)
     private val blankHeight = MutableStateFlow(100)
     private val format = MutableStateFlow(ExportFormat.PDF)
+    private val fontScale = MutableStateFlow(FontScale.DEFAULT)
+    private val fontFamily = MutableStateFlow(AppFont.DEFAULT)
     private val generating = MutableStateFlow(false)
     private val result = MutableStateFlow<ExportPublisher.Output?>(null)
     private val skipped = MutableStateFlow<List<String>>(emptyList())
@@ -90,8 +104,16 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
             showAnswer.value = snapshot.printShowAnswer
             blankRedo.value = snapshot.printBlankRedo
             blankHeight.value = snapshot.printBlankHeightPt
+            // 打印的字号/字体是**打印专用**的（与屏幕上的各存各的）
+            fontScale.value = snapshot.printFontScale
+            fontFamily.value = snapshot.printFontFamily
         }
     }
+
+    /** 字号与字体合成一个流：两者总是一起被读，少一个 combine 槽位。 */
+    private val fontChoice: StateFlow<FontChoice> =
+        combine(fontScale, fontFamily) { scale, family -> FontChoice(scale, family) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FontChoice())
 
     private val questions: StateFlow<List<Question>> =
         combine(subjectId, status, keyword.debounce(300)) { s, st, kw -> Triple(s, st, kw) }
@@ -114,7 +136,9 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
     val uiState: StateFlow<PrintUiState> = combine(
         orderedQuestions,
         combine(container.subjectRepository.observeAll(), selected) { subjects, sel -> subjects to sel },
-        combine(includeImage, showAnswer) { image, answer -> image to answer },
+        combine(includeImage, showAnswer, fontChoice) { image, answer, fonts ->
+            Triple(image, answer, fonts)
+        },
         combine(blankRedo, blankHeight, generating) { redo, height, working ->
             Triple(redo, height, working)
         },
@@ -128,6 +152,8 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
             selected = subjectsAndSelection.second,
             includeImage = imageAndAnswer.first,
             showAnswer = imageAndAnswer.second,
+            fontScale = imageAndAnswer.third.scale,
+            fontFamily = imageAndAnswer.third.family,
             blankRedo = redoAndMore.first,
             blankHeight = redoAndMore.second,
             generating = redoAndMore.third,
@@ -233,7 +259,9 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
                 includeImage = state.includeImage,
                 showAnswer = state.showAnswer,
                 blankRedoMode = state.blankRedo,
-                blankHeightPt = state.blankHeight
+                blankHeightPt = state.blankHeight,
+                fontScale = state.fontScale,
+                fontFamily = state.fontFamily
             )
             val subjectNames = state.subjectNames
             val doc = ExportCardBuilder(subjectNames).buildDoc(
@@ -275,6 +303,23 @@ class PrintViewModel(private val container: AppContainer) : ViewModel() {
                 }
             )
         }
+    }
+
+    /**
+     * 改打印字号（v0.0.99）。
+     *
+     * **写进设置**：打印页改完字号就离开，回来还得是那个字号——
+     * 页面临时态的话每次都要重设一遍，打印一份卷子调三次。
+     */
+    fun setFontScale(value: FontScale) {
+        fontScale.value = value
+        viewModelScope.launch { container.settingsStore.setPrintFontScale(value) }
+    }
+
+    /** 改打印字体（v0.0.99）。同样落盘，理由同 [setFontScale]。 */
+    fun setFontFamily(value: AppFont) {
+        fontFamily.value = value
+        viewModelScope.launch { container.settingsStore.setPrintFontFamily(value) }
     }
 
     fun setFormat(value: ExportFormat) {

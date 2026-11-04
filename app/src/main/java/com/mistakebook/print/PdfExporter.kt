@@ -10,6 +10,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.text.TextPaint
+import com.mistakebook.data.prefs.AppFont
 import com.mistakebook.math.MathLayout
 import com.mistakebook.math.MathRenderer
 import com.mistakebook.math.RenderedMath
@@ -47,6 +48,19 @@ import java.util.Locale
  *      「第 N / M 页」，并完整绘制该页元素。
  */
 // 画布层没有 Context：重做区角标与页脚模板由调用方从 strings.xml 解析后注入。
+/**
+ * 打印字体族 → Android 的 Typeface 家族名（纯函数，单测见 PrintFontTest）。
+ *
+ * 为什么是这三个：它们是系统**自带**的字体，打印机上一定有对应的物理字体
+ * （无衬线≈雅黑/黑体，衬线≈宋体，等宽≈Courier），不必打包字体文件，
+ * 也不必在 PDF 里嵌字体——嵌了文件能大好几 MB。
+ */
+internal fun pdfTypefaceName(font: AppFont): String = when (font) {
+    AppFont.SYSTEM -> "sans-serif"
+    AppFont.SERIF -> "serif"
+    AppFont.MONOSPACE -> "monospace"
+}
+
 class PdfExporter(
     private val mathRenderer: MathRenderer,
     private val redoTagText: String,
@@ -70,6 +84,7 @@ class PdfExporter(
 
         // 字号常量
         const val FONT_TITLE_PT = 13f
+        // 实际字号 = 常量 × 用户选的倍数（见 printFontSizes）
         const val FONT_STEM_PT = 14f
         const val FONT_OPTION_PT = 12.5f
         const val FONT_ANSWER_PT = 12f
@@ -107,7 +122,7 @@ class PdfExporter(
         val textPaint = TextPaint().apply {
             isAntiAlias = true
             isSubpixelText = true
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = Typeface.create(pdfTypefaceName(doc.options.fontFamily), Typeface.NORMAL)
         }
         val linePaint = Paint().apply {
             isAntiAlias = true
@@ -131,10 +146,10 @@ class PdfExporter(
                 val canvas = page.canvas
 
                 // 绘制页眉
-                drawHeader(canvas, textPaint, linePaint, doc.title, dateStr)
+                drawHeader(canvas, textPaint, linePaint, doc.title, dateStr, doc.options.fontScale.scale)
 
                 // 绘制页脚（第 N / M 页）
-                drawFooter(canvas, textPaint, pageNumber, totalPages)
+                drawFooter(canvas, textPaint, pageNumber, totalPages, doc.options.fontScale.scale)
 
                 // 绘制本页所有元素
                 pageLayout.drawItems.forEach { item ->
@@ -301,6 +316,9 @@ class PdfExporter(
         mathMap: Map<String, RenderedMath?>,
         skipped: MutableList<String>
     ): List<PageLayout> {
+        // 字号倍数：用户选的档位在这里生效（1.0 = 原版式）。
+        // 公式尺寸按正文的字号等比缩放（见 layoutRichTokens 的 targetFontPx）。
+        val scale = doc.options.fontScale.scale
         val pages = mutableListOf<PageLayout>()
         var currentPage = PageLayout()
         pages.add(currentPage)
@@ -309,7 +327,7 @@ class PdfExporter(
         val textPaint = TextPaint().apply {
             isAntiAlias = true
             isSubpixelText = true
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = Typeface.create(pdfTypefaceName(doc.options.fontFamily), Typeface.NORMAL)
         }
 
         fun ensureSpace(neededHeight: Float): Float {
@@ -325,13 +343,13 @@ class PdfExporter(
             try {
                 // 卡片预留检查：标题 + 题干首行，避免孤题号遗留页底
                 val titleText = card.header + (card.subjectName?.let { " $it" } ?: "")
-                textPaint.textSize = FONT_TITLE_PT
-                val titleHeight = FONT_TITLE_PT * 1.5f
+                textPaint.textSize = FONT_TITLE_PT * scale
+                val titleHeight = (FONT_TITLE_PT * scale) * 1.5f
 
                 // 排版题干
                 val stemLines = layoutRichTokens(
                     tokens = card.stem,
-                    fontSize = FONT_STEM_PT,
+                    fontSize = (FONT_STEM_PT * scale),
                     textColor = COLOR_TEXT_PRIMARY,
                     maxWidth = USABLE_WIDTH_PT,
                     paint = textPaint,
@@ -342,13 +360,13 @@ class PdfExporter(
                 ensureSpace(headMinHeight)
 
                 // 1. 绘制标题行
-                val titleY = currentY + FONT_TITLE_PT
+                val titleY = currentY + FONT_TITLE_PT * scale
                 currentPage.drawItems.add(
                     TextLineDrawItem(
                         x = MARGIN_H_PT,
                         y = titleY,
                         text = titleText,
-                        fontSize = FONT_TITLE_PT,
+                        fontSize = (FONT_TITLE_PT * scale),
                         color = COLOR_TEXT_PRIMARY,
                         isBold = true
                     )
@@ -371,7 +389,7 @@ class PdfExporter(
                         if (decoded != null) {
                             val imgW = decoded.first.width.toFloat()
                             val imgH = decoded.first.height.toFloat()
-                            val captionHeight = FONT_CAPTION_PT * 1.4f
+                            val captionHeight = (FONT_CAPTION_PT * scale) * 1.4f
                             val totalImgBlockH = imgH + 4f + captionHeight + 6f
 
                             currentY = ensureSpace(totalImgBlockH)
@@ -385,16 +403,16 @@ class PdfExporter(
                             )
 
                             val captionText = if (card.imageIsFigure) "题目附图" else "原题照片"
-                            textPaint.textSize = FONT_CAPTION_PT
+                            textPaint.textSize = FONT_CAPTION_PT * scale
                             val capW = textPaint.measureText(captionText)
                             val capX = MARGIN_H_PT + (USABLE_WIDTH_PT - capW) / 2f
-                            val capY = currentY + imgH + 4f + FONT_CAPTION_PT
+                            val capY = currentY + imgH + 4f + FONT_CAPTION_PT * scale
                             currentPage.drawItems.add(
                                 TextLineDrawItem(
                                     x = capX,
                                     y = capY,
                                     text = captionText,
-                                    fontSize = FONT_CAPTION_PT,
+                                    fontSize = (FONT_CAPTION_PT * scale),
                                     color = COLOR_TEXT_MUTED
                                 )
                             )
@@ -414,7 +432,7 @@ class PdfExporter(
 
                         val optLines = layoutRichTokens(
                             tokens = optionTokens,
-                            fontSize = FONT_OPTION_PT,
+                            fontSize = (FONT_OPTION_PT * scale),
                             textColor = COLOR_TEXT_PRIMARY,
                             maxWidth = USABLE_WIDTH_PT,
                             paint = textPaint,
@@ -438,7 +456,7 @@ class PdfExporter(
 
                     val ansLines = layoutRichTokens(
                         tokens = answerTokens,
-                        fontSize = FONT_ANSWER_PT,
+                        fontSize = (FONT_ANSWER_PT * scale),
                         textColor = COLOR_ANSWER_TAG,
                         maxWidth = USABLE_WIDTH_PT,
                         paint = textPaint,
@@ -458,7 +476,7 @@ class PdfExporter(
 
                     val anaLines = layoutRichTokens(
                         tokens = analysisTokens,
-                        fontSize = FONT_ANALYSIS_PT,
+                        fontSize = (FONT_ANALYSIS_PT * scale),
                         textColor = COLOR_TEXT_SECONDARY,
                         maxWidth = USABLE_WIDTH_PT,
                         paint = textPaint,
@@ -479,13 +497,13 @@ class PdfExporter(
 
                     // 仅在左上角绘制微弱极细的【重做区】字样，下方绝对不画任何横线或网格
                     val tagText = redoTagText
-                    val tagY = currentY + FONT_TAG_PT
+                    val tagY = currentY + FONT_TAG_PT * scale
                     currentPage.drawItems.add(
                         TextLineDrawItem(
                             x = MARGIN_H_PT,
                             y = tagY,
                             text = tagText,
-                            fontSize = FONT_TAG_PT,
+                            fontSize = (FONT_TAG_PT * scale),
                             color = COLOR_TEXT_MUTED
                         )
                     )
@@ -708,9 +726,10 @@ class PdfExporter(
         textPaint: TextPaint,
         linePaint: Paint,
         title: String,
-        dateStr: String
+        dateStr: String,
+        scale: Float
     ) {
-        textPaint.textSize = FONT_HEADER_PAGE_PT
+        textPaint.textSize = FONT_HEADER_PAGE_PT * scale
         textPaint.color = COLOR_TEXT_MUTED
         textPaint.isFakeBoldText = false
 
@@ -731,9 +750,10 @@ class PdfExporter(
         canvas: Canvas,
         textPaint: TextPaint,
         pageNumber: Int,
-        totalPages: Int
+        totalPages: Int,
+        scale: Float
     ) {
-        textPaint.textSize = FONT_FOOTER_PAGE_PT
+        textPaint.textSize = FONT_FOOTER_PAGE_PT * scale
         textPaint.color = COLOR_TEXT_MUTED
         textPaint.isFakeBoldText = false
 
