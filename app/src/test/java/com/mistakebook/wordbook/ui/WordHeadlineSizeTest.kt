@@ -5,12 +5,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 题干（单词本身）取宽与选字号的单测（v0.0.90）。
+ * 题干（单词本身）取宽与选字号的单测（v0.0.102 改口径）。
  *
  * 纯 JVM：两个函数都只是浮点换算，不依赖 Android。
- * 钉住的是**不压图标**这条硬规矩：右上角工具带占 96dp，长单词
- * （sophisticated 13 字母、antidisestablishmentarianism 28 字母）
- * 不管屏幕多宽、用户把系统字号调多大，都不允许越过工具带。
+ *
+ * ## v0.0.102 改了什么
+ * 用户原话：「单词绝对不能换行啊……是让你把它们的空间位置留充足
+ * 而不是限制单词的长度」。
+ *
+ * 之前的两条规矩把这件事做反了：
+ * 1. 可用宽度**左右各扣** 96dp 的工具带——右边是真占用，左边空着也扣，
+ *    单词被塞进一半宽的带子里，「hammer」这种 6 个字母的词都放不下，只能折行；
+ * 2. 字号被**下限**托住（18sp），一旦托到放不下，就只能靠 maxLines=2 折行兜底。
+ *
+ * 现在的规矩只有一条：**单词永远单行、永远不越界**。
+ * 宽度只扣右边那一条带子（那是真占用），单词在剩下的区域里整体向左错开一点；
+ * 字号按可用宽度算，**不设会破坏「塞得下」的下限**；真放不下时，
+ * 界面上还有按**实测宽度**的等比缩放兜底。
  */
 class WordHeadlineSizeTest {
 
@@ -25,18 +36,19 @@ class WordHeadlineSizeTest {
     /** PIXEL_5 实测：屏幕 392dp - LazyColumn 左右 16dp - 卡片左右 20dp。 */
     private val phoneContent = 320f
 
-    /** 360dp 宽的设计下限屏：卡片内容区正好被工具带吃到 96dp。 */
+    /** 360dp 宽的设计下限屏。 */
     private val narrowContent = 288f
 
     @Test
-    fun `可用宽度左右各扣一个工具带`() {
-        // 320 - 2*96 = 128：右侧是真实占用，左侧让出来保持单词居中
-        assertEquals(128f, wordHeadlineMaxWidthDp(phoneContent), 0f)
+    fun `可用宽度只扣右边那一条工具带`() {
+        // 320 - 96 = 224：右边是真实占用（星标/喇叭/收藏），
+        // 左边空着凭什么也扣一条带子——那正是单词被逼到折行的原因
+        assertEquals(224f, wordHeadlineMaxWidthDp(phoneContent), 0f)
     }
 
     @Test
     fun `窄屏兜底不低于九十六dp`() {
-        assertEquals(96f, wordHeadlineMaxWidthDp(narrowContent), 0f)
+        assertEquals(192f, wordHeadlineMaxWidthDp(narrowContent), 0f)
         // 再窄也不该吐负数或零宽——那会让题干直接不显示
         assertEquals(96f, wordHeadlineMaxWidthDp(0f), 0f)
         assertEquals(96f, wordHeadlineMaxWidthDp(100f), 0f)
@@ -44,49 +56,45 @@ class WordHeadlineSizeTest {
 
     @Test
     fun `六个字母以内的短单词用满三十六号`() {
-        // cat / water / book 这类常见词必须保持设计稿的 36sp。
-        // 到 6 个字母为止：6 * 0.539 * 36 = 116dp，128dp 装得下。
-        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("cat", 128f, 1f), 0f)
-        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("book", 128f, 1f), 0f)
-        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("water", 128f, 1f), 0f)
+        // cat / water / book 这类常见词必须保持设计稿的 36sp
+        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("cat", 224f, 1f), 0f)
+        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("book", 224f, 1f), 0f)
+        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("water", 224f, 1f), 0f)
+        // hammer 之前正好是被折成两行的那个词
+        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("hammer", 224f, 1f), 0f)
     }
 
     @Test
-    fun `第七个字母起就按比例缩`() {
-        // history：7 * 0.539 * 36 = 136dp > 128dp，塞不下就必须缩
-        val size = wordHeadlineSizeSp("history", 128f, 1f)
+    fun `第十一个字母起就按比例缩`() {
+        // 224dp 里 10 个字母仍是 36sp（10 * 0.58 * 36 = 209dp）；
+        // 13 个字母就要缩了——这正是「sophisticated」这类长词的表现
+        val size = wordHeadlineSizeSp("sophisticated", 224f, 1f)
         assertTrue("实际 $size", size < WORD_HEADLINE_MAX_SP)
-        assertTrue("实际 $size", size >= WORD_HEADLINE_MIN_SP)
     }
 
     @Test
     fun `空串不缩字号`() {
-        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("", 128f, 1f), 0f)
-    }
-
-    @Test
-    fun `sophisticated 停在下限且仍不越过工具带`() {
-        // 13 个字母在 128dp 里最多 18sp；这不是显示 bug，是几何必然
-        val size = wordHeadlineSizeSp("sophisticated", 128f, 1f)
-        assertEquals(WORD_HEADLINE_MIN_SP, size, 0f)
-        // 关键：18sp 的 13 个字母仍塞得进 128dp（126dp），所以单行放得下
-        val needed = 13 * realEmPerChar * size
-        assertTrue("需要 ${needed}dp", needed <= 128f + 0.05f)
+        assertEquals(WORD_HEADLINE_MAX_SP, wordHeadlineSizeSp("", 224f, 1f), 0f)
     }
 
     @Test
     fun `选出来的字号一定塞得进可用宽度`() {
-        // 这是整条修复的核心不变量：只要没触到 18sp 下限，按实测字宽算出的
-        // 宽度必须 <= 可用宽度。超出下限的极端长词靠 widthIn 折行兜底。
-        val words = listOf("cat", "book", "water", "history", "language", "ubiquitous", "sophisticated")
+        // 这是整条修复的核心不变量：**没有后门**。
+        // 之前有「触到 18sp 下限就不管了，靠 maxLines=2 折行兜底」——
+        // 那个后门正是单词被折成两行的原因。现在任何词、任何宽度、
+        // 任何系统字号放大倍数，吐出来的字号都必须塞得下。
+        val words = listOf(
+            "cat", "book", "water", "hammer", "history", "language",
+            "ubiquitous", "sophisticated", "antidisestablishmentarianism"
+        )
         for (word in words) {
-            for (available in listOf(96f, 128f, 200f, 320f)) {
+            for (available in listOf(96f, 128f, 224f, 320f)) {
                 for (scale in listOf(1f, 1.3f, 2f)) {
                     val size = wordHeadlineSizeSp(word, available, scale)
                     val needed = word.length * realEmPerChar * size * scale
                     assertTrue(
-                        "$word / $available / $scale 需要 ${needed}dp",
-                        needed <= available + 0.05f || size == WORD_HEADLINE_MIN_SP
+                        "$word / $available / $scale 需要 ${needed}dp（字号 $size）",
+                        needed <= available + 0.05f
                     )
                 }
             }
@@ -97,8 +105,8 @@ class WordHeadlineSizeTest {
     fun `系统字号放大时同长度单词缩得更小`() {
         // 用户在设置里把字号调到 1.3x：sp 占的 dp 会同比例变大，
         // 不一起算进去的话放大模式又会压图标。
-        val normal = wordHeadlineSizeSp("ubiquitous", 128f, 1f)
-        val enlarged = wordHeadlineSizeSp("ubiquitous", 128f, 1.3f)
+        val normal = wordHeadlineSizeSp("ubiquitous", 224f, 1f)
+        val enlarged = wordHeadlineSizeSp("ubiquitous", 224f, 1.3f)
         assertTrue("$normal vs $enlarged", enlarged < normal)
     }
 
@@ -111,15 +119,8 @@ class WordHeadlineSizeTest {
     }
 
     @Test
-    fun `二十八字母的极端长词停在下限交给折行`() {
-        // antidisestablishmentarianism：再怎么缩也不该小到看不清，
-        // 18sp 以下交给 maxLines=2 + widthIn 折行，图标照样不沾边。
-        val size = wordHeadlineSizeSp("antidisestablishmentarianism", 128f, 1f)
-        assertEquals(WORD_HEADLINE_MIN_SP, size, 0f)
-    }
-
-    @Test
-    fun `字号永远落在地下限与上限之间`() {
+    fun `字号永远不超过上限`() {
+        // 下限没有了：字号由「塞得下」唯一决定，只剩上限这条硬规矩
         val words = listOf("a", "cat", "sophisticated", "antidisestablishmentarianism")
         for (word in words) {
             for (available in listOf(0f, 50f, 128f, 320f, 1000f)) {
@@ -127,7 +128,7 @@ class WordHeadlineSizeTest {
                     val size = wordHeadlineSizeSp(word, available, scale)
                     assertTrue(
                         "$word / $available / $scale 吐出 $size",
-                        size in WORD_HEADLINE_MIN_SP..WORD_HEADLINE_MAX_SP
+                        size <= WORD_HEADLINE_MAX_SP
                     )
                 }
             }

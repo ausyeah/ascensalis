@@ -81,9 +81,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Dispatchers
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -92,7 +94,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -597,24 +602,68 @@ internal fun StudyView(
                             // 按比例缩」，外面再叠一层 widthIn 硬钳——字体度量
                             // 估算有偏差、或用户把系统字号调到 1.3x 时，宁可折行
                             // 也绝不压到图标（双保险，同 RichText 的取宽思路）。
+                            //
+                            // 单词**绝不换行**（v0.0.102 用户原话：「单词绝对不能换行」）：
+                            // 折成两行的单词看着就是显示坏了，用户会以为 App 出问题。
+                            //
+                            // 做法是三件事一起：
+                            // 1. 只给**右边**的图标带留位——左边空着，凭什么也扣掉？
+                            //    之前左右各扣 96dp，单词被塞进一条比它还窄的带子里，
+                            //    于是「hammer」这种 6 个字母的词都放不下，只能折行；
+                            // 2. 单词在「卡片宽度减去右边那条带子」的区域内居中，
+                            //    整体向左错开一点（= 用户说的「错位一点」），
+                            //    这样长单词的右端也够不到星标/喇叭/收藏；
+                            // 3. 估算的字号只是初值，真正兜底的是**实测宽度**：
+                            //    排版完拿 onTextLayout 的 maxIntrinsicWidth 与可用宽度比，
+                            //    超出就整体等比缩到刚好放得下。
+                            //    估算总有偏差（字体度量、系统字号放大），
+                            //    只有实测才保证「不折行也不压图标」两件事同时成立。
                             BoxWithConstraints(
                                 modifier = Modifier.fillMaxWidth(),
-                                contentAlignment = Alignment.Center
+                                contentAlignment = Alignment.CenterStart
                             ) {
                                 val safeWidthDp = wordHeadlineMaxWidthDp(maxWidth.value)
+                                val density = LocalDensity.current
+                                val availablePx = with(density) { safeWidthDp.dp.toPx() }
+                                val headlineSp = wordHeadlineSizeSp(
+                                    word = currentWord.word,
+                                    availableWidthDp = safeWidthDp,
+                                    fontScale = density.fontScale
+                                )
+                                // 用官方排版器量出这行字**实际**有多宽：
+                                // 估算（0.58em/字）总有偏差，而「折行」与「压图标」
+                                // 两件事都只能靠实际宽度同时兜住。
+                                val textMeasurer = rememberTextMeasurer()
+                                val measuredPx = remember(currentWord.word, headlineSp, density.fontScale) {
+                                    textMeasurer.measure(
+                                        AnnotatedString(currentWord.word),
+                                        style = TextStyle(
+                                            fontSize = headlineSp.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Serif
+                                        )
+                                    ).size.width
+                                }
+                                val fitScale = if (measuredPx > availablePx && measuredPx > 0f) {
+                                    availablePx / measuredPx
+                                } else {
+                                    1f
+                                }
                                 Text(
                                     text = currentWord.word,
-                                    fontSize = wordHeadlineSizeSp(
-                                        word = currentWord.word,
-                                        availableWidthDp = safeWidthDp,
-                                        fontScale = LocalDensity.current.fontScale
-                                    ).sp,
+                                    fontSize = headlineSp.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Serif,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     textAlign = TextAlign.Center,
-                                    maxLines = 2,
-                                    modifier = Modifier.widthIn(max = safeWidthDp.dp)
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier
+                                        .width(safeWidthDp.dp)
+                                        .graphicsLayer {
+                                            scaleX = fitScale
+                                            scaleY = fitScale
+                                        }
                                 )
                             }
 
@@ -1360,14 +1409,10 @@ internal const val WORD_CARD_TOOL_BAND_DP = 96f
 /** 题干（单词本身）的最大字号：设计稿基准值，短单词一律用满。 */
 internal const val WORD_HEADLINE_MAX_SP = 36f
 
-/**
- * 题干的最小字号。
- *
- * 为什么必须有下限：字数继续涨时按比例缩会小到看不清，而 widthIn 硬钳
- * 已经保证不会压图标——所以缩到 18sp（正文 bodyLarge 量级）就停，
- * 剩下的交给折行，折两行仍读得清。
- */
-internal const val WORD_HEADLINE_MIN_SP = 18f
+// 题干的**最小字号被删掉了**（v0.0.102）：
+// 有下限就一定会出现「字号被托到放不下 → 单词折行」这个后门，
+// 而折行正是用户说的「单词绝对不能换行」里最不能接受的那件事。
+// 现在字号只由「塞得下可用宽度」决定，唯一还留着的硬规矩是上限。
 
 /**
  * Noto Serif Bold 下每个字符约占多少个 em。
@@ -1391,7 +1436,10 @@ internal const val WORD_HEADLINE_EM_PER_CHAR = 0.58f
  * 96dp，已超出本项目的设计包络（内边距写死 16/20dp、题干写死 36sp）。
  */
 internal fun wordHeadlineMaxWidthDp(cardContentWidthDp: Float): Float =
-    (cardContentWidthDp - 2 * WORD_CARD_TOOL_BAND_DP).coerceAtLeast(96f)
+    // 只扣**右边**那条工具带（星标/喇叭/收藏真占着的地方）。
+    // 之前左右各扣一条，右侧那条是对的，左侧那条是凭空扣的——
+    // 单词被塞进一半宽的带子里，「hammer」都放不下，只好折行。
+    (cardContentWidthDp - WORD_CARD_TOOL_BAND_DP).coerceAtLeast(96f)
 
 /**
  * 按可用宽度给题干选字号（sp）。
@@ -1403,6 +1451,10 @@ internal fun wordHeadlineMaxWidthDp(cardContentWidthDp: Float): Float =
 internal fun wordHeadlineSizeSp(word: String, availableWidthDp: Float, fontScale: Float): Float {
     if (word.isEmpty()) return WORD_HEADLINE_MAX_SP
     val availableEm = availableWidthDp / (fontScale * WORD_HEADLINE_EM_PER_CHAR)
-    return (availableEm / word.length).coerceIn(WORD_HEADLINE_MIN_SP, WORD_HEADLINE_MAX_SP)
+    val fit = availableEm / word.length
+    // **下限不能破坏「塞得下」这条不变量**：一旦被下限抬到放不下的字号，
+    // 单词就只能折行（用户看到的「显示坏了」）。宁可字小一点、也不折行。
+    // 真要再大，界面上还有实测宽度的等比缩放兜底。
+    return fit.coerceAtMost(WORD_HEADLINE_MAX_SP)
 }
 
