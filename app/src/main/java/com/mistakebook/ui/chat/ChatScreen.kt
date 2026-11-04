@@ -561,7 +561,7 @@ fun ChatScreen(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(stringResource(R.string.chat_loading), style = MaterialTheme.typography.bodyMedium)
                     }
-                } else if (showChatEmptyState(state.loading, state.messages.size)) {
+                } else if (showChatEmptyState(state.loading, state.visibleMessageCount)) {
                     // 空会话中央原来是纯白一块：用户进来第一眼不知道这页能干嘛。
                     // 标志 + 签名把「这是哪儿」说清楚，比任何引导浮层都轻，也不占状态。
                     ChatEmptyState(
@@ -611,7 +611,8 @@ fun ChatScreen(
                     )
                 }
 
-                if (coordinator.showJumpButton) {
+                // 空会话不显示「回到底部」：没有消息可滚，那颗浮钮是纯噪音
+                if (coordinator.showJumpButton && state.visibleMessageCount > 0) {
                     JumpToBottomButton(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -717,7 +718,12 @@ fun ChatScreen(
 
 
 /**
- * 中央空状态什么时候出场：会话读完了，且一条消息都没有。
+ * 中央空状态什么时候出场：会话读完了，且**用户看得见的**消息一条都没有。
+ *
+ * 「看得见」这个限定是 v0.0.99 加的：功能入口的隐藏指令是以 injected 消息
+ * 入库的，它一进会话 [state.messages] 就非空了——空状态（标志 + 签名）不出现，
+ * 用户点完「英语翻译」看到的是一片空白，连「这条会话是空的」都不知道。
+ * 题目上下文那条注入消息同理。
  *
  * 纯函数（单测见 ChatEmptyStateTest）。`loading` 必须挡在前面——
  * 进会话要先读数据库，这几百毫秒里消息数也是 0，

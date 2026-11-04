@@ -109,6 +109,15 @@ data class ChatUiState(
     val streamingContent: String? = null,
 
     /**
+     * **用户看得见的**消息条数（不含注入消息）。
+     *
+     * 注入消息（题目上下文、功能入口的隐藏指令）是给模型看的，不进气泡。
+     * 空状态判定必须用这个数：否则功能入口注入指令后，会话明明一条话都没说，
+     * 空状态却不出现（v0.0.99 实机发现）。
+     */
+    val visibleMessageCount: Int = 0,
+
+    /**
      * 消息 id -> 该消息里图片的 data URL 列表。
      *
      * 只给**用户自己发的**消息用：AI 不会回图，而历史里更早的图片
@@ -464,6 +473,7 @@ class ChatViewModel(
                     // 摘要消息是真实消息，observeMessages 会带上它；
                     // 有它在 state 里就标记 summaryActive，输入栏才显示提示条。
                     summaryActive = messages.any { it.isSummary() },
+                    visibleMessageCount = messages.count { !it.injected },
                     streamingMessageId = if (committedStream != null) null else current.streamingMessageId,
                     streamingContent = if (committedStream != null) null else current.streamingContent,
                     canRetry = messages.lastOrNull()?.status == MessageStatus.FAILED
