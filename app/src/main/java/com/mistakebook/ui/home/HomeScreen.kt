@@ -54,8 +54,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -292,15 +292,19 @@ fun HomeScreen(
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         floatingActionButton = {
-            // v0.0.114：拍错题主 FAB 上方加一颗**问一问**小 FAB——
-            // 拍题与问问题是并列的两个起手，进对话却要绕到顶部图标行。
-            // 用 SmallFloatingActionButton 弱化层级，主次仍然分明。
+            // v0.0.118：这一对按钮以「拍错题」为准统一。
+            //
+            // 原来「问一问」是 40dp 的 SmallFloatingActionButton + 白底蓝字，
+            // 和下面 56dp 的浅蓝胶囊并排放着像两个尺寸、两套配色拼出来的：
+            // 圆钮又小又灰，胶囊又大又亮。现在两枚同高（56dp）、同底色
+            // （primaryContainer）、同内容色（onPrimaryContainer）、同阴影，
+            // 只在形状与文案上分主次——图标圆钮是次，带文字的胶囊是主。
             Column(horizontalAlignment = Alignment.End) {
-                SmallFloatingActionButton(
+                FloatingActionButton(
                     onClick = onNewChat,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 10.dp)
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(bottom = 12.dp)
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Chat,
@@ -309,6 +313,8 @@ fun HomeScreen(
                 }
                 ExtendedFloatingActionButton(
                     onClick = { showAddSheet = true },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
                     text = { Text(stringResource(R.string.home_add_by_photo)) }
                 )
