@@ -55,19 +55,54 @@ class ChatEmptyBrandTest {
     }
 
     @Test
-    fun `空状态用 onSurface 染色而不是强调色`() {
+    fun `空状态中央是用户定稿的山岳徽章且明暗跟随主题`() {
         val screen = readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
         val start = screen.indexOf("private fun ChatEmptyState(")
         assertTrue("ChatEmptyState 必须存在", start >= 0)
         val body = screen.substring(start, screen.indexOf("\n}", start))
 
-        // v0.0.114：山形 logo 换成 Canvas 手绘的黑白相机（用户指定）。
-        // 墨色语义不变：相机描边取 onSurface，黑白两套主题都成立。
-        assertTrue("必须渲染 Canvas 相机标志", body.contains("CameraMark("))
-        assertTrue("墨色必须取当前主题", body.contains("val ink = MaterialTheme.colorScheme.onSurface"))
+        // v0.0.121（用户定稿两版手作徽章）：选版由 LocalDarkTheme 决定——
+        // 它是应用**实际渲染**的主题（设置里可强制浅色/深色）；
+        // 用 -night 资源限定符会跟系统夜间开关走，用户强制浅色时
+        // 就会在米白纸面上贴炭黑徽章（实机踩过）。
+        assertTrue("空状态必须渲染 brand_emblem 徽章", body.contains("R.drawable.brand_emblem"))
+        assertTrue(
+            "选版必须读 LocalDarkTheme（跟随应用实际背景）",
+            body.contains("LocalDarkTheme.current")
+        )
+        assertTrue(
+            "浅色版必须在 drawable-nodpi",
+            File("src/main/res/drawable-nodpi/brand_emblem_light.png").exists() ||
+                File("app/src/main/res/drawable-nodpi/brand_emblem_light.png").exists()
+        )
+        assertTrue(
+            "深色版必须在 drawable-nodpi（强制浅色/深色主题时也要有得换）",
+            File("src/main/res/drawable-nodpi/brand_emblem_dark.png").exists() ||
+                File("app/src/main/res/drawable-nodpi/brand_emblem_dark.png").exists()
+        )
         assertFalse(
-            "不许 tint 强调色——那会让标志跟着用户换的 8 档主题色一起变",
+            "Canvas 相机已退役（v0.0.121 徽章替代），不许残留在空状态里",
+            body.contains("CameraMark(")
+        )
+        assertFalse(
+            "徽章不许 tint 强调色——它自带明暗两版，染色反而破坏配色",
             body.contains("ColorFilter.tint(MaterialTheme.colorScheme.primary)")
+        )
+    }
+
+    @Test
+    fun `抽屉签名旁也挂同一枚徽章`() {
+        val sheet = readSource("src/main/java/com/mistakebook/ui/chat/ChatHistorySheet.kt")
+        // 头部区域 = 「头部」注释之后、功能行（ChatToolRows）之前
+        val header = sheet.substringAfter("头部：左上角徽章 + 应用签名")
+            .substringBefore("ChatToolRows")
+        assertTrue(
+            "签名前必须有 brand_emblem 徽章",
+            header.contains("R.drawable.brand_emblem")
+        )
+        assertTrue(
+            "签名本身还在",
+            header.contains("R.string.app_signature")
         )
     }
 

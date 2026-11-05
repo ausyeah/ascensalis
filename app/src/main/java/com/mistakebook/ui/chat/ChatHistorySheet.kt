@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -57,6 +58,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -66,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
+import com.mistakebook.ui.theme.LocalDarkTheme
 import com.mistakebook.di.AppContainer
 import com.mistakebook.di.PendingTool
 import com.mistakebook.ui.common.containerViewModel
@@ -170,14 +173,24 @@ internal fun ChatHistorySheet(
             .fillMaxHeight()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // 头部：左上角应用签名。抽屉的关闭交给遮罩点击与边缘右滑，
-        // 不另设关闭键——ChatGPT 的抽屉也是这么做的。
+        // 头部：左上角徽章 + 应用签名（v0.0.121：签名旁挂上「登临」山岳徽章，
+        // 明暗两版由 LocalDarkTheme 选——跟随应用实际渲染的背景）。
+        // 抽屉的关闭交给遮罩点击与边缘右滑，不另设关闭键——ChatGPT 的抽屉也是这么做的。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Image(
+                painter = painterResource(
+                if (LocalDarkTheme.current) R.drawable.brand_emblem_dark
+                else R.drawable.brand_emblem_light
+            ),
+                contentDescription = null,
+                modifier = Modifier.size(40.dp)
+            )
+            Spacer(Modifier.width(12.dp))
             Text(
                 text = stringResource(R.string.app_signature),
                 style = MaterialTheme.typography.titleLarge.copy(
