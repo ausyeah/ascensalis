@@ -42,6 +42,15 @@ class MistakeBookApp : Application() {
         container.appScope.launch {
             runCatching { container.chatRepository.purgeEmptySessions() }
         }
+        // 自动归档（v0.0.121，issue #35）：最后活跃超过七天的会话丢进归档，
+        // 归档满三个月的连同附件文件一起删除——阈值见 ChatRetention，
+        // 用户要的是「不动手也会自己收拾」的对话列表。
+        container.appScope.launch {
+            runCatching { container.chatRepository.autoArchiveStaleSessions() }
+        }
+        container.appScope.launch {
+            runCatching { container.chatRepository.purgeExpiredArchivedSessions() }
+        }
         // T10 徽章判定：启动时跑一轮轻量判定，把新解锁徽章持久化
         container.appScope.launch {
             runCatching { container.badgeRepository.evaluateAndStore() }

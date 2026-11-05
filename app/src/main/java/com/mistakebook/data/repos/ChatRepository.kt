@@ -6,6 +6,7 @@ import com.mistakebook.data.chat.AssembledContext
 import com.mistakebook.data.chat.ChatContextAssembler
 import com.mistakebook.data.chat.ChatOcrText
 import com.mistakebook.data.chat.ChatPrompts
+import com.mistakebook.data.chat.ChatRetention
 import com.mistakebook.data.chat.MemoryPrompts
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.data.local.ChatDao
@@ -244,6 +245,36 @@ class ChatRepository(
 
     /** 已归档的会话，按归档时间倒序（最近归档的排最前）。 */
     fun observeArchivedSessions() = chatDao.observeArchivedSessions()
+
+    /**
+     * 自动归档（v0.0.121，issue #35）：最后活跃超过七天（[ChatRetention.ARCHIVE_AFTER_DAYS]）
+     * 的会话启动时批量丢进归档。App 启动时跑一次。
+     *
+     * 阈值换算收在 [ChatRetention]；SQL 在 [ChatDao.archiveStaleSessions]。
+     *
+     * @return 归档的会话数（日志用）。
+     */
+    suspend fun autoArchiveStaleSessions(now: Long = System.currentTimeMillis()): Int =
+        chatDao.archiveStaleSessions(at = now, olderThan = ChatRetention.archiveCutoff(now))
+
+    /**
+     * 归档会话的定期清理（v0.0.121，issue #35）：归档满三个月
+     * （[ChatRetention.DELETE_AFTER_MONTHS]）的连同附件文件一起物理清掉。
+     * App 启动时跑一次。
+     *
+     * 软删会话不在这里处理：归档后再软删的，撤销窗口（30 天）优先，
+     * 过期走 [purgeExpiredDeletedSessions]——两条保留期互不抢活。
+     *
+     * @return 删除的会话数（日志用）。
+     */
+    suspend fun purgeExpiredArchivedSessions(now: Long = System.currentTimeMillis()): Int {
+        val before = ChatRetention.deleteCutoff(now)
+        val expired = chatDao.listArchivedBefore(before)
+        if (expired.isEmpty()) return 0
+        expired.forEach { appFiles.deleteRecursively(appFiles.chatDir(it.id)) }
+        chatDao.hardDeleteArchivedBefore(before)
+        return expired.size
+    }
 
     /**
      * 回收站定期清理（v0.0.71）：软删超过 [RETENTION_DAYS] 天的会话

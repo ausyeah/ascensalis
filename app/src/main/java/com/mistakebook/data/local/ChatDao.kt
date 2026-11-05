@@ -171,6 +171,45 @@ interface ChatDao {
     @Query("UPDATE chat_sessions SET archivedAt = NULL, updatedAt = :at WHERE id = :id")
     suspend fun clearArchived(id: Long, at: Long)
 
+    // ------------------------------------------------------------ 自动归档（v0.0.121，issue #35）
+    //
+    // 用户要求：「对话时间戳七天前的都丢进归档，归档三个月前的删掉」。
+    // 触发点在应用启动（MistakeBookApp），阈值换算在 ChatRetention。
+
+    /**
+     * 自动归档：最后活跃早于 [olderThan] 的会话批量打上归档时间，返回条数。
+     *
+     * - 「对话时间戳」取 updatedAt（最后一条消息落库时刻）；
+     * - 只动没归档、没软删、非临时的会话——软删的归回收站管，
+     *   临时的退出时已经转正归档，两处都不该被这里重复处理；
+     * - 置顶的也在内：七天没动就是沉了，用户要求的是「都」。
+     */
+    @Query(
+        """UPDATE chat_sessions
+           SET archivedAt = :at, updatedAt = :at
+           WHERE archivedAt IS NULL AND deletedAt IS NULL AND temporary = 0
+             AND updatedAt < :olderThan"""
+    )
+    suspend fun archiveStaleSessions(at: Long, olderThan: Long): Int
+
+    /** 列出归档时刻早于 [before] 的会话（软删的不碰，走回收站自己的保留期）。 */
+    @Query(
+        """SELECT * FROM chat_sessions
+           WHERE archivedAt IS NOT NULL AND deletedAt IS NULL AND archivedAt < :before"""
+    )
+    suspend fun listArchivedBefore(before: Long): List<ChatSession>
+
+    /**
+     * 物理删除归档早于 [before] 的会话，返回条数。
+     * 消息与附件行经外键 CASCADE 一并删除（session → messages → attachments）；
+     * 附件**文件**由仓库层在调用前逐会话删除，与回收站清理同一条规矩。
+     */
+    @Query(
+        """DELETE FROM chat_sessions
+           WHERE archivedAt IS NOT NULL AND deletedAt IS NULL AND archivedAt < :before"""
+    )
+    suspend fun hardDeleteArchivedBefore(before: Long): Int
+
     @Query("UPDATE chat_sessions SET deletedAt = :at, updatedAt = :at WHERE id = :id")
     suspend fun softDeleteSession(id: Long, at: Long)
 
