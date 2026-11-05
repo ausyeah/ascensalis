@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -75,6 +76,16 @@ internal enum class ChatTool(
         needsCamera = true,
         needsLlm = true,
         needsOcr = false
+    ),
+    GRADE(
+        labelRes = R.string.chat_tool_grade,
+        icon = Icons.Default.TaskAlt,
+        instruction = ChatToolPrompts.GRADE,
+        // 与作文批改同款的两段式拍摄：先题目，再手写答案。
+        needsCamera = true,
+        needsLlm = true,
+        // 发送路径会对照片跑 OCR（纯文本模型也能批），识别没配就是真的用不了
+        needsOcr = true
     ),
     DIAGRAM(
         labelRes = R.string.chat_tool_diagram,

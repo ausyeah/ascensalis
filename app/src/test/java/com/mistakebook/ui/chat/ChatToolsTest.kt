@@ -20,13 +20,14 @@ import com.mistakebook.R
 class ChatToolsTest {
 
     @Test
-    fun `四个入口一个不多一个不少`() {
-        assertEquals(4, ChatTool.entries.size)
-        // 用户点名的几个（错因诊断已按用户要求删掉）
+    fun `五个入口一个不多一个不少`() {
+        // v0.0.121（issue #36）：批改从输入栏开关升级成对话历史独立入口
+        assertEquals(5, ChatTool.entries.size)
         listOf(
             R.string.chat_tool_photo,
             R.string.chat_tool_translate,
             R.string.chat_tool_essay,
+            R.string.chat_tool_grade,
             R.string.chat_tool_diagram
         ).forEach { res ->
             assertTrue(
@@ -65,12 +66,46 @@ class ChatToolsTest {
     }
 
     @Test
-    fun `要拍照的入口有三个`() {
-        // 拍题讲解 / 英语翻译 / 作文批改都从一张照片开始（v0.0.106 翻译改口）；
+    fun `要拍照的入口有四个`() {
+        // 拍题讲解 / 英语翻译 / 作文批改 / 题目批改都从一张照片开始
+        // （v0.0.121 题目批加入，「先拍题目，再拍答案」与作文批改同款）；
         // 只有绘图生图是纯文字/纯生成，不该拉起相机
         assertEquals(
-            setOf(ChatTool.PHOTO, ChatTool.TRANSLATE, ChatTool.ESSAY),
+            setOf(ChatTool.PHOTO, ChatTool.TRANSLATE, ChatTool.ESSAY, ChatTool.GRADE),
             ChatTool.entries.filter { it.needsCamera }.toSet()
+        )
+    }
+
+    /**
+     * v0.0.121（issue #36）：批改开关从输入栏拆掉——题目会话与普通对话
+     * 用同一个输入栏；批改入口在对话历史里，拍照回来**那一轮**按批改发。
+     */
+    @Test
+    fun `批改入口会拍照且走识别，输入栏不再有批改开关`() {
+        assertTrue(
+            "题目批改必须拉起相机（先拍题目，再拍答案）",
+            ChatTool.GRADE.needsCamera
+        )
+        assertTrue(
+            "题目批改的发送路径要对照片跑 OCR，识别没配必须挡在入口",
+            ChatTool.GRADE.needsOcr
+        )
+        val bar = readSource("src/main/java/com/mistakebook/ui/chat/ChatInputBar.kt")
+        assertFalse(
+            "输入栏不许再有批改开关（题目会话与普通对话保持一致）",
+            bar.contains("gradingVisible") || bar.contains("chat_grading_toggle")
+        )
+        val screen = readSource("src/main/java/com/mistakebook/ui/chat/ChatScreen.kt")
+        assertTrue(
+            "题目批改入口的自动发送那一轮必须走批改路径",
+            screen.contains("viewModel.send(forceGrading = mine.tool == ChatTool.GRADE)")
+        )
+        val strings = readStrings()
+        assertTrue("strings.xml 少了 chat_tool_grade", strings.contains("name=\"chat_tool_grade\""))
+        assertTrue("strings.xml 少了 capture_hint_grade", strings.contains("name=\"capture_hint_grade\""))
+        assertFalse(
+            "输入栏开关的两条文案已随开关删除，不许残留",
+            strings.contains("chat_grading_toggle") || strings.contains("chat_input_hint_grading")
         )
     }
 

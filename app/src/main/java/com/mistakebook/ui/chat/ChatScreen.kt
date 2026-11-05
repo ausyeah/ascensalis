@@ -57,7 +57,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Send
@@ -123,6 +122,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import com.mistakebook.R
+import com.mistakebook.ui.theme.LocalDarkTheme
 import com.mistakebook.data.chat.ChatToolPrompts
 import com.mistakebook.domain.AttachmentStatus
 import com.mistakebook.data.chat.ChatContextAssembler
@@ -157,7 +157,6 @@ import java.io.File
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.ui.res.painterResource
-import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.drawscope.Stroke
 
 /**
@@ -368,13 +367,19 @@ fun ChatScreen(
                 container.pendingTool = null
             pending.all { it.status == AttachmentStatus.READY } -> {
                 container.pendingTool = null
-                viewModel.send()
+                // 题目批改（v0.0.121，issue #36）：这一轮按批改发——
+                // OCR 手写过程 + 注入批改指令都走 T13 那条路，只作用于本轮。
+                viewModel.send(forceGrading = mine.tool == ChatTool.GRADE)
             }
         }
     }
 
     LaunchedEffect(state.sessionId, state.loading) {
-        if (state.sessionId != 0L && !state.loading && state.messages.isEmpty() &&
+        // v0.0.121（issue #34）：判「可见消息为空」而不是「消息列表为空」。
+        // 题目上下文是**注入消息**，进会话瞬间就在库里了——原来那条
+        // `messages.isEmpty()` 在题目会话里永远不成立，「预填首问」是死代码。
+        // 现在进题目会话：上方立刻出现题目卡（上下文注入），输入框预填首问。
+        if (state.sessionId != 0L && !state.loading && state.visibleMessageCount == 0 &&
             questionId != null && state.input.isBlank()
         ) {
             viewModel.onInputChange(ChatViewModel.PREFILL_QUESTION)
@@ -574,7 +579,11 @@ fun ChatScreen(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(stringResource(R.string.chat_loading), style = MaterialTheme.typography.bodyMedium)
                     }
-                } else if (showChatEmptyState(state.loading, state.visibleMessageCount)) {
+                } else if (showChatEmptyState(state.loading, state.messages.size)) {
+                    // v0.0.121（issue #34）：传全部消息数而不是 visibleMessageCount。
+                    // 题目上下文是注入消息、不计入可见数——原来一进题目会话
+                    // 空状态就盖住整页，题目卡要等模型回应后才「冒出来」。
+                    // 注入消息也算内容， MessageList 里的题目卡第一时间可见。
                     // 空会话中央原来是纯白一块：用户进来第一眼不知道这页能干嘛。
                     // 标志 + 签名把「这是哪儿」说清楚，比任何引导浮层都轻，也不占状态。
                     ChatEmptyState(
@@ -690,11 +699,7 @@ fun ChatScreen(
                 onSteer = viewModel::steer,
                 onAttach = { showAttachSheet = true },
                 onPickModel = { showModelSheet = true },
-                onRemoveAttachment = viewModel::removePendingAttachment,
-                // T13 批改开关：仅题目会话显示（自由会话 questionId == null）
-                gradingMode = state.gradingMode,
-                gradingVisible = questionId != null,
-                onToggleGrading = viewModel::toggleGrading
+                onRemoveAttachment = viewModel::removePendingAttachment
             )
         }
     }
@@ -771,20 +776,23 @@ private fun ChatEmptyState(onSnapAsk: () -> Unit, modifier: Modifier = Modifier)
         // 点标志直接进拍题（v0.0.98）：空会话里唯一能干的事就是开始一问，
         // 而这一页最常见的问法就是「拍一道题」。标志本身就是最大的可点区域。
         //
-        // v0.0.114：山形 logo 换成**相机**黑白标记——空对话页的语义是
-        // 「拍题」，相机比山更直接；镜面里藏一座小山，与品牌仍是一体。
-        Box(
+        // v0.0.121：中央标志换成用户定稿的「登临」山岳徽章（明/暗两版，
+        // 用户认真手作）。选哪一版由 [LocalDarkTheme] 决定——它拿的是
+        // 应用**实际渲染**的主题（设置里可强制浅色/深色），不是系统夜间
+        // 开关：用户强制浅色时若跟系统走，就会在米白纸面上贴炭黑徽章。
+        // 浅版米白底贴浅色纸面、深版炭黑底贴深色纸面，随背景自适应。
+        // v0.0.114 的 Canvas 相机随之退役。
+        Image(
+            painter = painterResource(
+                if (LocalDarkTheme.current) R.drawable.brand_emblem_dark
+                else R.drawable.brand_emblem_light
+            ),
+            contentDescription = stringResource(R.string.home_snap_ask),
             modifier = Modifier
-                .size(112.dp)
-                .clip(CircleShape)
-                .clickable(role = Role.Button, onClick = onSnapAsk),
-            contentAlignment = Alignment.Center
-        ) {
-            CameraMark(
-                color = ink,
-                modifier = Modifier.size(96.dp)
-            )
-        }
+                .size(128.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .clickable(role = Role.Button, onClick = onSnapAsk)
+        )
         Spacer(Modifier.height(18.dp))
         Text(
             text = stringResource(R.string.app_signature),
@@ -921,90 +929,3 @@ private fun Context.findActivity(): Activity? {
  * 流式期间裁掉未闭合的行内/块级公式尾巴；静态文本原样返回。
  * 纯函数抽出便于与防抖组合。
  */
-
-/**
- * 黑白相机标记（v0.0.114）：空对话页的中央标志。
- *
- * 纯 Canvas 手绘：机身圆角矩形 + 顶部取景器凸起 + 圆形镜头，
- * 镜面里一座小山——「拍题」语义直达，又与品牌山形呼应。
- * 全部用描边与填充的几何组合，任何主题密度下都清晰。
- */
-@Composable
-private fun CameraMark(color: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val stroke = size.minDimension * 0.055f
-        val w = size.width
-        val h = size.height
-        val bodyTop = h * 0.24f
-        val bodyBottom = h * 0.86f
-        val bodyLeft = w * 0.06f
-        val bodyRight = w * 0.94f
-        val corner = w * 0.14f
-
-        // 顶部取景器凸起（梯形）
-        val bumpLeft = w * 0.32f
-        val bumpRight = w * 0.68f
-        drawPath(
-            path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(bumpLeft, bodyTop)
-                lineTo(bumpLeft + w * 0.06f, h * 0.12f)
-                lineTo(bumpRight - w * 0.06f, h * 0.12f)
-                lineTo(bumpRight, bodyTop)
-                close()
-            },
-            color = color,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
-        )
-
-        // 机身：圆角矩形描边
-        drawRoundRect(
-            color = color,
-            topLeft = androidx.compose.ui.geometry.Offset(bodyLeft, bodyTop),
-            size = androidx.compose.ui.geometry.Size(bodyRight - bodyLeft, bodyBottom - bodyTop),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(corner, corner),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
-        )
-
-        // 镜头外圈
-        val lensR = w * 0.20f
-        val cx = w / 2f
-        val cy = (bodyTop + bodyBottom) / 2f
-        drawCircle(
-            color = color,
-            radius = lensR,
-            center = androidx.compose.ui.geometry.Offset(cx, cy),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
-        )
-
-        // 镜面里的小山：两座三角峰（填充），底部一条地平线
-        val mountainBase = cy + lensR * 0.42f
-        drawPath(
-            path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(cx - lensR * 0.62f, mountainBase)
-                lineTo(cx - lensR * 0.18f, cy - lensR * 0.30f)
-                lineTo(cx + lensR * 0.10f, mountainBase)
-                close()
-            },
-            color = color
-        )
-        drawPath(
-            path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(cx + lensR * 0.02f, mountainBase)
-                lineTo(cx + lensR * 0.34f, cy - lensR * 0.05f)
-                lineTo(cx + lensR * 0.62f, mountainBase)
-                close()
-            },
-            color = color
-        )
-
-        // 快门指示点（机身右上）
-        drawCircle(
-            color = color,
-            radius = stroke * 0.9f,
-            center = androidx.compose.ui.geometry.Offset(
-                bodyRight - w * 0.10f,
-                bodyTop + (bodyBottom - bodyTop) * 0.14f
-            )
-        )
-    }
-}

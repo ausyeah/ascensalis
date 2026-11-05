@@ -147,12 +147,6 @@ data class ChatUiState(
     /** 输入框内容。首问会预填但不自动发送。 */
     val input: String = "",
 
-    /**
-     * 手写过程批改模式（T13）。仅题目会话（questionId != null）由 UI 展示开关；
-     * 自由会话恒 false。开关状态进 UiState，旋转屏不丢。
-     */
-    val gradingMode: Boolean = false,
-
     /** 还没发送的待发附件。 */
     val pendingAttachments: List<PendingAttachment> = emptyList(),
     /** T6 闄嶇骇锛氬凡閫夊緟娉ㄥ叆鐨勮祫鏂欏簱鏂囦欢鍚嶏紙鍙戦€佹椂鍓嶇疆涓哄綋杞笂涓嬫枃锛夈€?*/
@@ -810,14 +804,6 @@ class ChatViewModel(
     }
 
     /**
-     * 切换手写过程批改模式（T13）。仅题目会话的 UI 会暴露这个开关，
-     * 自由会话不展示、状态恒 false。
-     */
-    fun toggleGrading() {
-        _state.value = _state.value.copy(gradingMode = !_state.value.gradingMode)
-    }
-
-    /**
      * 把一条助手回复存入题目备注（T13）。
      *
      * 追加而不是覆盖：`updateNote` 会 trim，这里自己拼好换行——
@@ -877,7 +863,15 @@ class ChatViewModel(
         }
     }
 
-    fun send() {
+    /**
+     * [forceGrading]（v0.0.121，issue #36）：这一轮按批改模式发。
+     *
+     * 批改开关已从输入栏拆掉（题目会话与普通对话同一个输入栏），
+     * 批改改为对话历史的「题目批改」入口：拍完照自动发送的**这一轮**
+     * 走批改路径（OCR 手写过程 + 注入批改指令），会话本身不粘住批改态——
+     * 下一轮用户想正常聊就正常聊。
+     */
+    fun send(forceGrading: Boolean = false) {
         val current = _state.value
         // `generationActive` 是**本地**的在途守卫：`isStreaming` 由后台服务
         // 通过总线回报，服务启动到回报之间有几毫秒窗口——用户在这窗口里
@@ -907,7 +901,7 @@ class ChatViewModel(
         // T13 批改校验**必须在清空状态之前**（v0.0.66 修复）：旧实现先清空
         // input + 附件、清掉草稿，然后才校验「批改需要图片」——校验失败时
         // 用户打的字与选好的图已经全没了。
-        if (current.gradingMode &&
+        if (forceGrading &&
             ready.none { it.prepared?.kind == AttachmentKind.IMAGE && it.prepared?.ok == true }
         ) {
             _events.trySend(ChatEvent.Error("批改模式需要附上手写过程照片"))
@@ -939,7 +933,7 @@ class ChatViewModel(
             // 批改不是独立页面，是对话的一种发送模式：普通文字/附件照旧，
             // 开关开启时才走下面这条「先 OCR、再拼文、后注入指令」的路。
             var messageText = text
-            if (current.gradingMode) {
+            if (forceGrading) {
                 val images = ready
                     .mapNotNull { it.prepared }
                     .filter { it.kind == AttachmentKind.IMAGE && it.ok }
@@ -1012,7 +1006,7 @@ class ChatViewModel(
                 text = messageText,
                 attachments = ready.mapNotNull { it.prepared },
                 isRetry = false,
-                grading = current.gradingMode,
+                grading = forceGrading,
                 libraryPaths = libraryPaths
             )
         }

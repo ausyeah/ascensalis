@@ -60,7 +60,6 @@ import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -181,13 +180,10 @@ internal fun ChatInputBar(
     onSteer: () -> Unit = {},
     onAttach: () -> Unit,
     onPickModel: () -> Unit,
-    onRemoveAttachment: (Long) -> Unit,
-    /** 批改模式开闭（T13）。 */
-    gradingMode: Boolean = false,
-    /** 是否展示批改开关：仅题目会话。 */
-    gradingVisible: Boolean = false,
-    onToggleGrading: () -> Unit = {}
+    onRemoveAttachment: (Long) -> Unit
 ) {
+    // v0.0.121（issue #36）：批改开关从输入栏拆掉——题目会话与普通对话
+    // 用同一个输入栏；批改改走对话历史的「题目批改」入口。
     // 输入栏与画布同色、零阴影，层次靠顶部 1dp 描边（与门户顶栏同一手法）：
     // 键盘弹出/收起时表面不再明暗跳变，只有一条静默的界线。
     val inputBarBorder = MaterialTheme.colorScheme.outlineVariant
@@ -241,12 +237,7 @@ internal fun ChatInputBar(
                 onValueChange = onTextChange,
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = {
-                    Text(
-                        stringResource(
-                            if (gradingMode) R.string.chat_input_hint_grading
-                            else R.string.chat_input_hint
-                        )
-                    )
+                    Text(stringResource(R.string.chat_input_hint))
                 },
                 maxLines = 5,
                 shape = MaterialTheme.shapes.large,
@@ -276,26 +267,6 @@ internal fun ChatInputBar(
                 }
 
                 Spacer(Modifier.width(6.dp))
-
-                // 批改开关（T13）：选中态高亮 + contentDescription 说明。
-                // 只对题目会话显示——自由会话没有题干/答案可对照，批改无从谈起。
-                if (gradingVisible) {
-                    val gradingTint =
-                        if (gradingMode) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    IconButton(
-                        onClick = onToggleGrading,
-                        enabled = !streaming,
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Icon(
-                            Icons.Filled.RateReview,
-                            contentDescription = stringResource(R.string.chat_grading_toggle),
-                            tint = gradingTint
-                        )
-                    }
-                    Spacer(Modifier.width(6.dp))
-                }
 
                 // 模型选择入口：圆形图标 + 当前模型名 + 下拉箭头。
                 // 一个 provider 常供应几十个模型，点这里弹出完整列表。
