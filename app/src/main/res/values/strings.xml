@@ -611,11 +611,13 @@
     <string name="chat_tool_photo">拍题讲解</string>
     <string name="chat_tool_translate">英语翻译</string>
     <string name="chat_tool_essay">作文批改</string>
+    <string name="chat_tool_grade">题目批改</string>
     <string name="chat_tool_diagram">绘图生图</string>
     <string name="home_snap_ask">拍题讲解</string>
     <string name="swipe_pin_action">置顶</string>
     <string name="swipe_unpin_action">取消置顶</string>
     <string name="capture_hint_essay">先拍题目要求，再拍作文，拍完点完成</string>
+    <string name="capture_hint_grade">先拍题目，再拍答案，拍完点完成</string>
     <string name="capture_hint_translate">拍下要翻译的英文，拍完直接讲解</string>
     <string name="chat_tool_needs_llm">需配模型</string>
     <string name="chat_tool_needs_ocr">需配识别</string>
@@ -727,8 +729,6 @@
     <string name="review_notification_title_99">今天有 99+ 道错题待复习</string>
     <!-- ===== T4 编辑页草稿防丢 ===== -->
     <!-- ===== T13 手写过程批改 ===== -->
-    <string name="chat_grading_toggle">批改我的解题过程</string>
-    <string name="chat_input_hint_grading">已开启批改：附上手写过程照片，发送后 AI 逐步对照</string>
     <string name="chat_save_to_note">存入题目备注</string>
     <string name="capture_chat_batch_count">本批 %1$d 张</string>
     <string name="capture_chat_batch_done">完成</string>
@@ -779,6 +779,8 @@
     <string name="pomodoro_give_up">放弃本次计时</string>
     <string name="pomodoro_cd_start">开始</string>
     <string name="pomodoro_cd_stop_record">结束并记录</string>
+    <string name="pomodoro_cd_pause">暂停</string>
+    <string name="pomodoro_cd_resume">继续</string>
     <string name="pomodoro_pick_duration_title">设置时长</string>
     <string name="pomodoro_wheel_hour">小时</string>
     <string name="pomodoro_wheel_minute">分钟</string>

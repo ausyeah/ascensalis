@@ -9,7 +9,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -33,7 +32,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,9 +39,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -55,6 +50,9 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -370,62 +368,59 @@ private fun TimerDial(
             Spacer(Modifier.height(10.dp))
 
             // ---- 主操作：时间正下方 ----
-            // v0.0.84：裸图标看着太秃（用户「显示有点丑」），给每颗按钮补
-            // 一层安静的圆底——开始用 primaryContainer 呼应主题色，暂停用
-            // 中性容器色，停止仍是唯一的彩色（errorContainer）。尺寸克制，
-            // 不回到早期那颗大胶囊。
+            // v0.0.121：圆底全部撤掉（用户点名「蓝色小圆圈就不要了…直接悬浮在
+            // 白底上」）。图标本身就带圆角（Rounded 系字形），白底上一颗
+            // 大号蓝三角、一颗红色圆润方块，比包在圆圈里干净得多。
+            // 热区仍是 56/64dp：没有背景不等于没有触感。
             when (status) {
                 RunStatus.IDLE -> {
                     // 开始：长按循环切换模式（隐藏手势，顶部另有可见 Tab）
                     Box(
                         modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .size(64.dp)
                             .combinedClickable(onClick = onStart, onLongClick = onCycleMode),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Filled.PlayArrow,
+                            Icons.Rounded.PlayArrow,
                             contentDescription = stringResource(R.string.pomodoro_cd_start),
-                            modifier = Modifier.size(30.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            modifier = Modifier.size(52.dp),
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
                 else -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                         Box(
                             modifier = Modifier
-                                .size(52.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .size(56.dp)
                                 .combinedClickable(
                                     onClick = if (status == RunStatus.RUNNING) onPause else onResume
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                if (status == RunStatus.RUNNING) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = if (status == RunStatus.RUNNING) "暂停" else "继续",
-                                modifier = Modifier.size(26.dp),
-                                tint = MaterialTheme.colorScheme.onSurface
+                                if (status == RunStatus.RUNNING) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = stringResource(
+                                    if (status == RunStatus.RUNNING) R.string.pomodoro_cd_pause
+                                    else R.string.pomodoro_cd_resume
+                                ),
+                                modifier = Modifier.size(44.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         // 停止：唯一允许出现的彩色，且只给破坏性操作
                         Box(
                             modifier = Modifier
-                                .size(52.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.errorContainer)
+                                .size(56.dp)
                                 .combinedClickable(onClick = onStopSave),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                Icons.Filled.Stop,
+                                Icons.Rounded.Stop,
                                 contentDescription = stringResource(R.string.pomodoro_cd_stop_record),
-                                modifier = Modifier.size(24.dp),
-                                tint = MaterialTheme.colorScheme.onErrorContainer
+                                modifier = Modifier.size(44.dp),
+                                tint = MaterialTheme.colorScheme.error
                             )
                         }
                     }
