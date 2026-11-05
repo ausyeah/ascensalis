@@ -319,11 +319,17 @@ private fun MemoryComposer(
     }
 }
 
-private fun formatMemoryTime(millis: Long): String =
+/**
+ * 记忆库版本时间。
+ *
+ * 月/日补零（`yyyy-MM-dd`）：资料库的文件行是 `2026-11-04 16:18`，同一台设备上
+ * 两个页面各用一套格式，看起来像两个不同的日期写法。
+ */
+internal fun formatMemoryTime(millis: Long): String =
     if (millis <= 0L) {
         ""
     } else {
-        DateTimeFormatter.ofPattern("yyyy-M-d HH:mm")
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
             .withZone(ZoneId.systemDefault())
             .format(Instant.ofEpochMilli(millis))
     }
