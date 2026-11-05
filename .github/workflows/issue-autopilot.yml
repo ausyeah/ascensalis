@@ -1,0 +1,268 @@
+name: Issue Autopilot
+
+# 自动修复流水线（配合 scripts/autopilot.ps1 里的本地 ZCode agent 使用）。
+#
+# 完整闭环：
+#   人工给 issue 打 autopilot 标签
+#     → 本地 watcher（scripts/autopilot.ps1，每 15 分钟）拉起 ZCode agent 读 issue、修复、提 PR
+#     → 本 workflow 的 merge job 在 CI 绿后自动合并
+#     → finalize job 打 tag，触发现有 android.yml 出正式签名 APK 并挂 Release
+#     → 拿到 APK 下载链接后，关闭 issue、贴链接、清理 autopilot 标签
+#
+# 三条不变量（改动前务必读）：
+#   1. 只处理打了 autopilot 标签的 issue，绝不碰其它 issue；
+#   2. CI 不绿不合并，合并不出包，不出包不关 issue——关早了等于没修；
+#   3. 一次只修一个 issue（本地 watcher 串行执行），避免版本号互相覆盖。
+
+on:
+  issues:
+    types: [labeled]
+  pull_request:
+    # 必须带上 labeled：agent 是先开 PR 再打 autopilot 标签的，
+    # 只靠 opened 会漏掉「标签晚到」这种情况，merge job 就永远不会跑。
+    types: [opened, synchronize, reopened, labeled, closed]
+  schedule:
+    # 每 3 小时巡检一次「自动修复停滞」的 issue。故意避开整点，减少 runner 排队。
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: '手动把某个 issue 塞进自动修复队列（填 issue 编号，可留空）'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  REPO: ${{ github.repository }}
+
+jobs:
+  claim:
+    name: 认领 issue
+    # 只有打上 autopilot 标签这一步才触发认领。
+    if: github.event_name == 'issues' && github.event.label.name == 'autopilot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 标记处理中并回执
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --add-label autopilot-active
+          gh issue comment "$ISSUE" --body "🤖 已被自动修复流水线认领。\n\n本地 agent 会拉起一个开发会话读取本 issue，修复后提 PR；PR 合并后自动出包并关闭本 issue。\n\n- 处理分支：\`fix/issue-$ISSUE\`"
+
+  enqueue:
+    name: 手动入队
+    if: github.event_name == 'workflow_dispatch' && inputs.issue_number != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: 打 autopilot 标签
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ inputs.issue_number }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --add-label autopilot
+          echo "已给 #$ISSUE 打上 autopilot 标签，本地 watcher 会在下一轮拉起 agent。"
+
+  merge:
+    name: CI 通过后自动合并
+    # 只对打了 autopilot 标签、且分支名形如 fix/issue-N 的 PR 生效。
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      startsWith(github.event.pull_request.head.ref, 'fix/issue-') &&
+      contains(github.event.pull_request.labels.*.name, 'autopilot')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 等待检查通过后合并
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # labeled / synchronize 会重复触发同一个 PR，已合并的直接跳过
+          STATE=$(gh pr view "$PR" --json state --jq '.state')
+          if [ "$STATE" != "OPEN" ]; then
+            echo "PR #$PR 当前状态 $STATE，无需再合并"
+            exit 0
+          fi
+          # 最多等 40 分钟（本地跑单测 + 模拟器回归通常比 CI 慢）
+          if ! gh pr checks "$PR" --watch --interval 30 --fail-fast >/dev/null 2>&1; then
+            echo "::error::PR #$PR 的检查未通过，保持打开等待人工介入"
+            exit 1
+          fi
+          # 用 merge 而不是 squash：仓库规则要求「每个任务一个 commit、版本号单独一个 commit」，
+          # squash 会把这些 commit 压成一个，规则就失效了。
+          gh pr merge "$PR" --merge --delete-branch
+          echo "PR #$PR 已合并"
+
+  finalize:
+    name: 合并后出包并收尾
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'fix/issue-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出合并结果
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: 读版本号并校验
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          CODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts | head -1)
+          if [ -z "$VERSION" ] || [ -z "$CODE" ]; then
+            echo "::error::读不到 versionName/versionCode，agent 可能忘了单独提交版本号"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "目标版本：v$VERSION（versionCode=$CODE）"
+
+      - name: 校验 tag 未被占用且版本单调递增
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          CODE: ${{ steps.ver.outputs.code }}
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::tag $TAG 已存在，换个版本号再合并"
+            exit 1
+          fi
+          # 拿历史最大的 versionCode 比对，防止把版本号往回改
+          MAX=0
+          for t in $(git tag -l 'v*' --sort=-v:refname | head -20); do
+            C=$(git show "$t:app/build.gradle.kts" 2>/dev/null | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' | head -1 || true)
+            [ -n "$C" ] && [ "$C" -gt "$MAX" ] && MAX=$C
+          done
+          if [ "$CODE" -le "$MAX" ]; then
+            echo "::error::versionCode=$CODE 未超过历史最大值 $MAX，版本号必须单调递增"
+            exit 1
+          fi
+          echo "版本号校验通过：$CODE > $MAX"
+
+      - name: 打 tag 并推送（触发现有 android.yml 出正式签名包）
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          PAT: ${{ secrets.AUTOPILOT_PAT }}
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          # 关键：GITHUB_TOKEN 推出去的事件不会触发其它 workflow，
+          # 用它推 tag → android.yml 不启动 → 没有 APK。
+          # 必须用 PAT（repo scope 即可）。
+          TOKEN="${PAT:-}"
+          if [ -z "$TOKEN" ]; then
+            TOKEN="$REPO_TOKEN"
+            echo "::warning::未配置 AUTOPILOT_PAT，改用 GITHUB_TOKEN 推 tag；"
+            echo "::warning::这种情况下 android.yml 可能不会自动启动，需要手动重打 tag 或手动触发构建。"
+          fi
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
+          git tag -a "$TAG" -m "错题本 $TAG"
+          git push origin "$TAG"
+          git remote set-url origin "https://github.com/${REPO}.git"
+          echo "tag $TAG 已推送，CI 开始编译。"
+
+      - name: 等待 Release 与 APK 就绪
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          DEADLINE=$(( $(date +%s) + 40 * 60 ))
+          URL=""
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            sleep 20
+            BODY=$(gh api "repos/$REPO/releases/tags/$TAG" 2>/dev/null || true)
+            [ -z "$BODY" ] && continue
+            URL=$(printf '%s' "$BODY" | python3 -c "
+          import sys,json
+          try:
+              d=json.load(sys.stdin)
+          except Exception:
+              print(''); raise SystemExit
+          for a in d.get('assets',[]):
+              if a.get('name','').endswith('.apk'):
+                  print(a.get('browser_download_url','')); break
+          ")
+            [ -n "$URL" ] && break
+            echo "  编译中……"
+          done
+          if [ -z "$URL" ]; then
+            echo "::error::等待 APK 超时，issue 保持打开"
+            exit 1
+          fi
+          echo "apk_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "APK 就绪：$URL"
+
+      - name: 关闭 issue、清理标签、回填下载链接
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          APK_URL: ${{ steps.rel.outputs.apk_url }}
+        run: |
+          set -euo pipefail
+          ISSUE="${BRANCH##*issue-}"
+          if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
+            ISSUE=$(gh pr view "$PR" --json body --jq '.body' | grep -oE '(?i)closes +#[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+          fi
+          if [ -z "$ISSUE" ]; then
+            echo "::warning::从分支名与 PR 正文都没解析出 issue 编号，跳过收尾"
+            exit 0
+          fi
+          gh issue comment "$ISSUE" --body "✅ 已修复并发布 v$VERSION。\n\n- PR：#$PR\n- 下载：$APK_URL\n\n本 issue 自动关闭。"
+          gh issue edit "$ISSUE" --add-label autopilot-done --remove-label autopilot --remove-label autopilot-active
+          gh issue close "$ISSUE"
+          echo "issue #$ISSUE 已关闭并清理标签"
+
+  watchdog:
+    name: 巡检自动修复停滞
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 找出长期没有进展的 issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NOW=$(date +%s)
+          gh issue list --label autopilot-active --state open --json number,title,updatedAt --limit 50 \
+            | python3 -c "
+          import sys,json,datetime
+          now=datetime.datetime.now(datetime.timezone.utc)
+          for it in json.load(sys.stdin):
+              t=datetime.datetime.fromisoformat(it['updatedAt'].replace('Z','+00:00'))
+              age=(now-t).total_seconds()/3600
+              if age>8:
+                  print(it['number'], round(age,1))
+          " > /tmp/stalled.txt || true
+          while read -r NUM AGE; do
+            [ -z "$NUM" ] && continue
+            # 有 open PR 说明还在推进，就不打扰
+            PRCOUNT=$(gh pr list --search "fix/issue-$NUM in:title" --state open --json number --limit 5 | python3 -c "import sys,json;print(len(json.load(sys.stdin)))")
+            if [ "$PRCOUNT" = "0" ]; then
+              gh issue comment "$NUM" --body "⏰ 自动修复似乎停滞在 #$NUM（已 $AGE 小时无更新，也没有对应的 open PR）。\n\n可能是本地 agent 没跑或中途失败，可以手动 \`workflow_dispatch\` 重新入队，或直接人工处理。"
+            fi
+          done < /tmp/stalled.txt
+          echo "巡检完成"
