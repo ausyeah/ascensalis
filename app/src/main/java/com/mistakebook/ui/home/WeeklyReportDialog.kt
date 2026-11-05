@@ -124,8 +124,13 @@ fun WeeklyReportDialog(
         confirmButton = {
             if (state.generating) {
                 // 生成中不给确认键：关闭只能走 onDismissRequest 之外的路（这里同样禁止），
-                // 用户唯一的等待出口就是让它跑完——LLM 调用没有取消语义
-                Text(stringResource(R.string.weekly_report_wait))
+                // 用户唯一的等待出口就是让它跑完——LLM 调用没有取消语义。
+                // v0.0.121：原来是裸 Text，和旁边 40dp 高的 TextButton 在同一行里
+                // 一高一矮一左一右（用户截图里的「异常错位」）——包成同样禁用的
+                // TextButton，两颗按钮同高同基线。
+                TextButton(onClick = {}, enabled = false) {
+                    Text(stringResource(R.string.weekly_report_wait))
+                }
             } else {
                 Button(onClick = { viewModel.generate() }) {
                     Text(
