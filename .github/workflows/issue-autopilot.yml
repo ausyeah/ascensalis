@@ -6,7 +6,8 @@ name: Issue Autopilot
 #   人工给 issue 打 autopilot 标签
 #     → 本地 watcher（scripts/autopilot.ps1，每 15 分钟）拉起 ZCode agent 读 issue、修复、提 PR
 #     → 本 workflow 的 merge job 在 CI 绿后自动合并
-#     → finalize job 打 tag，触发现有 android.yml 出正式签名 APK 并挂 Release
+#     → finalize job 打 tag 并显式派发 android.yml，出正式签名 APK 挂 Release
+#       （GITHUB_TOKEN 推 tag 不会自动触发工作流，必须显式 dispatch）
 #     → 拿到 APK 下载链接后，关闭 issue、贴链接、清理 autopilot 标签
 #
 # 三条不变量（改动前务必读）：
@@ -35,6 +36,9 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+  # 需要它来显式派发 android.yml：GITHUB_TOKEN 推 tag 不会触发 push 工作流，
+  # 所以打完 tag 必须再 dispatch 一次，见 finalize 的「打 tag」步骤。
+  actions: write
 
 env:
   REPO: ${{ github.repository }}
@@ -154,28 +158,23 @@ jobs:
           fi
           echo "版本号校验通过：$CODE > $MAX"
 
-      - name: 打 tag 并推送（触发现有 android.yml 出正式签名包）
+      - name: 打 tag 并派发构建
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-          PAT: ${{ secrets.AUTOPILOT_PAT }}
-          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TAG="v$VERSION"
-          # 关键：GITHUB_TOKEN 推出去的事件不会触发其它 workflow，
-          # 用它推 tag → android.yml 不启动 → 没有 APK。
-          # 必须用 PAT（repo scope 即可）。
-          TOKEN="${PAT:-}"
-          if [ -z "$TOKEN" ]; then
-            TOKEN="$REPO_TOKEN"
-            echo "::warning::未配置 AUTOPILOT_PAT，改用 GITHUB_TOKEN 推 tag；"
-            echo "::warning::这种情况下 android.yml 可能不会自动启动，需要手动重打 tag 或手动触发构建。"
-          fi
-          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
           git tag -a "$TAG" -m "错题本 $TAG"
           git push origin "$TAG"
-          git remote set-url origin "https://github.com/${REPO}.git"
-          echo "tag $TAG 已推送，CI 开始编译。"
+
+          # 关键：GitHub 规定「由 GITHUB_TOKEN 触发的事件不会再启动新的工作流」。
+          # 所以上面这次 push 不会自动跑 android.yml —— 必须显式派发一次，
+          # 且 --ref 指到 tag，这样 android.yml 里 startsWith(github.ref,'refs/tags/v')
+          # 的发布分支判定仍然成立，APK 照样挂到 Release 上。
+          gh workflow run android.yml --repo "$REPO" --ref "$TAG"
+          echo "tag $TAG 已推送，并已派发 android.yml 构建。"
 
       - name: 等待 Release 与 APK 就绪
         id: rel

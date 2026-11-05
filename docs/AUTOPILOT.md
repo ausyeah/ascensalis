@@ -24,7 +24,7 @@
                         │
                         └─→ [A] finalize job
                                ├─ 读 app/build.gradle.kts 的版本号，校验单调递增
-                               ├─ 打 tag 并推送（用 AUTOPILOT_PAT，见下）
+                               ├─ 打 tag 并显式派发 android.yml（GITHUB_TOKEN 推 tag 不会自动触发，见下）
                                ├─ 等 android.yml 出正式签名 APK
                                └─ 回填下载链接 + 关闭 issue + 换 autopilot-done 标签
 ```
@@ -35,16 +35,20 @@
 
 `autopilot`（入队）→ `autopilot-active`（处理中）→ `autopilot-done`（已发布）。
 
-### 2. `AUTOPILOT_PAT` secret（必配，否则出不了包）
+### 2. `android.yml` 的派发（已内置，无需配置）
 
-**为什么必须**：用仓库自带的 `GITHUB_TOKEN` 推送 tag，GitHub 不会因为这次 push 再触发 `android.yml`，结果就是 tag 有了、APK 没有。
+GitHub 有条规则：**由 `GITHUB_TOKEN` 触发的事件不会再启动新的工作流**。所以 `finalize` 用 `GITHUB_TOKEN` 推 tag 之后，`android.yml` 不会自己跑起来——结果就是「tag 有了、APK 没有」。
 
-配法：Settings → Secrets and variables → Actions → New repository secret
+解决办法不是配 PAT，而是推完 tag 后显式派发一次：
 
-- Name：`AUTOPILOT_PAT`
-- Value：一个 classic PAT，勾 `repo` 即可
+```bash
+gh workflow run android.yml --repo <repo> --ref "v0.0.121"
+```
 
-没配也能跑，只是 finalize 会打一条 warning，需要手动重打 tag。
+`--ref` 指到 tag，`workflow_dispatch` 运行时 `github.ref` 就是 `refs/tags/v0.0.121`，
+`android.yml` 里 `startsWith(github.ref, 'refs/tags/v')` 的发布分支判定照样成立，APK 正常挂 Release。
+
+→ 需要给 `issue-autopilot.yml` 开 `actions: write` 权限（已写在文件里）。
 
 ### 3. 本机 watcher（Windows 计划任务）
 
