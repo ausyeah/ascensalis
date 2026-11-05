@@ -229,6 +229,7 @@ fun LibraryScreen(
                 model = embeddingModel,
                 onModelChange = { embeddingModel = it },
                 progress = indexProgress,
+                hasFiles = files.isNotEmpty(),
                 onIndex = { reindex() }
             )
 
@@ -628,11 +629,32 @@ private fun formatLibrarySize(bytes: Long): String = when {
  * 接口地址与 Key 沿用当前大模型配置（见 [EmbeddingClient] 的 KDoc），
  * 这里只需要多一个模型名。
  */
+/**
+ * 索引状态五种归宿。
+ *
+ * 为什么单独抽出来：`chunks == 0` 有两种完全不同的处境——资料库真的一篇都没有，
+ * 和「有资料但还没建索引」。v0.0.114 巡检发现两者挤在同一句「资料库为空」上，
+ * 明明列表里有 `linear_algebra.md`，状态栏却告诉用户「资料库为空」。
+ */
+internal enum class IndexStatusKind { RUNNING, FAILED, READY, MISSING, EMPTY }
+
+internal fun indexStatusKind(
+    progress: com.mistakebook.data.library.LibraryIndexer.Progress,
+    hasFiles: Boolean
+): IndexStatusKind = when {
+    progress.running -> IndexStatusKind.RUNNING
+    progress.lastError != null -> IndexStatusKind.FAILED
+    progress.chunks > 0 -> IndexStatusKind.READY
+    hasFiles -> IndexStatusKind.MISSING
+    else -> IndexStatusKind.EMPTY
+}
+
 @Composable
 private fun LibraryIndexCard(
     model: String,
     onModelChange: (String) -> Unit,
     progress: com.mistakebook.data.library.LibraryIndexer.Progress,
+    hasFiles: Boolean,
     onIndex: () -> Unit
 ) {
     Column(
@@ -664,14 +686,16 @@ private fun LibraryIndexCard(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val statusText = when {
-                progress.running ->
+            val statusText = when (indexStatusKind(progress, hasFiles)) {
+                IndexStatusKind.RUNNING ->
                     stringResource(R.string.library_index_running, progress.done, progress.total)
-                progress.lastError != null ->
-                    stringResource(R.string.library_index_failed, progress.lastError)
-                progress.chunks > 0 ->
+                IndexStatusKind.FAILED ->
+                    stringResource(R.string.library_index_failed, progress.lastError.orEmpty())
+                IndexStatusKind.READY ->
                     stringResource(R.string.library_index_ready, progress.docs, progress.chunks)
-                else ->
+                IndexStatusKind.MISSING ->
+                    stringResource(R.string.library_index_missing)
+                IndexStatusKind.EMPTY ->
                     stringResource(R.string.library_index_empty)
             }
             Text(
