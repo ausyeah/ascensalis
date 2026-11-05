@@ -374,18 +374,6 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(state.sessionId, state.loading) {
-        // v0.0.121（issue #34）：判「可见消息为空」而不是「消息列表为空」。
-        // 题目上下文是**注入消息**，进会话瞬间就在库里了——原来那条
-        // `messages.isEmpty()` 在题目会话里永远不成立，「预填首问」是死代码。
-        // 现在进题目会话：上方立刻出现题目卡（上下文注入），输入框预填首问。
-        if (state.sessionId != 0L && !state.loading && state.visibleMessageCount == 0 &&
-            questionId != null && state.input.isBlank()
-        ) {
-            viewModel.onInputChange(ChatViewModel.PREFILL_QUESTION)
-        }
-    }
-
     LaunchedEffect(state.needsApiKey) { if (state.needsApiKey) showKeyGate = true }
 
     LaunchedEffect(Unit) {

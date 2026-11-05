@@ -1632,12 +1632,6 @@ class ChatViewModel(
         const val FINISH_REASON_LENGTH = "length"
 
         /**
-         * 从题目页进入时的首问预填。**不自动发送**——
-         * 自动发会白烧 token，而且用户十有八九想改问法。
-         */
-        const val PREFILL_QUESTION = "请讲解这道题，给出详细解题步骤、答案和易错点。"
-
-        /**
          * 「是否压缩」按钮的出现阈值（按上次请求的输入 token 数）。
          *
          * 用户约定：门槛之前压缩按钮不出现——短会话没有压缩价值，
