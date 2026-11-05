@@ -380,10 +380,16 @@ object MathWrap {
                 var j = i + 1
                 while (j < latex.length && latex[j].isLetter()) j++
                 if (j == i + 1) {
+                    // 控制符号（\! \, \; \{ …）：反斜杠与后面的字符是一个原子，
+                    // 绝不能从中间切开——旧版把切点记在 j（反斜杠之后），模型把
+                    // 折行折进命令里时（`rect\` + 换行 + `!\left(...`）就会把
+                    // 孤立的反斜杠留在段尾，KaTeX 报「Unexpected character: '\'」
+                    // （v0.0.121 issue #33 真机用例 2）。切点改记在反斜杠**之前**，
+                    // 两个字符整体去留。
                     i = j + 1
-                    if (j > from + 4 && matrixDepth == 0) {
-                        best = j
-                        if (delimDepth == 0) bestTop = j
+                    if (i > from + 4 && i <= searchEnd && matrixDepth == 0) {
+                        best = i
+                        if (delimDepth == 0) bestTop = i
                     }
                     continue
                 }

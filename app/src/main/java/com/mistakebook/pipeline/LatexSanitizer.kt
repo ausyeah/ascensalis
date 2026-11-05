@@ -46,6 +46,13 @@ object LatexSanitizer {
     fun balanceDelimiters(input: String): String {
         val opens = LEFT_DELIMITER_REGEX.findAll(input).count()
         val closes = RIGHT_DELIMITER_REGEX.findAll(input).count()
+        // v0.0.121（issue #33 真机用例 1）：`\leftrightarrow` / `\leftarrow`
+        // 里的 `\left`、`\rightarrow` 里的 `\right` **不是定界符命令**。
+        // 旧的裸 `\\left\s*` 把它们也算进去：频移公式
+        // `g(t)\,e^{j2\pi f_0 t} \leftrightarrow G(f-f_0)` 被数出一个孤立的
+        // `\left`，于是末尾补上 `\right.`——KaTeX 直接报
+        // 「Expected 'EOF', got '\right'」，整条公式挂掉。
+        // 正则加字母负向断言后，只有真正的 `\left(` / `\right)` 才计数。
         if (opens <= closes) return input
         // \left 比 \right 多几个，在末尾补对应数量的 \right.
         return input.trimEnd() + " ".repeat(opens - closes) + "\\right."
@@ -483,10 +490,26 @@ object LatexSanitizer {
     /** tabular 环境：KaTeX 不支持，改写成 array。 */
     private val ENV_TABULAR = Regex("""\\(?:begin|end)\{tabular\}""")
 
+    /**
+     * 孤立的控制反斜杠降级成空格（v0.0.121，issue #33 真机用例 2）。
+     *
+     * 模型会把折行折进命令里：`rect\` + 换行 + `!\left(...`——反斜杠后面
+     * 直接跟空白。LaTeX 里 `\ ` 是显式空格，KaTeX 却对它报
+     * 「Unexpected character: '\'」。按语义替换成一个空格：渲染不变，
+     * 公式活了。`\\`（换行符）不受影响——它的第二个反斜杠前面还是反斜杠，
+     * 被负向环视排除。
+     */
+    internal fun normalizeControlBackslashBeforeSpace(input: String): String =
+        input.replace(CONTROL_BACKSLASH_BEFORE_SPACE, " ")
+
+    /** 单个 `\` 且后面紧跟空白（前面不是 `\`，排除换行符 `\\`）。 */
+    private val CONTROL_BACKSLASH_BEFORE_SPACE = Regex("""(?<!\\)\\(?=\s)""")
+
     /** 完整清洗流水线。 */
     fun clean(input: String): String {
         if (input.isBlank()) return input
         var out = stripStrayDollar(input)
+        out = normalizeControlBackslashBeforeSpace(out)
         // 救援必须发生在命令降级之前：\label \ce 若先走降级，
         // 反斜杠被剥掉后就再也认不出来了。
         out = rescueUnsupported(out)
@@ -567,8 +590,9 @@ object LatexSanitizer {
     /** 匹配 `\command` 或 `\command*`，只取命令名部分。 */
     private val COMMAND_REGEX = Regex("""\\([a-zA-Z]+)\*?""")
 
-    private val LEFT_DELIMITER_REGEX = Regex("""\\left\s*""")
-    private val RIGHT_DELIMITER_REGEX = Regex("""\\right\s*""")
+    // (?![a-zA-Z])：`\leftrightarrow` / `\rightarrow` 的前缀不算数（issue #33）
+    private val LEFT_DELIMITER_REGEX = Regex("""\\left(?![a-zA-Z])\s*""")
+    private val RIGHT_DELIMITER_REGEX = Regex("""\\right(?![a-zA-Z])\s*""")
 
     /**
      * 判断清洗后是否值得尝试渲染。
