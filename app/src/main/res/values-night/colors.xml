@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 深色主题下的桌面自适应图标背景：与深色版徽章底色一致（#262A32），
+     前景由 drawable-night/ic_launcher_foreground 自动切换。 -->
+<resources>
+    <color name="ic_launcher_background">#262A32</color>
+</resources>

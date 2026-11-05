@@ -56,6 +56,19 @@ object AppUpdate {
     private const val TAG = "AppUpdate"
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
 
+    /**
+     * 备用检查通道（v0.0.122）：不走 api.github.com。
+     *
+     * GitHub 对未认证 API 的限额是**每 IP 每小时 60 次**，手机运营商 NAT 下
+     * 几十个人共享一个出口，超了就是 403——用户看到的「检查失败：GitHub 返回
+     * 403」几乎全是它。这个页面地址是普通网站路径，不占 API 限额；
+     * 访问它会 302 到 `/releases/tag/vX.Y.Z`，从最终地址里就能拿到版本号。
+     */
+    private const val RELEASES_LATEST_PAGE = "https://github.com/$REPO/releases/latest"
+
+    /** GitHub 要求所有请求带 User-Agent；显式声明一个，别依赖 OkHttp 的默认值。 */
+    private const val USER_AGENT = "ascensalis-app"
+
     /** 下载目录：缓存区即可，装完系统会自己清。 */
     private const val UPDATE_DIR = "updates"
 
@@ -136,11 +149,33 @@ object AppUpdate {
      *
      * 只认**带 APK 资产的** Release：有的 tag 可能只是打标记（比如灰度），
      * 没有可下载的包，那就不算「有更新」。
+     *
+     * v0.0.122 起是**双通道**：先走 API（信息最全——说明、包大小），被限流
+     * 或任何原因失败时自动切备用通道（releases/latest 页面的 302 重定向，
+     * 不占 API 限额）。两条都失败才把错误抛给界面——且错误信息里带主通道
+     * 的失败原因，用户看到的不再是干巴巴的「GitHub 返回 403」。
      */
     suspend fun latestRelease(currentVersion: String): Release? = withContext(Dispatchers.IO) {
+        try {
+            latestReleaseViaApi(currentVersion)
+        } catch (apiError: Exception) {
+            try {
+                latestReleaseViaRedirect(currentVersion)
+            } catch (fallbackError: Exception) {
+                throw IllegalStateException(
+                    "GitHub 接口受限且备用通道也不可用（${apiError.message}）",
+                    fallbackError
+                )
+            }
+        }
+    }
+
+    /** 主通道：API JSON，带完整说明与 APK 大小。 */
+    private suspend fun latestReleaseViaApi(currentVersion: String): Release? = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(API_LATEST)
             .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
             .build()
         // 网络异常**往上抛**：界面要能区分「已是最新」和「根本没查成」，
         // 全都吞掉的话用户看到「已是最新」却其实是断网了。
@@ -168,6 +203,54 @@ object AppUpdate {
             apkSize = apk.string("size")?.toLongOrNull() ?: 0L
         )
     }
+
+    /**
+     * 备用通道：跟随 `releases/latest` 的 302，从最终地址拿 tag。
+     *
+     * 说明与包大小拿不到——说明留空（下载页里看得到），大小置 0：
+     * 下载进度对 total<=0 本来就是「不定进度」处理，不影响装包。
+     * APK 地址按 CI 的命名规则拼出来（android.yml：`mistakebook-<tag>-android.apk`）。
+     */
+    private suspend fun latestReleaseViaRedirect(currentVersion: String): Release? = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(RELEASES_LATEST_PAGE)
+            .header("User-Agent", USER_AGENT)
+            .build()
+        val tag = client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IllegalStateException("GitHub 页面返回 ${response.code}")
+            }
+            val url = response.request.url.toString()
+            parseTagFromRedirectUrl(url)
+                ?: throw IllegalStateException("没能从 GitHub 页面地址解析出版本：$url")
+        } ?: return@withContext null
+        val versionName = parseVersion(tag)?.joinToString(".") ?: return@withContext null
+        if (compareVersions(versionName, currentVersion) <= 0) return@withContext null
+
+        Release(
+            tag = tag,
+            versionName = versionName,
+            notes = "",
+            apkUrl = apkDownloadUrl(tag),
+            apkSize = 0L
+        )
+    }
+
+    /**
+     * 从 `releases/latest` 302 后的最终地址里解析 tag（纯函数，单测见
+     * AppUpdateFallbackTest）。
+     *
+     * 只认「主版本.次版本.修订号」的 tag：`/releases/latest` 自身（没发生
+     * 重定向）与预发布号都返回 null——后者本来就不是能安全比较的版本。
+     */
+    internal fun parseTagFromRedirectUrl(url: String): String? {
+        val match = Regex("""/releases/tag/(v?\d+\.\d+\.\d+)/?(?:[?#].*)?$""").find(url)
+        return match?.groupValues?.get(1)
+    }
+
+    /** CI 产物命名：tag 里的版本拼进文件名（android.yml 的 Prepare APK 步骤）。 */
+    internal fun apkDownloadUrl(tag: String): String =
+        "https://github.com/$REPO/releases/download/$tag/mistakebook-$tag-android.apk"
 
     /**
      * 给界面展示用的说明文本：剥掉 Markdown 的标题井号与加粗星号（v0.0.111）。

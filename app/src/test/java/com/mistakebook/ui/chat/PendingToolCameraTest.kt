@@ -73,17 +73,31 @@ class PendingToolCameraTest {
     }
 
     @Test
-    fun `桌面图标前景是黑墨而不是白墨`() {
-        // 之前把前景做成白山、背景做成黑色，等于把 artwork 整体反相：
-        // 山体里的白色雪线与缝隙变成黑色，中间那道「A」形的白三角就消失了，
-        // 远看只剩一团白。桌面图标必须保留原 artwork 的黑白关系：黑山白底。
-        val launcher = readSource("src/main/res/values/colors.xml")
+    fun `桌面图标是山岳徽章且明暗两版随主题切换`() {
+        // v0.0.122（用户定稿）：桌面图标整体换成手作的山岳徽章——
+        // 自适应图标前景是徽章位图（缩到安全区居中），背景取徽章自身的
+        // 底色（浅色奶油 / 深色炭黑，values-night 切换）；前景在
+        // drawable-night 里有深色版，系统夜间模式跟着换。
+        val colors = readSource("src/main/res/values/colors.xml")
         assertTrue(
-            "桌面图标背景必须是白的",
-            launcher.contains("<color name=\"ic_launcher_background\">#FFFFFFFF</color>")
+            "浅色桌面背景必须取徽章奶油底色",
+            colors.contains("<color name=\"ic_launcher_background\">#F3F0EB</color>")
         )
-        val png = File("src/main/res/drawable-nodpi/ic_launcher_foreground.png")
-        assertTrue("桌面图标前景必须是黑墨位图", png.exists())
+        val night = readSource("src/main/res/values-night/colors.xml")
+        assertTrue(
+            "深色桌面背景必须取徽章炭黑底色",
+            night.contains("<color name=\"ic_launcher_background\">#262A32</color>")
+        )
+        assertTrue(
+            "浅色前景必须是徽章位图",
+            File("src/main/res/drawable-nodpi/ic_launcher_foreground.png").exists() ||
+                File("app/src/main/res/drawable-nodpi/ic_launcher_foreground.png").exists()
+        )
+        assertTrue(
+            "深色前景必须在 drawable-night（少了它夜间桌面就是奶油底贴浅徽章）",
+            File("src/main/res/drawable-night/ic_launcher_foreground.png").exists() ||
+                File("app/src/main/res/drawable-night/ic_launcher_foreground.png").exists()
+        )
     }
 
     private fun readSource(path: String): String {

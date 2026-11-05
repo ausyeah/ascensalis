@@ -790,7 +790,8 @@ private fun ChatEmptyState(onSnapAsk: () -> Unit, modifier: Modifier = Modifier)
             contentDescription = stringResource(R.string.home_snap_ask),
             modifier = Modifier
                 .size(128.dp)
-                .clip(RoundedCornerShape(24.dp))
+                // 不再加 clip：徽章 PNG 自带与外框对齐的透明圆角，
+                // 再叠一层 clip 会在圆角处切掉外框（用户截图指出的裁切伤）。
                 .clickable(role = Role.Button, onClick = onSnapAsk)
         )
         Spacer(Modifier.height(18.dp))
