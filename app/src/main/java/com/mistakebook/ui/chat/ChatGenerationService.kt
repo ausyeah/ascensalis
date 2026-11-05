@@ -442,6 +442,7 @@ class ChatGenerationService : Service() {
                     val stageLabel = when {
                         call.name == SearchTools.WEB_SEARCH -> "正在联网搜索…"
                         com.mistakebook.data.chat.MathTools.handles(call.name) -> "正在精确计算…"
+                        call.name == com.mistakebook.data.library.LibraryTools.SEARCH -> "正在检索资料库…"
                         com.mistakebook.data.library.LibraryTools.handles(call.name) -> "正在读取资料库…"
                         call.name == MediaTools.DESCRIBE_IMAGE ||
                             call.name == MediaTools.OCR_IMAGE -> "正在查看图片…"
@@ -514,6 +515,27 @@ class ChatGenerationService : Service() {
                             generated = generatedImages,
                             stage = { stage -> publishStage(currentText, stage) }
                         )
+
+                        // 资料库检索（v0.0.120）：走与资料库页同一套
+                        // RRF 混合检索，只回最相关的几段，避免模型整份读。
+                        com.mistakebook.data.library.LibraryTools.SEARCH -> {
+                            val query = com.mistakebook.data.library.LibraryTools
+                                .parseSearchQuery(call.arguments)
+                            if (query == null) {
+                                "检索未执行：参数缺少 query 字段，请修正后重试。"
+                            } else {
+                                val config = runCatching {
+                                    container.settingsStore.embeddingConfigNow()
+                                }.getOrDefault(com.mistakebook.net.llm.EmbeddingConfig())
+                                val hits = container.libraryIndexer.search(
+                                    query = query,
+                                    config = config,
+                                    profile = profile,
+                                    topK = 6
+                                )
+                                com.mistakebook.data.library.LibraryTools.formatHits(query, hits)
+                            }
+                        }
 
                         // 资料库只读工具（v0.0.57）。目录在这里解析：
                         // AppFiles.rootDir + "library"，与资料库页面同一处。

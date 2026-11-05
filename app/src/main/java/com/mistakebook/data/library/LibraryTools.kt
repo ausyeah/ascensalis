@@ -37,8 +37,11 @@ object LibraryTools {
     const val LIST = "library_list"
     const val READ = "library_read"
 
-    /** 下发给模型的两个只读工具。 */
-    fun all(): List<LlmTool> = listOf(listTool(), readTool())
+    /** 语义 + 关键词混合检索（v0.0.120）。 */
+    const val SEARCH = "library_search"
+
+    /** 下发给模型的三个只读工具。 */
+    fun all(): List<LlmTool> = listOf(listTool(), readTool(), searchTool())
 
     private fun listTool(): LlmTool = LlmTool(
         function = ToolFunction(
@@ -78,8 +81,47 @@ object LibraryTools {
         )
     )
 
+    /**
+     * 检索工具（v0.0.120）。
+     *
+     * 为什么要有它：只有 list + read 时，模型回答「资料库里关于 X 的内容」
+     * 必须先列目录、再整份读——一次问答就能把几万字塞进上下文，既贵又容易
+     * 撞上下文上限。检索只回最相关的几段，才是资料库该有的用法。
+     */
+    private fun searchTool(): LlmTool = LlmTool(
+        function = ToolFunction(
+            name = SEARCH,
+            description = "在资料库里做混合检索（语义相似 + 关键词命中），返回最相关的几段正文。" +
+                "只要用户的问题可能落在资料库的内容里，就先调用本工具定位段落，" +
+                "不要用 library_list + library_read 把整份文件读进上下文。" +
+                "资料库没有建立索引时会返回提示，无需重试。",
+            parameters = buildJsonObject {
+                put("type", "object")
+                put(
+                    "properties",
+                    buildJsonObject {
+                        put(
+                            "query",
+                            buildJsonObject {
+                                put("type", "string")
+                                put("description", "检索词或一句话问题。写成完整的语义描述比堆关键词更准。")
+                            }
+                        )
+                    }
+                )
+                put("required", buildJsonArray { add(JsonPrimitive("query")) })
+            }
+        )
+    )
+
+    /** 取出检索参数。 */
+    fun parseSearchQuery(arguments: String): String? = runCatching {
+        Json.parseToJsonElement(arguments).jsonObject["query"]
+            ?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
     /** 是否是我们接管的资料库工具名。 */
-    fun handles(name: String): Boolean = name == LIST || name == READ
+    fun handles(name: String): Boolean = name == LIST || name == READ || name == SEARCH
 
     /**
      * 执行一次资料库工具调用，返回给模型看的文本。
@@ -106,4 +148,42 @@ object LibraryTools {
             Json.parseToJsonElement(arguments).jsonObject["name"]?.jsonPrimitive?.contentOrNull?.trim()
         }.getOrNull()?.takeIf { it.isNotBlank() }
     }
+
+    /**
+     * 检索结果 → 给模型看的文本。
+     *
+     * 三条规则都有原因：
+     * - 只保留前 [MAX_SEARCH_CHARS] 个字符：检索回 6 段、每段几百字，不设上限
+     *   就等于把整份资料又塞回去了，白做了检索；
+     * - 每段都带文件名与段号：模型转述时能说清「来自哪份资料的哪一段」；
+     * - 空结果给可执行提示而不是「无结果」：多数时候是没建索引，模型据此
+     *   可以提示用户去资料库点「建立索引」，而不是硬说资料里没有。
+     */
+    fun formatHits(
+        query: String,
+        hits: List<LibrarySearchFusion.Hit>,
+        maxChars: Int = MAX_SEARCH_CHARS
+    ): String {
+        if (hits.isEmpty()) {
+            return "资料库没有检索到与「$query」相关的内容。" +
+                "可能还没建立索引（资料库页点「建立索引」），也可能资料里确实没有这个话题。"
+        }
+        val builder = StringBuilder()
+        builder.append("资料库检索「").append(query).append("」命中 ").append(hits.size)
+            .append(" 段（按相关度排序）：\n")
+        hits.forEachIndexed { index, hit ->
+            val block = "\n[" + (index + 1) + "] " + hit.docName + " · 第 " + hit.chunkIndex +
+                " 段 · 相关度 " + String.format("%.2f", hit.score) + "\n" +
+                hit.text.trim() + "\n"
+            if (builder.length + block.length > maxChars) {
+                builder.append("\n（其余段落已省略，需要更具体的内容请缩小检索范围）\n")
+                return builder.toString()
+            }
+            builder.append(block)
+        }
+        return builder.toString()
+    }
+
+    /** 单次检索结果回传给模型的字符上限。 */
+    const val MAX_SEARCH_CHARS = 3000
 }
