@@ -1,5 +1,6 @@
 package com.mistakebook.ui.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
@@ -60,6 +61,7 @@ import com.mistakebook.R
 import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.data.local.entities.Question
+import com.mistakebook.data.local.displayTitle
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.MasteryStatus
 import com.mistakebook.ui.common.EmptyState
@@ -221,8 +223,12 @@ private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues
                 onDelete = { scope.launch { container.chatRepository.softDeleteSession(session.id) } }
             ) {
                 Card(
-                    shape = MaterialTheme.shapes.small,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                         Text(
@@ -255,12 +261,19 @@ private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues
 @Composable
 private fun QuestionArchiveCard(question: Question) {
     Card(
-        shape = MaterialTheme.shapes.small,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        shape = MaterialTheme.shapes.medium,
+        // 与首页题目卡同一套面：surfaceContainerLow + 1dp 描边。
+        // 原先的 surface 无描边在浅色底上等于一张看不见边界的白卡，
+        // 用户滑开归档页的第一眼会以为列表是空的。
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             Text(
-                text = question.stem.ifBlank { question.title },
+                // 用 displayTitle 而不是 stem：stem 里带 $...$ 的公式原样摊出来
+                // 就是「$f(x)=x^2+2x$」这种源码，和首页 / 详情页的观感对不上。
+                text = question.displayTitle,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
