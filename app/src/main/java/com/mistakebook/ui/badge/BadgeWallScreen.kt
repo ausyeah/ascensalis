@@ -1,7 +1,6 @@
 package com.mistakebook.ui.badge
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,7 +52,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -165,11 +163,14 @@ fun BadgeWallScreen(onBack: () -> Unit) {
                     )
                 )
         ) {
-            Spotlights(Modifier.fillMaxWidth().height(120.dp))
             WallSummaryCard(
                 unlockedCount = unlockedCount,
                 total = progressList.size,
-                modifier = Modifier.padding(horizontal = 20.dp)
+                // v0.0.117：撤掉顶部的三道聚光灯（用户：「丑死了」）。
+                // 原先靠一段 120dp 的梯形渐变光束撑「展台」氛围，实际效果是
+                // 页头糊了三团半透明黄，还把战绩卡往下推了一屏。首屏该留给
+                // 进度本身，所以直接把它删了，卡片上移到与顶栏相接。
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
             )
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(96.dp),
@@ -243,32 +244,6 @@ fun BadgeWallScreen(onBack: () -> Unit) {
             unlockedAt = record?.unlockedAt,
             onDismiss = { selected = null }
         )
-    }
-}
-
-/** 顶部三道聚光灯：梯形光束从上向下渐隐，营造「展台」氛围。 */
-@Composable
-private fun Spotlights(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        listOf(0.24f, 0.50f, 0.76f).forEach { center ->
-            val topHalf = w * 0.03f
-            val bottomHalf = w * 0.15f
-            val beam = Path().apply {
-                moveTo(w * center - topHalf, 0f)
-                lineTo(w * center + topHalf, 0f)
-                lineTo(w * center + bottomHalf, h)
-                lineTo(w * center - bottomHalf, h)
-                close()
-            }
-            drawPath(
-                beam,
-                brush = Brush.verticalGradient(
-                    listOf(Color(0xFFE8D6B8).copy(alpha = 0.9f), Color.Transparent)
-                )
-            )
-        }
     }
 }
 
