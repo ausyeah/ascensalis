@@ -7,6 +7,8 @@ import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.math.VectorMath
 import com.mistakebook.net.ApiResult
 import com.mistakebook.net.llm.EmbeddingClient
+import com.mistakebook.net.llm.EmbeddingConfig
+import com.mistakebook.net.llm.EmbeddingEndpoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -56,13 +58,14 @@ class LibraryIndexer(
     /**
      * 全量重建索引（增量：未变化的块不重新嵌入）。
      *
-     * @param activeProfile 当前生效的大模型配置（嵌入请求走它的 baseUrl/key）
-     * @param model 嵌入模型名；空串直接失败——这是用户没配，不是网络问题
+     * @param config 向量化配置（地址 / Key / 模型名）；地址与 Key 留空时回退到
+     *   [activeProfile]，即「借对话配置」的老路径
+     * @param activeProfile 当前生效的大模型配置，只在 [config] 缺项时兜底
      */
-    suspend fun reindex(activeProfile: LlmProfile?, model: String): Progress {
+    suspend fun reindex(config: EmbeddingConfig, activeProfile: LlmProfile?): Progress {
         _progress.value = Progress(running = true)
         val result = mutex.withLock {
-            runCatching { reindexLocked(activeProfile, model.trim()) }.getOrElse { error ->
+            runCatching { reindexLocked(config, activeProfile) }.getOrElse { error ->
                 Progress(
                     chunks = chunkDao.count(),
                     lastError = error.message ?: error.javaClass.simpleName
@@ -73,13 +76,12 @@ class LibraryIndexer(
         return result
     }
 
-    private suspend fun reindexLocked(profile: LlmProfile?, model: String): Progress {
-        if (profile == null || !profile.isConfigured()) {
-            return Progress(chunks = chunkDao.count(), lastError = "还没有配置大模型")
-        }
-        if (model.isEmpty()) {
+    private suspend fun reindexLocked(config: EmbeddingConfig, profile: LlmProfile?): Progress {
+        if (config.model.isBlank()) {
             return Progress(chunks = chunkDao.count(), lastError = "还没有填写向量化模型")
         }
+        val endpoint = EmbeddingEndpoint.resolve(config, profile)
+            ?: return Progress(chunks = chunkDao.count(), lastError = "还没有配置接口地址或 Key")
 
         val files = LibraryStore.list(libraryRoot)
         if (files.isEmpty()) {
@@ -101,7 +103,8 @@ class LibraryIndexer(
         }
         val total = docs.sumOf { it.chunks.size }
 
-        val modelTag = model
+        // 模型名变了等于换了一套向量空间，旧块必须重算——这里按模型名对齐
+        val modelTag = endpoint.model
         docs.forEach { doc ->
             val existing = chunkDao.byDoc(doc.name)
                 .associateBy { it.chunkIndex to it.contentHash }
@@ -126,7 +129,7 @@ class LibraryIndexer(
 
             pending.chunked(embeddingClient.batchSize).forEach { batch ->
                 val embedded = when (
-                    val result = embeddingClient.embed(profile, modelTag, batch.map { it.second })
+                    val result = embeddingClient.embed(endpoint, batch.map { it.second })
                 ) {
                     is ApiResult.Success -> result.data
                     is ApiResult.Failure -> throw IllegalStateException(
@@ -178,8 +181,8 @@ class LibraryIndexer(
      */
     suspend fun search(
         query: String,
+        config: EmbeddingConfig,
         profile: LlmProfile?,
-        model: String,
         topK: Int = 8
     ): List<LibrarySearchFusion.Hit> {
         val trimmed = query.trim()
@@ -202,9 +205,10 @@ class LibraryIndexer(
             .sortedByDescending { it.score }
 
         // 向量路：查询嵌入失败就只留关键词路（功能降级，不报错打断用户）
-        val vectorRanked = if (profile != null && profile.isConfigured() && model.isNotBlank()) {
+        val endpoint = EmbeddingEndpoint.resolve(config, profile)
+        val vectorRanked = if (endpoint != null) {
             val queryVector = when (
-                val result = embeddingClient.embed(profile, model, listOf(trimmed))
+                val result = embeddingClient.embed(endpoint, listOf(trimmed))
             ) {
                 is ApiResult.Success -> result.data.firstOrNull()
                 is ApiResult.Failure -> null

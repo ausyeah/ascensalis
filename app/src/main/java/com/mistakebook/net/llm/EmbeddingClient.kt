@@ -1,6 +1,5 @@
 package com.mistakebook.net.llm
 
-import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.net.ApiError
 import com.mistakebook.net.ApiErrorKind
 import com.mistakebook.net.ApiResult
@@ -9,15 +8,14 @@ import com.mistakebook.net.HttpFactory
 /**
  * 向量嵌入客户端（v0.0.113，资料库语义检索用）。
  *
- * ## 为什么复用大模型配置
+ * ## 接口从哪来
  * 仓库硬规则「不引入任何新依赖」——端侧跑嵌入模型（ONNX/MediaPipe）
- * 需要引运行时，直接排除。而用户配的 OpenAI 兼容网关几乎都带
- * `/v1/embeddings`，**一次配置、两个用途**：资料库向量化只多要一个
- * 模型名（如 `text-embedding-v3` / `BAAI/bge-m3`）。
+ * 需要引运行时，直接排除。嵌入只能走网络，配置由 [EmbeddingConfig]
+ * 提供：地址 / Key / 模型名三项**各自可填**，留空才回退到当前大模型
+ * 配置（v0.0.113 的老行为）。最终拼成什么由 [EmbeddingEndpoint] 决定。
  *
- * 好处是零成本接入；代价是嵌入要走网络（索引一次资料库要联网）。
- * 这个取舍写在这里：检索请求本身在本地（暴力余弦），只有**建索引**
- * 需要联网，之后加资料不重建索引就不产生流量。
+ * 代价是索引一次资料库要联网。这个取舍写在这里：检索时的余弦比对在本地，
+ * 只有**建索引**需要联网，之后加资料不重建索引就不产生流量。
  */
 class EmbeddingClient(private val api: LlmApi) {
 
@@ -30,21 +28,19 @@ class EmbeddingClient(private val api: LlmApi) {
      * @param inputs 非空文本列表；调用方保证（空白文本没有嵌入意义）
      */
     suspend fun embed(
-        profile: LlmProfile,
-        model: String,
+        endpoint: EmbeddingEndpoint.Resolved,
         inputs: List<String>
     ): ApiResult<List<FloatArray>> {
-        if (model.isBlank()) {
+        if (endpoint.model.isBlank()) {
             return ApiResult.Failure(ApiError(ApiErrorKind.NO_KEY, detail = "未配置向量化模型"))
         }
         if (inputs.isEmpty()) return ApiResult.Success(emptyList())
 
-        val url = profile.baseUrl.trimEnd('/') + "/" + EMBEDDINGS_PATH
-        val request = EmbeddingRequest(model = model, input = inputs)
+        val request = EmbeddingRequest(model = endpoint.model, input = inputs)
         return try {
             val response = api.embeddings(
-                url = url,
-                authorization = "Bearer " + profile.apiKey,
+                url = endpoint.url,
+                authorization = endpoint.authorization,
                 request = request
             )
             val body = response.body()
@@ -66,8 +62,6 @@ class EmbeddingClient(private val api: LlmApi) {
     }
 
     private companion object {
-        /** Base URL 以 /v1 结尾的约定下，嵌入路径与 chat 同级。 */
-        const val EMBEDDINGS_PATH = "embeddings"
         const val BATCH_SIZE = 16
     }
 }

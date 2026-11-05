@@ -60,9 +60,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.mistakebook.R
 import com.mistakebook.data.library.LibrarySearchFusion
 import com.mistakebook.data.library.LibraryStore
+import com.mistakebook.net.llm.EmbeddingConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -112,15 +114,16 @@ fun LibraryScreen(
     var searchResults by remember { mutableStateOf<List<LibrarySearchFusion.Hit>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     val indexProgress by container.libraryIndexer.progress.collectAsState()
-    var embeddingModel by remember { mutableStateOf("") }
+    // v0.0.119：向量化三项各自可填；地址/Key 留空才回退到对话配置
+    var embeddingConfig by remember { mutableStateOf(EmbeddingConfig()) }
 
     fun refresh() {
         files = LibraryStore.list(root)
     }
 
-    // 进入页面拉一次已保存的向量化模型名
+    // 进入页面拉一次已保存的向量化配置
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        embeddingModel = container.settingsStore.embeddingModelNow()
+        embeddingConfig = container.settingsStore.embeddingConfigNow()
     }
 
     fun runSearch(text: String) {
@@ -132,8 +135,8 @@ fun LibraryScreen(
         scope.launch {
             searching = true
             val profile = runCatching { container.settingsStore.snapshotNow().activeProfile }.getOrNull()
-            val model = container.settingsStore.embeddingModelNow()
-            searchResults = container.libraryIndexer.search(text, profile, model)
+            val config = container.settingsStore.embeddingConfigNow()
+            searchResults = container.libraryIndexer.search(text, config, profile)
             searching = false
         }
     }
@@ -142,8 +145,8 @@ fun LibraryScreen(
         if (indexProgress.running) return
         scope.launch {
             val profile = runCatching { container.settingsStore.snapshotNow().activeProfile }.getOrNull()
-            container.settingsStore.setEmbeddingModel(embeddingModel)
-            container.libraryIndexer.reindex(profile, embeddingModel)
+            container.settingsStore.setEmbeddingConfig(embeddingConfig)
+            container.libraryIndexer.reindex(embeddingConfig, profile)
         }
     }
 
@@ -226,10 +229,13 @@ fun LibraryScreen(
 
             // 向量检索卡片（v0.0.113）：模型名 + 建立索引 + 进度/状态
             LibraryIndexCard(
-                model = embeddingModel,
-                onModelChange = { embeddingModel = it },
+                config = embeddingConfig,
+                onConfigChange = { embeddingConfig = it },
                 progress = indexProgress,
                 hasFiles = files.isNotEmpty(),
+                onSave = {
+                    scope.launch { container.settingsStore.setEmbeddingConfig(embeddingConfig) }
+                },
                 onIndex = { reindex() }
             )
 
@@ -622,12 +628,14 @@ private fun formatLibrarySize(bytes: Long): String = when {
 
 
 /**
- * 向量检索卡：嵌入模型名 + 「建立索引」+ 进度/状态行。
+ * 向量检索卡：接口地址 / Key / 模型名 + 「保存」+「建立索引」+ 状态行。
  *
  * 为什么放在资料库页而不是设置：向量化是**资料库自己的动作**——
- * 模型名、索引状态、搜索都在同一个语境里，跳到设置再回来是两套心智。
- * 接口地址与 Key 沿用当前大模型配置（见 [EmbeddingClient] 的 KDoc），
- * 这里只需要多一个模型名。
+ * 配置、索引状态、搜索都在同一个语境里，跳到设置再回来是两套心智。
+ *
+ * v0.0.119 起三项拆开各自可填（用户：「这个 url 和 key 都不让我填写」）：
+ * 对话与嵌入常常不在同一家网关、甚至不同 Key，硬绑在一起只能来回改配置。
+ * 地址与 Key 留空即回退到当前大模型配置，老用户不受影响。
  */
 /**
  * 索引状态五种归宿。
@@ -651,10 +659,11 @@ internal fun indexStatusKind(
 
 @Composable
 private fun LibraryIndexCard(
-    model: String,
-    onModelChange: (String) -> Unit,
+    config: EmbeddingConfig,
+    onConfigChange: (EmbeddingConfig) -> Unit,
     progress: com.mistakebook.data.library.LibraryIndexer.Progress,
     hasFiles: Boolean,
+    onSave: () -> Unit,
     onIndex: () -> Unit
 ) {
     Column(
@@ -673,12 +682,33 @@ private fun LibraryIndexCard(
         )
         Spacer(Modifier.height(6.dp))
         OutlinedTextField(
-            value = model,
-            onValueChange = onModelChange,
+            value = config.model,
+            onValueChange = { onConfigChange(config.copy(model = it)) },
             modifier = Modifier.fillMaxWidth(),
             label = { Text(stringResource(R.string.library_index_model_label)) },
             supportingText = { Text(stringResource(R.string.library_index_model_hint)) },
             singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall
+        )
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = config.baseUrl,
+            onValueChange = { onConfigChange(config.copy(baseUrl = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.library_index_url_label)) },
+            supportingText = { Text(stringResource(R.string.library_index_url_hint)) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall
+        )
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = config.apiKey,
+            onValueChange = { onConfigChange(config.copy(apiKey = it)) },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.library_index_key_label)) },
+            supportingText = { Text(stringResource(R.string.library_index_key_hint)) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
             textStyle = MaterialTheme.typography.bodySmall
         )
         Spacer(Modifier.height(6.dp))
@@ -708,7 +738,10 @@ private fun LibraryIndexCard(
                 },
                 modifier = Modifier.weight(1f)
             )
-            TextButton(onClick = onIndex, enabled = !progress.running && model.isNotBlank()) {
+            TextButton(onClick = onSave) {
+                Text(stringResource(R.string.library_index_save))
+            }
+            TextButton(onClick = onIndex, enabled = !progress.running && config.model.isNotBlank()) {
                 Text(stringResource(R.string.library_index_action))
             }
         }

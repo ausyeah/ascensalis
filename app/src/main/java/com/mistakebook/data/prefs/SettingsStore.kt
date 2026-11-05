@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.mistakebook.net.llm.EmbeddingConfig
 import com.mistakebook.BuildConfig
 import com.mistakebook.data.chat.ChatSearchProvider
 import kotlinx.coroutines.flow.first
@@ -518,15 +519,33 @@ class SettingsStore(context: Context) {
     // ===== 资料库向量化（v0.0.113）=====
 
     private val KEY_EMBEDDING_MODEL = stringPreferencesKey("library_embedding_model")
+    private val KEY_EMBEDDING_BASE_URL = stringPreferencesKey("library_embedding_base_url")
+    private val KEY_EMBEDDING_API_KEY = stringPreferencesKey("library_embedding_api_key")
 
-    /** 资料库向量化用的嵌入模型名（空 = 未启用向量检索）。 */
-    suspend fun embeddingModelNow(): String =
-        appContext.settingsDataStore.data.first()[KEY_EMBEDDING_MODEL].orEmpty()
+    /**
+     * 资料库向量化配置（v0.0.119）。
+     *
+     * 三项都是「留空即回退」：地址 / Key 空着就跟当前大模型配置共用，
+     * 模型名空着就等于没启用语义检索。读取时一次取齐，调用方不必拼。
+     */
+    suspend fun embeddingConfigNow(): EmbeddingConfig {
+        val prefs = appContext.settingsDataStore.data.first()
+        return EmbeddingConfig(
+            baseUrl = prefs[KEY_EMBEDDING_BASE_URL].orEmpty(),
+            apiKey = prefs[KEY_EMBEDDING_API_KEY].orEmpty(),
+            model = prefs[KEY_EMBEDDING_MODEL].orEmpty()
+        )
+    }
 
-    suspend fun setEmbeddingModel(model: String) {
+    suspend fun setEmbeddingConfig(config: EmbeddingConfig) {
         appContext.settingsDataStore.edit { prefs ->
-            val trimmed = model.trim()
-            if (trimmed.isEmpty()) prefs.remove(KEY_EMBEDDING_MODEL) else prefs[KEY_EMBEDDING_MODEL] = trimmed
+            fun put(key: Preferences.Key<String>, value: String) {
+                val trimmed = value.trim()
+                if (trimmed.isEmpty()) prefs.remove(key) else prefs[key] = trimmed
+            }
+            put(KEY_EMBEDDING_BASE_URL, config.baseUrl)
+            put(KEY_EMBEDDING_API_KEY, config.apiKey)
+            put(KEY_EMBEDDING_MODEL, config.model)
         }
     }
 
