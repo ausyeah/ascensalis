@@ -124,6 +124,8 @@ fun LibraryScreen(
     // 进入页面拉一次已保存的向量化配置
     androidx.compose.runtime.LaunchedEffect(Unit) {
         embeddingConfig = container.settingsStore.embeddingConfigNow()
+        // 索引进度是内存态，重启后回到 Idle；进页面读一次库把数字补回来
+        container.libraryIndexer.hydrate()
     }
 
     fun runSearch(text: String) {

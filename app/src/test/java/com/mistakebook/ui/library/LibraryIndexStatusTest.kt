@@ -1,6 +1,7 @@
 package com.mistakebook.ui.library
 
 import com.mistakebook.data.library.LibraryIndexer
+import com.mistakebook.data.library.shouldHydrate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -65,5 +66,15 @@ class LibraryIndexStatusTest {
             IndexStatusKind.READY,
             indexStatusKind(progress(docs = 1, chunks = 7), hasFiles = true)
         )
+    }
+
+    @Test
+    fun `重启后状态行从库里回填，但不覆盖运行中的进度`() {
+        // 进程重启：进度回到 Idle（0 块）→ 该读库补数字
+        assertTrue(shouldHydrate(progress()))
+        // 运行中绝不回填，否则进度条会被一次页面进入打回 0
+        assertFalse(shouldHydrate(progress(running = true)))
+        // 已经有块就不用再读库
+        assertFalse(shouldHydrate(progress(docs = 2, chunks = 7)))
     }
 }

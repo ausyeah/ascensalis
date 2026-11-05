@@ -56,6 +56,20 @@ class LibraryIndexer(
     val progress: StateFlow<Progress> = _progress.asStateFlow()
 
     /**
+     * 从库里的块回填状态行（v0.0.119）。
+     *
+     * 进度是内存态：进程重启后回到 Idle，界面就会写「尚未建立索引」，
+     * 可库里明明有块、搜索也照常能用。进页面时读一次库把数字补回来——
+     * 只有本来就没状态、且不在跑的时候才回填，绝不覆盖运行中的进度。
+     */
+    suspend fun hydrate() {
+        if (!shouldHydrate(_progress.value)) return
+        val counts = runCatching { chunkDao.countsByDoc() }.getOrDefault(emptyList())
+        if (counts.isEmpty()) return
+        _progress.value = Progress(docs = counts.size, chunks = counts.sumOf { it.chunks })
+    }
+
+    /**
      * 全量重建索引（增量：未变化的块不重新嵌入）。
      *
      * @param config 向量化配置（地址 / Key / 模型名）；地址与 Key 留空时回退到
@@ -231,3 +245,12 @@ class LibraryIndexer(
         return LibrarySearchFusion.fuse(vectorRanked, keywordRanked, topK)
     }
 }
+
+/**
+ * 状态行该不该从库里回填：只有「没在跑且显示 0 块」的 Idle 才回填。
+ *
+ * 纯函数便于单测：回填本身要读 Room，而这条判断才是会被改坏的地方
+ * ——写成无条件回填，运行中的进度条会被一次页面进入打回 0。
+ */
+internal fun shouldHydrate(current: LibraryIndexer.Progress): Boolean =
+    !current.running && current.chunks == 0
