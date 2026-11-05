@@ -772,6 +772,34 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * 重置番茄钟「今日记录」（v0.0.124）：按会话落库时的 `day` 字符串删，
+     * 与实体同口径。任务与学科是用户的配置不是统计数据，一律保留。
+     */
+    fun resetPomodoroToday() {
+        viewModelScope.launch {
+            val today = java.time.LocalDate.now().toString()
+            withContext(Dispatchers.IO + NonCancellable) {
+                container.pomodoroDao.clearSessionsOnDay(today)
+            }
+            backupMessage.value = container.appContext.getString(
+                com.mistakebook.R.string.settings_pomodoro_reset_today_done
+            )
+        }
+    }
+
+    /** 重置番茄钟**全部**专注记录：统计数据归零，任务与学科保留。 */
+    fun resetPomodoroAll() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO + NonCancellable) {
+                container.pomodoroDao.clearAllSessions()
+            }
+            backupMessage.value = container.appContext.getString(
+                com.mistakebook.R.string.settings_pomodoro_reset_all_done
+            )
+        }
+    }
+
     fun consumeRestoreDone() {
         restoreDoneCountFlow.value = null
     }

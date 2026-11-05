@@ -377,6 +377,96 @@ internal fun WordbookDataSection(viewModel: SettingsViewModel) {
     }
 }
 
+/**
+ * 番茄钟数据重置（v0.0.124）：与 [WordbookDataSection] 同一套交互——
+ * 两个按钮、两步确认弹窗，只是数据源换成专注记录。
+ * 「重置今日记录」按会话的 `day` 字段删当天；「全部重置」清空全部流水。
+ * 任务与学科是用户的配置，两种重置都不碰。
+ */
+@Composable
+internal fun PomodoroDataSection(viewModel: SettingsViewModel) {
+    var confirmToday by remember { mutableStateOf(false) }
+    var confirmAll by remember { mutableStateOf(false) }
+
+    SettingsGroup(title = stringResource(R.string.settings_pomodoro_reset_title)) {
+        Text(
+            text = stringResource(R.string.settings_pomodoro_reset_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { confirmToday = true },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_pomodoro_reset_today),
+                    maxLines = 1
+                )
+            }
+            OutlinedButton(
+                onClick = { confirmAll = true },
+                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                ),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_pomodoro_reset_all),
+                    maxLines = 1
+                )
+            }
+        }
+    }
+
+    if (confirmToday) {
+        AlertDialog(
+            onDismissRequest = { confirmToday = false },
+            title = { Text(stringResource(R.string.settings_pomodoro_reset_today)) },
+            text = { Text(stringResource(R.string.settings_pomodoro_reset_today_body)) },
+            confirmButton = {
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.action_confirm),
+                    confirmText = stringResource(R.string.settings_pomodoro_reset_today_confirm),
+                    onConfirm = {
+                        confirmToday = false
+                        viewModel.resetPomodoroToday()
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmToday = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (confirmAll) {
+        AlertDialog(
+            onDismissRequest = { confirmAll = false },
+            title = { Text(stringResource(R.string.settings_pomodoro_reset_all)) },
+            text = { Text(stringResource(R.string.settings_pomodoro_reset_all_body)) },
+            confirmButton = {
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.action_confirm),
+                    confirmText = stringResource(R.string.settings_pomodoro_reset_all_confirm),
+                    onConfirm = {
+                        confirmAll = false
+                        viewModel.resetPomodoroAll()
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmToday = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+}
+
 // 题目编辑页共用的学科下拉
 
 

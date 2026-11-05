@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -156,12 +157,15 @@ fun SettingsScreen(
             // 分类卡带一句摘要 + 图标，把「找设置」压成两步：
             // 3 选 1 定大类 → 类内再选分组。
             //
-            // 分类与分组映射（一项不丢）：
+            // 分类与分组映射（一项不丢，v0.0.124 重组）：
             //   AI 与识别: 识别方式、OCR 配置、大模型配置、识图模型、
-            //     生图渠道、联网搜索
-            //   学习: 学习工具（资料库/成就墙/番茄钟）、复习提醒、打印默认
-            //   通用: 主题外观、用量统计、网络与代理（高级）、数据与备份、
-            //     单词书数据
+            //     生图渠道、联网搜索、记忆
+            //   学习: 学习工具（资料库/成就墙）、背单词、番茄钟、复习提醒、
+            //     打印默认——背单词与番茄钟从「学习工具」里拆出来独立成组，
+            //     用户点名「功能很多但不好找」，一级分组名直接可见才好找
+            //   数据: 数据与备份、已归档内容、单词书数据、番茄钟数据——
+            //     数据类入口原来散在「通用」卡的三处，收拢到一张卡
+            //   通用: 主题外观、用量统计、网络与代理（高级）、关于与更新
             SettingsCategoryCard(
                 title = stringResource(R.string.settings_group_ai),
                 summary = "大模型、识图、生图、搜索的 Key 与参数",
@@ -212,21 +216,26 @@ fun SettingsScreen(
 
             SettingsCategoryCard(
                 title = stringResource(R.string.settings_group_learning),
-                summary = "番茄钟、复习提醒、打印与学习资料",
+                summary = "背单词、番茄钟、复习提醒、打印与学习资料",
                 icon = Icons.AutoMirrored.Filled.MenuBook
             ) {
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_learning_tools), nested = true) {
                     // 成就墙入口放设置「学习」组（而非首页图标行）：
                     // 首页图标行每一寸都要留给刷题主流程入口（用户每天进来
-                    // 是为了做题，不是为了看徽章），成就墙是阶段性回访目标，
-                    // 与番茄钟/复习提醒同属「学习」分组更合理。
+                    // 是为了做题，不是为了看徽章），成就墙是阶段性回访目标。
                     LibraryEntrySection(onOpen = onOpenLibrary)
                     Spacer(Modifier.height(12.dp))
                     BadgeEntrySection(onOpen = onOpenBadgeWall)
-                    Spacer(Modifier.height(12.dp))
-                    PomodoroSection(state = state, viewModel = viewModel)
-                    Spacer(Modifier.height(12.dp))
+                }
+
+                // v0.0.124：背单词 / 番茄钟从「学习工具」拆出独立分组——
+                // 折在二级组里时用户得挨个展开才知道在哪，一级名直接可见。
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_wordbook), nested = true) {
                     WordbookSection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_pomodoro), nested = true) {
+                    PomodoroSection(state = state, viewModel = viewModel)
                 }
 
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_review_reminder), nested = true) {
@@ -242,27 +251,13 @@ fun SettingsScreen(
                 }
             }
 
+            // v0.0.124：数据类入口收拢成第四张卡——备份、归档、两类
+            // 数据重置原来散在「通用」卡的三处，找哪个都要先想起它在哪。
             SettingsCategoryCard(
-                title = stringResource(R.string.settings_group_general),
-                summary = "外观、用量、网络与数据备份",
-                icon = Icons.Default.Settings
+                title = stringResource(R.string.settings_group_data),
+                summary = "备份、归档与数据重置",
+                icon = Icons.Default.Storage
             ) {
-                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_appearance), nested = true) {
-                    ThemeModeSection(state = state, viewModel = viewModel)
-                    Spacer(Modifier.height(12.dp))
-                    TextStyleSection(state = state, viewModel = viewModel)
-                }
-
-                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_usage), nested = true) {
-                    LlmUsageSection(container = container)
-                    Spacer(Modifier.height(12.dp))
-                    MineruUsageSection(container = container)
-                }
-
-                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_network), nested = true) {
-                    NetworkProxySection(state = state, viewModel = viewModel)
-                }
-
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_data_backup), nested = true) {
                     DataManageSection(
                         container = container,
@@ -270,11 +265,6 @@ fun SettingsScreen(
                         onExportClick = { viewModel.exportBackup() },
                         onRestoreClick = { showRestoreConfirm = true }
                     )
-                }
-
-                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_about), nested = true) {
-                    // 版本号 / 检查更新 / 去 star
-                    AboutUpdateSection()
                 }
 
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_archived), nested = true) {
@@ -297,6 +287,40 @@ fun SettingsScreen(
                     // 英语单词数据重置：背单词页自己没有重置入口（刷题页每一寸
                     // 都要留给题目），统一收到设置里，与数据管理相邻。
                     WordbookDataSection(viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_pomodoro_data), nested = true) {
+                    // 番茄钟数据重置（v0.0.124）：统计页有「重置统计数据」，
+                    // 但入口埋在图表下面；这里与单词书数据同款交互，
+                    // 「重置今日记录」+「全部重置」两步确认。
+                    PomodoroDataSection(viewModel = viewModel)
+                }
+            }
+
+            SettingsCategoryCard(
+                title = stringResource(R.string.settings_group_general),
+                summary = "外观、用量、网络与关于",
+                icon = Icons.Default.Settings
+            ) {
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_appearance), nested = true) {
+                    ThemeModeSection(state = state, viewModel = viewModel)
+                    Spacer(Modifier.height(12.dp))
+                    TextStyleSection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_usage), nested = true) {
+                    LlmUsageSection(container = container)
+                    Spacer(Modifier.height(12.dp))
+                    MineruUsageSection(container = container)
+                }
+
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_network), nested = true) {
+                    NetworkProxySection(state = state, viewModel = viewModel)
+                }
+
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_about), nested = true) {
+                    // 版本号 / 检查更新 / 去 star
+                    AboutUpdateSection()
                 }
             }
 

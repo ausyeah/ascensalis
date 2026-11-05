@@ -289,6 +289,14 @@ interface PomodoroDao {
     suspend fun clearAllSessions()
 
     /**
+     * 清空某一天的专注记录（设置页「番茄钟数据 → 重置今日记录」用）。
+     * [day] 是会话落库时的 `day` 字符串（如 "2026-11-06"），
+     * 与实体同口径，命中 `day` 索引。
+     */
+    @Query("DELETE FROM pomodoro_sessions WHERE day = :day")
+    suspend fun clearSessionsOnDay(day: String)
+
+    /**
      * 导入去重用的自然键查询（v0.0.63）：同一文件的二次导入，
      * (taskId, startedAt, durationSec) 完全一致——同一行源数据
      * 建出的会话必然落出同一个三元组。
