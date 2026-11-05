@@ -164,19 +164,113 @@ class BadgeEngineTest {
 
     @Test
     fun `all badges unlock with saturated stats`() {
-        // v0.0.57 目录扩到 48 枚，最高档到「千题 / 五百掌握 / 五千复习 /
-        // 一年坚持 / 单日三十 / 十关清零 / 五百词」。饱和值随之抬高。
+        // v0.0.125 目录扩到 100 枚，最高档到「五千题 / 五千毕业 / 两万复习 /
+        // 千日坚持 / 单日百题 / 五十关清零 / 两千词 / 千次专注 / 百小时 /
+        // 百日专注 / 自测千题 / 两百次问答 / 百份资料 / 全图鉴」。饱和值随之抬高。
         val stats = empty().copy(
-            totalQuestions = 1000,
-            masteredQuestions = 500,
-            totalReviews = 5000,
-            maxDailyEntries = 30,
-            studyDays = (0L until 365L).map { today.minusDays(it) }.toSet(),
-            clearedKnowledgePoints = 10,
+            totalQuestions = 5000,
+            masteredQuestions = 5000,
+            totalReviews = 20000,
+            maxDailyEntries = 100,
+            studyDays = (0L until 1000L).map { today.minusDays(it) }.toSet(),
+            clearedKnowledgePoints = 100,
             firstWordRecorded = true,
-            masteredWords = 500
+            masteredWords = 5000,
+            focusMinutes = 10000,
+            pomodoroCount = 1000,
+            focusDays = 100,
+            wordStudyDays = 100,
+            quizCorrect = 1000,
+            chatSessions = 200,
+            libraryDocs = 100,
+            // 全图鉴（99）按「评估时点的解锁数」判定：饱和口径下直接给满。
+            unlockedBadges = 99
         )
         assertEquals(Badge.entries.size, unlockedKeys(stats).size)
+    }
+
+    @Test
+    fun `every progress badge locks one below target and unlocks at target`() {
+        // v0.0.125 起用**全目录通用边界**替代逐枚正反例：每枚进度型徽章
+        // 把自己的维度压到 target-1 必须锁着，压到 target 必须解锁；
+        // 其余维度全部饱和，保证只有这一维在挡路。
+        val maxima = mapOf(
+            "totalQuestions" to 5000, "masteredQuestions" to 5000,
+            "totalReviews" to 20000, "maxDailyEntries" to 100,
+            "studyDays" to 1000, "clearedKnowledgePoints" to 100,
+            "masteredWords" to 5000, "focusMinutes" to 10000,
+            "pomodoroCount" to 1000, "focusDays" to 100,
+            "wordStudyDays" to 100, "quizCorrect" to 1000,
+            "chatSessions" to 200, "libraryDocs" to 100
+        )
+        fun saturatedWith(dimensions: Map<String, Int>): BadgeStats {
+            val v = dimensions.toMutableMap()
+            v.merge("studyDays", 0, Int::plus)
+            val streakDays = (0L until v.getValue("studyDays").toLong())
+                .map { today.minusDays(it) }.toSet()
+            return BadgeStats(
+                totalQuestions = v.getValue("totalQuestions"),
+                masteredQuestions = v.getValue("masteredQuestions"),
+                totalReviews = v.getValue("totalReviews"),
+                maxDailyEntries = v.getValue("maxDailyEntries"),
+                studyDays = streakDays,
+                clearedKnowledgePoints = v.getValue("clearedKnowledgePoints"),
+                firstWordRecorded = true,
+                masteredWords = v.getValue("masteredWords"),
+                focusMinutes = v.getValue("focusMinutes"),
+                pomodoroCount = v.getValue("pomodoroCount"),
+                focusDays = v.getValue("focusDays"),
+                wordStudyDays = v.getValue("wordStudyDays"),
+                quizCorrect = v.getValue("quizCorrect"),
+                chatSessions = v.getValue("chatSessions"),
+                libraryDocs = v.getValue("libraryDocs"),
+                unlockedBadges = 99
+            )
+        }
+        Badge.entries.filter { it.target > 0 }.forEach { badge ->
+            // 该徽章自己的维度（与 evaluate 的分支一一对应）
+            val dim = when (badge) {
+                Badge.M1, Badge.M5, Badge.TEN_MASTERED, Badge.M25, Badge.M50,
+                Badge.M100, Badge.M200, Badge.M500, Badge.M1000, Badge.M2000,
+                Badge.M5000 -> "masteredQuestions"
+                Badge.S3, Badge.SEVEN_DAY_STREAK, Badge.S14, Badge.S21,
+                Badge.THIRTY_DAY_STREAK, Badge.S60, Badge.S100, Badge.S365,
+                Badge.S200, Badge.S500, Badge.S1000 -> "studyDays"
+                Badge.D3, Badge.D5, Badge.TEN_IN_ONE_DAY, Badge.D20, Badge.D30,
+                Badge.D50, Badge.D100 -> "maxDailyEntries"
+                Badge.K3, Badge.K5, Badge.K10, Badge.K25, Badge.K50 ->
+                    "clearedKnowledgePoints"
+                Badge.W50, Badge.HUNDRED_WORDS, Badge.W200, Badge.W500,
+                Badge.W1000, Badge.W2000 -> "masteredWords"
+                Badge.WD7, Badge.WD30, Badge.WD100 -> "wordStudyDays"
+                Badge.WA100, Badge.WA1000 -> "quizCorrect"
+                Badge.FOCUS_TEN, Badge.FOCUS_FIFTY, Badge.FOCUS_HUNDRED,
+                Badge.FOCUS_FIVE_HUNDRED, Badge.FOCUS_THOUSAND -> "pomodoroCount"
+                Badge.FOCUS_HALF_HOUR, Badge.FOCUS_HOUR, Badge.FOCUS_TEN_HOURS,
+                Badge.FIFTY_HOURS, Badge.HUNDRED_HOURS -> "focusMinutes"
+                Badge.FOCUS_DAYS_3, Badge.FOCUS_DAYS_10, Badge.FOCUS_DAYS_30,
+                Badge.FOCUS_DAYS_100 -> "focusDays"
+                Badge.CHAT_TEN, Badge.CHAT_FIFTY, Badge.CHAT_HUNDRED,
+                Badge.CHAT_TWO_HUNDRED -> "chatSessions"
+                Badge.DOCS_FIVE, Badge.DOCS_TWENTY, Badge.DOCS_FIFTY,
+                Badge.DOCS_HUNDRED -> "libraryDocs"
+                Badge.BADGE_ROOKIE, Badge.BADGE_COLLECTOR, Badge.BADGE_MASTER,
+                Badge.BADGE_ELDER, Badge.BADGE_GALLERY -> "unlockedBadges"
+                else -> "totalQuestions"
+            }
+            // 「unlockedBadges」维度不在 maxima（它是库内计数，直接给值）
+            fun stats(value: Int): BadgeStats =
+                if (dim == "unlockedBadges") {
+                    saturatedWith(maxima).copy(unlockedBadges = value)
+                } else {
+                    saturatedWith(maxima + (dim to value))
+                }
+            val below = progressOf(stats(badge.target - 1), badge)
+            assertFalse("${badge.key} 在 target-1 必须锁着", below.unlocked)
+            assertEquals("${badge.key} 进度", badge.target - 1, below.current)
+            val at = progressOf(stats(badge.target), badge)
+            assertTrue("${badge.key} 在 target 必须解锁", at.unlocked)
+        }
     }
 
     // ---- 成就墙排序（v0.0.86 重排版）----
@@ -224,7 +318,7 @@ class BadgeEngineTest {
     fun `wall sort with nothing unlocked is pure difficulty order`() {
         val sorted = BadgeEngine.sortForWall(Badge.entries, emptySet())
         assertEquals(sorted.sortedBy { it.difficulty }, sorted)
-        // 最难的一枚压轴：五千次复习
-        assertEquals(Badge.R5000.key, sorted.last().key)
+        // 最难的一枚压轴：两万次复习（v0.0.125 扩目录后全场最高目标）
+        assertEquals(Badge.R20000.key, sorted.last().key)
     }
 }

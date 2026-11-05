@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mistakebook.R
+import com.mistakebook.ui.theme.categoryGradientOf
 import com.mistakebook.domain.Badge
 import com.mistakebook.domain.BadgeCategory
 import com.mistakebook.domain.BadgeEngine
@@ -474,16 +475,11 @@ private fun ProceduralBadge(badge: Badge, unlocked: Boolean, size: Dp) {
     }
 }
 
-/** 分类配色（与全局暖色主题一致，v0.0.57 去掉蓝/紫）。 */
-private fun categoryGradient(category: BadgeCategory): Pair<Color, Color> = when (category) {
-    BadgeCategory.QUESTIONS -> Color(0xFFB0673A) to Color(0xFF8A4E2A)
-    BadgeCategory.MASTERY -> Color(0xFF5C8A3C) to Color(0xFF3E6B2A)
-    BadgeCategory.REVIEWS -> Color(0xFF3E7F86) to Color(0xFF2C5F66)
-    BadgeCategory.STREAK -> Color(0xFFC08A3E) to Color(0xFF96661E)
-    BadgeCategory.DAILY -> Color(0xFFA24A63) to Color(0xFF7A3248)
-    BadgeCategory.KNOWLEDGE -> Color(0xFF8A6A4F) to Color(0xFF66492F)
-    BadgeCategory.WORDS -> Color(0xFF7C8A4E) to Color(0xFF5A6836)
-}
+// 分类配色（与全局暖色主题一致，v0.0.57 去掉蓝/紫）已迁入主题包
+// BadgeCategoryColors.kt——程序化兜底徽章是唯一成体系用裸色值的地方，
+// 放进 theme 豁免区，「界面层不写裸色值」契约才能守得住。
+private fun categoryGradient(category: BadgeCategory): Pair<Color, Color> =
+    categoryGradientOf(category)
 
 @Composable
 private fun BadgeDetailDialog(
@@ -616,10 +612,67 @@ private val BADGE_IMAGES: Map<Badge, Int> = mapOf(
     Badge.K3 to R.drawable.badge_k3,
     Badge.K5 to R.drawable.badge_k5,
     Badge.K10 to R.drawable.badge_k10,
-    // 单词（5）
+    // 单词（5 + 7 = 12）
     Badge.FIRST_WORD to R.drawable.badge_first_word,
     Badge.W50 to R.drawable.badge_w50,
     Badge.HUNDRED_WORDS to R.drawable.badge_hundred_words,
     Badge.W200 to R.drawable.badge_w200,
-    Badge.W500 to R.drawable.badge_w500
+    Badge.W500 to R.drawable.badge_w500,
+    Badge.W1000 to R.drawable.badge_w1000,
+    Badge.W2000 to R.drawable.badge_w2000,
+    Badge.WD7 to R.drawable.badge_wd7,
+    Badge.WD30 to R.drawable.badge_wd30,
+    Badge.WD100 to R.drawable.badge_wd100,
+    Badge.WA100 to R.drawable.badge_wa100,
+    Badge.WA1000 to R.drawable.badge_wa1000,
+    // 番茄专注（15，v0.0.125）
+    Badge.FIRST_FOCUS to R.drawable.badge_first_focus,
+    Badge.FOCUS_TEN to R.drawable.badge_focus_ten,
+    Badge.FOCUS_FIFTY to R.drawable.badge_focus_fifty,
+    Badge.FOCUS_HUNDRED to R.drawable.badge_focus_hundred,
+    Badge.FOCUS_FIVE_HUNDRED to R.drawable.badge_focus_five_hundred,
+    Badge.FOCUS_THOUSAND to R.drawable.badge_focus_thousand,
+    Badge.FOCUS_HALF_HOUR to R.drawable.badge_focus_half_hour,
+    Badge.FOCUS_HOUR to R.drawable.badge_focus_hour,
+    Badge.FOCUS_TEN_HOURS to R.drawable.badge_focus_ten_hours,
+    Badge.FIFTY_HOURS to R.drawable.badge_fifty_hours,
+    Badge.HUNDRED_HOURS to R.drawable.badge_hundred_hours,
+    Badge.FOCUS_DAYS_3 to R.drawable.badge_focus_days_3,
+    Badge.FOCUS_DAYS_10 to R.drawable.badge_focus_days_10,
+    Badge.FOCUS_DAYS_30 to R.drawable.badge_focus_days_30,
+    Badge.FOCUS_DAYS_100 to R.drawable.badge_focus_days_100,
+    // AI 问答（5，v0.0.125）
+    Badge.FIRST_CHAT to R.drawable.badge_first_chat,
+    Badge.CHAT_TEN to R.drawable.badge_chat_ten,
+    Badge.CHAT_FIFTY to R.drawable.badge_chat_fifty,
+    Badge.CHAT_HUNDRED to R.drawable.badge_chat_hundred,
+    Badge.CHAT_TWO_HUNDRED to R.drawable.badge_chat_two_hundred,
+    // 资料库（5，v0.0.125）
+    Badge.FIRST_DOC to R.drawable.badge_first_doc,
+    Badge.DOCS_FIVE to R.drawable.badge_docs_five,
+    Badge.DOCS_TWENTY to R.drawable.badge_docs_twenty,
+    Badge.DOCS_FIFTY to R.drawable.badge_docs_fifty,
+    Badge.DOCS_HUNDRED to R.drawable.badge_docs_hundred,
+    // 徽章收藏（5，v0.0.125）
+    Badge.BADGE_ROOKIE to R.drawable.badge_badge_rookie,
+    Badge.BADGE_COLLECTOR to R.drawable.badge_badge_collector,
+    Badge.BADGE_MASTER to R.drawable.badge_badge_master,
+    Badge.BADGE_ELDER to R.drawable.badge_badge_elder,
+    Badge.BADGE_GALLERY to R.drawable.badge_badge_gallery,
+    // 旧阶梯补长（9，v0.0.125）
+    Badge.Q2000 to R.drawable.badge_q2000,
+    Badge.Q3000 to R.drawable.badge_q3000,
+    Badge.Q5000 to R.drawable.badge_q5000,
+    Badge.M1000 to R.drawable.badge_m1000,
+    Badge.M2000 to R.drawable.badge_m2000,
+    Badge.M5000 to R.drawable.badge_m5000,
+    Badge.R10000 to R.drawable.badge_r10000,
+    Badge.R20000 to R.drawable.badge_r20000,
+    Badge.S200 to R.drawable.badge_s200,
+    Badge.S500 to R.drawable.badge_s500,
+    Badge.S1000 to R.drawable.badge_s1000,
+    Badge.D50 to R.drawable.badge_d50,
+    Badge.D100 to R.drawable.badge_d100,
+    Badge.K25 to R.drawable.badge_k25,
+    Badge.K50 to R.drawable.badge_k50
 )

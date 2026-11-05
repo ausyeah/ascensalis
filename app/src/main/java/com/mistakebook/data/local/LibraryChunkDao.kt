@@ -18,6 +18,10 @@ interface LibraryChunkDao {
     @Query("SELECT * FROM library_chunks ORDER BY docName, chunkIndex")
     suspend fun allOnce(): List<LibraryChunkEntity>
 
+    /** 导入过的文档数（去重文件名；成就「五份资料」等按它计，v0.0.125）。 */
+    @Query("SELECT COUNT(DISTINCT docName) FROM library_chunks")
+    suspend fun countDocs(): Int
+
     @Query("SELECT * FROM library_chunks ORDER BY docName, chunkIndex")
     fun observeAll(): Flow<List<LibraryChunkEntity>>
 

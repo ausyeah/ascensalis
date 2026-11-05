@@ -311,6 +311,10 @@ interface ChatDao {
     )
     suspend fun findStreamingMessage(sessionId: Long): ChatMessage?
 
+    /** 会话总数（成就「十次问答」这类累计口径，v0.0.125）。 */
+    @Query("SELECT COUNT(*) FROM chat_sessions")
+    suspend fun countSessions(): Int
+
     @Query("SELECT COUNT(*) FROM chat_messages WHERE sessionId = :sessionId")
     suspend fun countMessages(sessionId: Long): Int
 

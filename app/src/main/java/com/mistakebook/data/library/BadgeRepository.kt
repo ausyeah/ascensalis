@@ -102,6 +102,46 @@ class BadgeRepository(private val container: AppContainer) {
         val firstWordRecorded = wordProgress.isNotEmpty()
         val masteredWords = wordProgress.count { it.isMastered }
 
+        // 背单词行为日期与自测答对数（成就「七日背词 / 自测百题」，v0.0.125）
+        val wordLogs = try {
+            container.wordbookDao.logsSince(0)
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        val wordStudyDays = wordLogs
+            .map { Instant.ofEpochMilli(it.answeredAt).atZone(zone).toLocalDate() }
+            .toSet()
+            .size
+        val quizCorrect = wordLogs.count { it.isCorrect }
+
+        // 番茄专注（成就「首次专注 / 百小时殿堂」，v0.0.125）：
+        // totalSecSince("") 是累计专注秒数（不含休息）；distinctDays 是专注日去重。
+        val focusMinutes = runCatching {
+            (container.pomodoroDao.totalSecSince("") / 60L).toInt()
+        }.getOrDefault(0)
+        val pomodoroCount = runCatching {
+            container.pomodoroDao.pomodoroCountSince("")
+        }.getOrDefault(0)
+        val focusDays = runCatching {
+            container.pomodoroDao.distinctDays("").size
+        }.getOrDefault(0)
+
+        // AI 对话会话数 / 资料库文档数（v0.0.125）
+        val chatSessions = try {
+            container.database.chatDao().countSessions()
+        } catch (_: Throwable) {
+            0
+        }
+        val libraryDocs = try {
+            container.database.libraryChunkDao().countDocs()
+        } catch (_: Throwable) {
+            0
+        }
+
+        // 收藏型成就（徽章新秀 / 全图鉴）按「评估时点」的解锁数判定：
+        // 本轮新解锁的下一轮才计入，见 BadgeStats.unlockedBadges 注释。
+        val unlockedBadges = container.badgeDao.all().size
+
         return BadgeStats(
             totalQuestions = totalQuestions,
             masteredQuestions = masteredQuestions,
@@ -110,7 +150,15 @@ class BadgeRepository(private val container: AppContainer) {
             studyDays = studyDays,
             clearedKnowledgePoints = clearedKnowledgePoints,
             firstWordRecorded = firstWordRecorded,
-            masteredWords = masteredWords
+            masteredWords = masteredWords,
+            focusMinutes = focusMinutes,
+            pomodoroCount = pomodoroCount,
+            focusDays = focusDays,
+            wordStudyDays = wordStudyDays,
+            quizCorrect = quizCorrect,
+            chatSessions = chatSessions,
+            libraryDocs = libraryDocs,
+            unlockedBadges = unlockedBadges
         )
     }
 
