@@ -7,14 +7,15 @@ import org.junit.Test
 import java.io.File
 
 /**
- * 首页右下角两颗 FAB 的一致性（v0.0.118）。
+ * 首页右下角这对 FAB（v0.0.121 第二轮）。
  *
- * 用户看着截图说：「这两个按钮以下面为准，两个要保证一致啊，美观程度太差了」。
- * 当时上面那颗是 40dp + 白底蓝字的 SmallFloatingActionButton，下面是 56dp
- * 的浅蓝胶囊——同高不同、同色不同，并排站着像两个人拼的。
+ * v0.0.118 统一了高度和配色，但上面那颗还是圆钮——图标悬在胶囊
+ * 旁边，用户看截图说「这个对话和这个拍错题一样，是一个长条胶囊形，
+ * 保证长度一致，图标、文字等对位要求工整」。
  *
- * 这类退化不会报错也不会影响点击，只会让首页第一眼显得廉价，
- * 所以把「同高、同底色、同内容色」三条钉在源码上。
+ * 现在两颗同为 ExtendedFloatingActionButton：同结构（图标 + 三个字）、
+ * 同底色、同内容色，宽度天然一致。这条只能钉源码——圆钮一回来，
+ * 「等长」就没了。
  */
 class HomeFabPairTest {
 
@@ -25,14 +26,28 @@ class HomeFabPairTest {
         .substringBefore("snackbarHost =")
 
     @Test
-    fun `两颗都是 56dp 的完整 FAB`() {
-        assertTrue(
-            "「问一问」必须换成标准 FloatingActionButton，与下面胶囊同高",
-            fabBlock.contains("FloatingActionButton(")
+    fun `两颗都是带文字的胶囊`() {
+        assertEquals(
+            "问一问与拍错题都必须是 ExtendedFloatingActionButton，宽窄才一致",
+            2,
+            fabBlock.split("ExtendedFloatingActionButton(").size - 1
         )
         assertFalse(
-            "SmallFloatingActionButton 只有 40dp，与 56dp 胶囊并排必然一头大一头小",
-            fabBlock.contains("SmallFloatingActionButton(")
+            "圆钮 FAB 与胶囊并排永远像两个组件（v0.0.121 起禁用）",
+            Regex("(?<!Extended)FloatingActionButton\\(").containsMatchIn(fabBlock)
+        )
+    }
+
+    @Test
+    fun `两颗都有图标加文字的完整结构`() {
+        assertEquals(
+            "两颗都要 icon { } + text { }，只有一边带文字就会一头宽一头窄",
+            2,
+            fabBlock.split("icon = {").size - 1
+        )
+        assertEquals(
+            2,
+            fabBlock.split("text = {").size - 1
         )
     }
 

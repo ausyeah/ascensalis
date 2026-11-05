@@ -67,7 +67,9 @@ fun ExamCountdownCard(container: AppContainer) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 4.dp)
+            // v0.0.121 起这张卡是列表条目：横向留白由 LazyColumn 的
+            // contentPadding 统一给（与题目卡对齐），这里只留上下呼吸。
+            .padding(vertical = 4.dp)
             .clickable { if (state.examDate != null) showPlan = true else showDateEditor = true }
     ) {
         Row(

@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -118,6 +120,7 @@ import com.mistakebook.ui.common.orderByIds
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
+import com.mistakebook.ui.common.SwipeActionJunctionRadius
 import com.mistakebook.ui.common.SwipeRevealSpring
 import com.mistakebook.ui.common.swipeRevealContentAlpha
 import com.mistakebook.ui.common.swipeRevealProgress
@@ -292,25 +295,26 @@ fun HomeScreen(
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         floatingActionButton = {
-            // v0.0.118：这一对按钮以「拍错题」为准统一。
+            // v0.0.121：两颗都是等长胶囊（用户拍板「保证长度一致」）。
             //
-            // 原来「问一问」是 40dp 的 SmallFloatingActionButton + 白底蓝字，
-            // 和下面 56dp 的浅蓝胶囊并排放着像两个尺寸、两套配色拼出来的：
-            // 圆钮又小又灰，胶囊又大又亮。现在两枚同高（56dp）、同底色
-            // （primaryContainer）、同内容色（onPrimaryContainer）、同阴影，
-            // 只在形状与文案上分主次——图标圆钮是次，带文字的胶囊是主。
+            // v0.0.118 只统一了高度与配色，上面那颗仍是圆钮——图标悬在
+            // 胶囊旁边还是像两个组件。现在两颗同为 ExtendedFloatingActionButton，
+            // 同底色、同内容色、同结构（图标 + 三个字），宽度天然一致，
+            // 右缘对齐后是一对真正的双胞胎。
             Column(horizontalAlignment = Alignment.End) {
-                FloatingActionButton(
+                ExtendedFloatingActionButton(
                     onClick = onNewChat,
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    icon = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = stringResource(R.string.home_open_chat)
+                        )
+                    },
+                    text = { Text(stringResource(R.string.home_open_chat)) },
                     modifier = Modifier.padding(bottom = 12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Chat,
-                        contentDescription = stringResource(R.string.home_open_chat)
-                    )
-                }
+                )
                 ExtendedFloatingActionButton(
                     onClick = { showAddSheet = true },
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -441,9 +445,9 @@ fun HomeScreen(
                 }
             }
 
-            // 考前倒计时（F3）：搜索栏与筛选行之间的常驻卡片，未设日期时是设置入口
-            ExamCountdownCard(container = container)
-
+            // 筛选条永远钉在搜索栏正下方（v0.0.121「筛选最高级」）：
+            // 复习横幅与倒计时卡都降级成了列表内容，题一多往下翻就被盖住，
+            // 只有筛选是用户随时可能要动的，必须一步够到、绝不被卷走。
             FilterRow(
                 state = state,
                 onStatusChange = viewModel::setStatus,
@@ -456,18 +460,6 @@ fun HomeScreen(
                 state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-
-                state.questions.isEmpty() && state.totalCount == 0 -> EmptyStateWithActions(
-                onAddByPhoto = onAddByPhoto,
-                onAddFromGallery = { pickFromGallery() },
-                onImportPdf = onImportPdf,
-                onAddManual = onAddManual
-                )
-
-                state.questions.isEmpty() -> EmptyState(
-                    title = stringResource(R.string.home_empty_title),
-                    subtitle = stringResource(R.string.home_empty_filter_hint)
-                )
 
                 else -> LazyColumn(
                     state = questionListState,
@@ -484,6 +476,8 @@ fun HomeScreen(
 
                     // T1 复习横幅：今天有到期题才出现（N=0 不显示，不做弹窗）。
                     // 样式与列表卡片同族，点击进独立复习页。
+                    // v0.0.121 起横幅是列表的第一个条目（「复习第二」）：
+                    // 随题目滚动被盖住，把屏幕留给筛选条。
                     if (state.dueCount > 0) {
                         item(key = "review-banner", contentType = "banner") {
                             Surface(
@@ -512,6 +506,35 @@ fun HomeScreen(
                                         tint = MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 }
+                            }
+                        }
+                    }
+
+                    // 考前倒计时（F3）：未设日期时是设置入口。
+                    // v0.0.121 起是列表条目（「倒计时第三」），随题目滚动被盖住；
+                    // 横向留白交给 contentPadding，和题目卡对齐。
+                    item(key = "exam-countdown", contentType = "banner") {
+                        ExamCountdownCard(container = container)
+                    }
+
+                    if (state.questions.isEmpty() && state.totalCount == 0) {
+                        item(key = "empty-add", contentType = "empty") {
+                            Box(Modifier.fillParentMaxSize()) {
+                                EmptyStateWithActions(
+                                    onAddByPhoto = onAddByPhoto,
+                                    onAddFromGallery = { pickFromGallery() },
+                                    onImportPdf = onImportPdf,
+                                    onAddManual = onAddManual
+                                )
+                            }
+                        }
+                    } else if (state.questions.isEmpty()) {
+                        item(key = "empty-filter", contentType = "empty") {
+                            Box(Modifier.fillParentMaxSize()) {
+                                EmptyState(
+                                    title = stringResource(R.string.home_empty_title),
+                                    subtitle = stringResource(R.string.home_empty_filter_hint)
+                                )
                             }
                         }
                     }
@@ -820,14 +843,20 @@ private fun SwipeableQuestionCard(
             // 底层背景由各操作块自己铺（置顶 primaryContainer、删除 errorContainer），
             // 外层保持透明——两块颜色不同，铺在同一层就分不开了。
     ) {
-        // 底层：删除区。
+        // 底层：操作区。
         //
         // **必须限定在露出来的那一条宽度内、并靠右对齐。**
         // v0.0.5 用的是 `fillMaxSize()` + `Alignment.Center`，
         // 图标被放在**整张卡的正中**——而滑开只露出最右边一条，
         // 于是图标压根没露出来，用户看到「一片红、什么都没有」，
         // 自然也没有东西可点。这是 v0.0.5 的实际回归。
-        Row(
+        //
+        // v0.0.121 圆润化（用户：「蓝色左边缘没有做圆润化处理，
+        // 红蓝连接的方式也没有做圆润化处理」）：两层叠画——
+        //   下层红块向左多铺一段衔接带；上层蓝块左缘随卡片圆角、
+        //   右缘以 [SwipeActionJunctionRadius] 的圆弧压在红色上。
+        // 蓝红交界从此是一段圆弧，蓝块左缘与卡片轮廓同一条曲线。
+        Box(
             modifier = Modifier
                 // v0.0.116：从 fillMaxHeight() 改成 matchParentSize()。
                 //
@@ -843,33 +872,50 @@ private fun SwipeableQuestionCard(
                 .graphicsLayer {
                     val progress = swipeRevealProgress(offsetX.value, revealWidthPx)
                     alpha = swipeRevealContentAlpha(progress)
-                },
-            horizontalArrangement = Arrangement.End
-        ) {
-            // 置顶：与对话历史的左滑同一颗组件、同一套观感（v0.0.112 用户拍板）。
-            SwipeActionBlock(
-                width = SwipeActionBlockWidth,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                icon = Icons.Default.PushPin,
-                label = stringResource(
-                    if (question.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
-                ),
-                enabled = revealed,
-                onClick = { close(); onPin() }
-            )
-            SwipeActionBlock(
-                width = SwipeActionBlockWidth,
-                color = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                icon = Icons.Default.Delete,
-                label = stringResource(R.string.archive_action),
-                enabled = revealed,
-                onClick = {
-                    close()
-                    onDelete()
                 }
-            )
+        ) {
+            // 红（归档）：宽度多出一段衔接带，多出的部分被上层蓝块的圆角盖住
+            Row(
+                modifier = Modifier.matchParentSize(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    icon = Icons.Default.Delete,
+                    label = stringResource(R.string.archive_action),
+                    enabled = revealed,
+                    onClick = {
+                        close()
+                        onDelete()
+                    }
+                )
+            }
+            // 蓝（置顶）：左缘随卡片圆角、右缘圆弧压进红色
+            Row(
+                modifier = Modifier.matchParentSize(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    icon = Icons.Default.PushPin,
+                    label = stringResource(
+                        if (question.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
+                    ),
+                    enabled = revealed,
+                    shape = RoundedCornerShape(
+                        topStart = MaterialTheme.shapes.medium.topStart,
+                        bottomStart = MaterialTheme.shapes.medium.bottomStart,
+                        topEnd = CornerSize(SwipeActionJunctionRadius),
+                        bottomEnd = CornerSize(SwipeActionJunctionRadius)
+                    ),
+                    onClick = { close(); onPin() }
+                )
+                Spacer(Modifier.width(SwipeActionBlockWidth))
+            }
         }
 
         // 上层：卡片，跟随手势位移。

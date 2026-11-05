@@ -14,7 +14,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -72,11 +75,23 @@ internal fun swipeRevealContentAlpha(progress: Float): Float {
 }
 
 /**
+ * 红蓝两块相接处的圆角半径（v0.0.121）。
+ *
+ * 用户看截图说「蓝色左边缘没有做圆润化处理，红蓝连接的方式也没有做
+ * 圆润化处理」。左缘的圆角跟卡片走，相接处用这个独立半径：整条操作区
+ * 高度几十 dp，16dp 的弧既看得见圆润，又不会把色块削成胶囊。
+ */
+val SwipeActionJunctionRadius: Dp = 16.dp
+
+/**
  * 滑动露出的**操作块**：整块色底 + 居中的图标和一行小字。
  *
  * 错题卡片、对话历史、归档页三处共用同一颗组件——同一套交互在不同页面
  * 各画一份，颜色、字号、图标大小迟早各长各样（用户就是对着对话历史的
  * 版本说「其他页面的太丑了」）。
+ *
+ * [shape] 默认直角；需要与卡片圆角或相邻色块做圆润过渡的页面自己传
+ * （见首页错题卡的红蓝双块）。
  */
 @Composable
 internal fun SwipeActionBlock(
@@ -86,12 +101,15 @@ internal fun SwipeActionBlock(
     icon: ImageVector,
     label: String,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
+    shape: Shape = RectangleShape,
     onClick: () -> Unit
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .width(width)
             .fillMaxHeight()
+            .clip(shape)
             .background(color)
             // 滑开前点不到这里（被卡片挡住），显式禁用更保险
             .clickable(enabled = enabled, onClick = onClick),
