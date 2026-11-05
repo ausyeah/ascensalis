@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -824,15 +823,22 @@ private fun SwipeableQuestionCard(
         // 自然也没有东西可点。这是 v0.0.5 的实际回归。
         Row(
             modifier = Modifier
-                .fillMaxHeight()
-                .align(Alignment.CenterEnd)
+                // v0.0.116：从 fillMaxHeight() 改成 matchParentSize()。
+                //
+                // 错题卡躺在 LazyColumn 里，纵向约束是无限高，fillMaxHeight()
+                // 在这种约束下等于「保持自身内容高度」——色块只有图标加一行字
+                // 那么高、上下留白，看着是一小块飘在卡片中间。对话历史的抽屉
+                // 用 matchParentSize() 恰好等于卡片高度，色块才饱满；三处
+                // 左滑共用同一套观感，这里跟着对齐。
+                .matchParentSize()
                 // 透明度跟着露出进度走，且只在绘制期读 offsetX（graphicsLayer 的
                 // lambda 是 draw 阶段，不重组）：图标像被手指带出来，而不是
                 // 一开始就静止贴在底层、被卡片切成一半。
                 .graphicsLayer {
                     val progress = swipeRevealProgress(offsetX.value, revealWidthPx)
                     alpha = swipeRevealContentAlpha(progress)
-                }
+                },
+            horizontalArrangement = Arrangement.End
         ) {
             // 置顶：与对话历史的左滑同一颗组件、同一套观感（v0.0.112 用户拍板）。
             SwipeActionBlock(

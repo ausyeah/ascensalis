@@ -50,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -60,6 +61,8 @@ import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
+import com.mistakebook.ui.common.swipeRevealContentAlpha
+import com.mistakebook.ui.common.swipeRevealProgress
 import com.mistakebook.data.local.entities.Question
 import com.mistakebook.data.local.displayTitle
 import com.mistakebook.di.AppContainer
@@ -307,9 +310,24 @@ private fun ArchiveSwipeRow(
     var offset by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
 
-    Box(modifier = Modifier.fillMaxWidth()) {
+    // 外层的 clip + surface 底与对话历史抽屉同一口径：色块要「长」在卡片里，
+    // 由父级圆角统一裁外沿，越界的方块才不会是直角的。
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
         Row(
-            modifier = Modifier.align(Alignment.CenterEnd),
+            // v0.0.116：原来是「按内容高度居中」，色块只有图标加一行字那么高，
+            // 滑开是一小块飘在卡片中间；对话历史用 matchParentSize() 恰好等于
+            // 卡片高度，饱满得多。归档页跟着对齐——三处左滑必须一套观感。
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    val progress = swipeRevealProgress(offset, revealWidthPx)
+                    alpha = swipeRevealContentAlpha(progress)
+                },
             horizontalArrangement = Arrangement.End
         ) {
             SwipeActionBlock(
@@ -318,7 +336,8 @@ private fun ArchiveSwipeRow(
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 icon = Icons.Default.Restore,
                 label = stringResource(R.string.archived_restore),
-                enabled = true,
+                // 滑开前点不到（被卡片挡住），显式收紧与另两处一致
+                enabled = offset < -revealWidthPx * 0.35f,
                 onClick = {
                     offset = 0f
                     scope.launch { onRestore() }
@@ -330,7 +349,7 @@ private fun ArchiveSwipeRow(
                 contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 icon = Icons.Default.Delete,
                 label = stringResource(R.string.archived_delete),
-                enabled = true,
+                enabled = offset < -revealWidthPx * 0.35f,
                 onClick = {
                     offset = 0f
                     scope.launch { onDelete() }
