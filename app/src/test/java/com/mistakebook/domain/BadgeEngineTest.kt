@@ -256,6 +256,11 @@ class BadgeEngineTest {
                 Badge.DOCS_HUNDRED -> "libraryDocs"
                 Badge.BADGE_ROOKIE, Badge.BADGE_COLLECTOR, Badge.BADGE_MASTER,
                 Badge.BADGE_ELDER, Badge.BADGE_GALLERY -> "unlockedBadges"
+                // 复习阶梯：R 系列的维度是 totalReviews——
+                // 落进 else（totalQuestions）就会在 target-1 误判解锁（CI 真实翻过车）
+                Badge.R10, Badge.R50, Badge.HUNDRED_REVIEWS, Badge.R250,
+                Badge.R500, Badge.R1000, Badge.R2000, Badge.R5000,
+                Badge.R10000, Badge.R20000 -> "totalReviews"
                 else -> "totalQuestions"
             }
             // 「unlockedBadges」维度不在 maxima（它是库内计数，直接给值）
