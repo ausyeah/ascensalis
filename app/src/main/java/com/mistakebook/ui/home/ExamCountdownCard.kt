@@ -299,28 +299,43 @@ class ExamCountdownViewModel(private val container: AppContainer) : ViewModel() 
         refresh()
     }
 
-    /** 读设置里的考试日期 + 到期队列，重算计划。改日期/应用排期后都调它。 */
+    /**
+     * 读设置里的考试日期 + 到期队列，重算计划。改日期/应用排期后都调它。
+     *
+     * v0.0.128（issue #44/#45「复习完了但首页还显示今天有题目没复习」）：
+     * 原来这里用 `dueQuestions(...)` **一次性查**，查完就存成快照 —— 用户去复习页
+     * 把题过完再回来，卡片上的「待复习 N 道」还是进页面时的旧数字。
+     * 改成订阅 [QuestionRepository.observeDue] 的 Flow：复习落库（nextReviewAt
+     * 推到明天/清空）会让 Room 失效这张表，计划与到期数自动跟着重算。
+     */
+    private var dueJob: kotlinx.coroutines.Job? = null
+
     fun refresh() {
         viewModelScope.launch {
             val snapshot = container.settingsStore.snapshotNow()
             val examDate = snapshot.examDateEpochDay?.let(LocalDate::ofEpochDay)
+            dueJob?.cancel()
             if (examDate == null) {
                 _uiState.value = ExamCountdownUiState()
                 return@launch
             }
             val today = LocalDate.now()
-            val due = container.questionRepository.dueQuestions(today, limit = 500)
-                .filter { it.status != com.mistakebook.domain.MasteryStatus.MASTERED }
-            val plan = ExamPlanner.plan(
-                questions = due.map { PlanQuestion(it.id, it.reviewStage) },
-                today = today,
-                examDate = examDate
-            )
-            _uiState.value = ExamCountdownUiState(
-                examDate = examDate,
-                daysLeft = plan.daysLeft,
-                plan = plan
-            )
+            dueJob = viewModelScope.launch {
+                container.questionRepository.observeDue(today).collect { due ->
+                    val plan = ExamPlanner.plan(
+                        questions = due
+                            .filter { it.status != com.mistakebook.domain.MasteryStatus.MASTERED }
+                            .map { PlanQuestion(it.id, it.reviewStage) },
+                        today = today,
+                        examDate = examDate
+                    )
+                    _uiState.value = ExamCountdownUiState(
+                        examDate = examDate,
+                        daysLeft = plan.daysLeft,
+                        plan = plan
+                    )
+                }
+            }
         }
     }
 

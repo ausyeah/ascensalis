@@ -183,10 +183,18 @@ class ChatToolsTest {
         assertFalse("长按菜单必须删掉", sheet.contains("onLongClick"))
         assertTrue("左滑露出宽度必须是三块", sheet.contains("SwipeActionRevealWidth = SwipeActionBlockWidth * 3"))
         val blocks = sheet.substring(sheet.indexOf("SwipeActionBlock("), sheet.indexOf("// 上层：卡片内容"))
-        assertTrue("第一块是置顶", blocks.contains("R.string.swipe_unpin_action") && blocks.contains("R.string.swipe_pin_action"))
-        assertTrue("第二块是重命名", blocks.contains("R.string.chat_rename"))
+        assertTrue("置顶块在", blocks.contains("R.string.swipe_unpin_action") && blocks.contains("R.string.swipe_pin_action"))
+        assertTrue("重命名块在", blocks.contains("R.string.chat_rename"))
         // v0.0.104：主列表不再直接删除，最后一块改成归档（删除只在「已归档」页里）
-        assertTrue("最后一块是归档", blocks.lastIndexOf("R.string.archive_action") > blocks.lastIndexOf("R.string.chat_rename"))
+        assertTrue("归档块在", blocks.contains("R.string.archive_action"))
+        // v0.0.128（issue #43）：三块改成**叠画**（底层先画、上层压圆弧），
+        // 声明顺序从「左→右」变成「右→左」：归档最底、置顶最上层。
+        // 视觉上的顺序不变（置顶在最左、归档在最右），所以只钉「谁压着谁」。
+        assertTrue(
+            "归档必须在底层（先声明），置顶在最上层（后声明）",
+            blocks.indexOf("R.string.archive_action") < blocks.indexOf("R.string.swipe_pin_action") &&
+                blocks.indexOf("R.string.archive_action") < blocks.indexOf("R.string.chat_rename")
+        )
     }
 
     @Test

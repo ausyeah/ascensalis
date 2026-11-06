@@ -49,6 +49,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ViewSidebar
 import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -257,6 +258,16 @@ fun ChatScreen(
     // 用户没动，页面自己在抽。回到触底自动解冻并补上攒下的内容。
     LaunchedEffect(coordinator.following) {
         viewModel.setStreamFrozen(!coordinator.following)
+    }
+
+    // 模型反问的选项卡片（v0.0.128，issue #46）：悬浮在最上层。
+    state.pendingAsk?.let { pending ->
+        AskUserDialog(
+            pending = pending,
+            onAnswer = { askId, indexes, skipped ->
+                viewModel.answerAsk(askId, indexes, skipped)
+            }
+        )
     }
 
     var showKeyGate by remember { mutableStateOf(false) }
@@ -527,8 +538,11 @@ fun ChatScreen(
                             scope.launch { drawerState.open() }
                         }
                     ) {
+                        // v0.0.128（issue #47）：原来是带箭头的时钟（History），
+                        // 24dp 细节太碎、更像「撤销」。换侧栏图标——现代 AI
+                        // 客户端统一做法，一眼看出是「从左边拉出会话列表」。
                         Icon(
-                            Icons.Default.History,
+                            Icons.AutoMirrored.Filled.ViewSidebar,
                             contentDescription = stringResource(R.string.chat_list_title)
                         )
                     }
@@ -538,7 +552,10 @@ fun ChatScreen(
                     // 「不想留在历史里」的问题。普通新对话的入口在首页与历史页。
                     IconButton(onClick = onNewTemporaryConversation) {
                         Icon(
-                            painter = painterResource(R.drawable.ic_temp_chat),
+                            // v0.0.128（issue #47）：虚线圆环在 24dp 下只剩一圈
+                            // 毛刺。换「圆角方框 + 铅笔」的新对话图标
+                            // （ChatGPT 手机端同款语义），干净得多。
+                            painter = painterResource(R.drawable.ic_new_chat),
                             contentDescription = stringResource(R.string.chat_temporary_new),
                             // 灰：临时对话是「次要动作」，用色重了会和正式对话抢
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,

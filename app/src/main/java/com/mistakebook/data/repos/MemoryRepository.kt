@@ -3,6 +3,7 @@ package com.mistakebook.data.repos
 import com.mistakebook.data.chat.MemoryPrompts
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.ReasoningEffort
+import com.mistakebook.data.chat.MemoryMerge
 import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.net.ApiResult
@@ -49,6 +50,25 @@ class MemoryRepository(
     /** 手动编辑：用户在编辑框里直接改全文。空文本允许（= 清空记忆）。 */
     suspend fun saveManually(text: String) {
         settingsStore.saveMemoryDocument(text.trim())
+    }
+
+    /**
+     * 直接把若干条事实并进记忆文档（v0.0.128，issue #42）。
+     *
+     * 供两条路径使用：模型在对话里调用 `save_memory` 工具；以及每轮结束后
+     * 的自动提取。**不调模型**——只做去重、追加到「对话里记下的」一节、
+     * 超长时裁掉该节最早的条目（人工写的分节不动）。
+     *
+     * @return 实际写入的新条目数（全是重复时为 0，此时不写盘）。
+     */
+    suspend fun appendFacts(facts: List<String>): Int {
+        if (facts.isEmpty()) return 0
+        val before = documentNow()
+        val merged = MemoryMerge.merge(before, facts)
+        if (merged == before) return 0
+        val added = merged.length - before.length
+        settingsStore.saveMemoryDocument(merged)
+        return if (added > 0) facts.size else 0
     }
 
     /**

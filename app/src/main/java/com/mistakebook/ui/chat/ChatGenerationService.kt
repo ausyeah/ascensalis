@@ -234,6 +234,10 @@ class ChatGenerationService : Service() {
         // 生图工具产出的图片路径：循环结束后以 Markdown 接到回答末尾。
         val generatedImages = mutableListOf<String>()
 
+        // 本轮是否已经写过记忆（v0.0.128，issue #42）：模型自己用工具写过，
+        // 关闭后的自动提取就不再重复记一遍。
+        var memoryWrittenThisTurn = false
+
         // tool loop 的消息链走 **DTO 层**：中途要追加 assistant(tool_calls)
         // 与 role=tool 两种本地域模型（OutgoingMessage）表达不了的消息。
         val llmMessages = context.messages.map { it.toLlm() }.toMutableList()
@@ -334,6 +338,12 @@ class ChatGenerationService : Service() {
                         // 数学计算器（v0.0.114）：算术外包给确定性求值器。
                         // 大模型心算多步算术错一位就是整题全错；无副作用，始终提供。
                         add(com.mistakebook.data.chat.MathTools.calculatorTool())
+                        // 长期记忆写入（v0.0.128，issue #42）：模型可把用户的身份/
+                        // 目标/偏好记进记忆库；此前只有用户在设置里手写一条路。
+                        addAll(com.mistakebook.data.chat.MemoryTools.all())
+                        // 反问用户（v0.0.128，issue #46）：需要澄清时抛选项卡片，
+                        // 用户在界面上点选，结果回到工具结果里；超时自动跳过。
+                        add(com.mistakebook.data.chat.AskUserTools.tool())
                     }.takeIf { it.isNotEmpty() }
                 )
                 // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）。
@@ -447,6 +457,8 @@ class ChatGenerationService : Service() {
                         call.name == MediaTools.DESCRIBE_IMAGE ||
                             call.name == MediaTools.OCR_IMAGE -> "正在查看图片…"
                         call.name == MediaTools.GENERATE_IMAGE -> "正在生成图片…"
+                        call.name == com.mistakebook.data.chat.MemoryTools.SAVE -> "正在记下这条…"
+                        call.name == com.mistakebook.data.chat.AskUserTools.ASK_USER -> "等你选一下…"
                         else -> "正在调用工具…"
                     }
                     ChatGenerationBus.publish(
@@ -562,6 +574,30 @@ class ChatGenerationService : Service() {
                                 arguments = call.arguments
                             )
 
+                        com.mistakebook.data.chat.MemoryTools.SAVE -> {
+                            // 只做合并追加，不重跑 LLM：一次工具调用不该再等一次模型。
+                            val facts = com.mistakebook.data.chat.MemoryTools
+                                .parseFacts(call.arguments)
+                            memoryWrittenThisTurn = memoryWrittenThisTurn || facts.isNotEmpty()
+                            val written = runCatching {
+                                container.memoryRepository.appendFacts(facts)
+                            }.getOrDefault(0)
+                            if (written > 0) {
+                                "已写入记忆 $written 条：${facts.joinToString("；")}。" +
+                                    "不要在回答里复述这份记忆。"
+                            } else {
+                                "这些信息记忆里已经有了（或内容为空），没有重复写入。"
+                            }
+                        }
+
+                        com.mistakebook.data.chat.AskUserTools.ASK_USER -> {
+                            com.mistakebook.data.chat.AskUserTools.execute(
+                                arguments = call.arguments,
+                                askId = call.id,
+                                sessionId = sessionId
+                            )
+                        }
+
                         else -> "未识别的工具「${call.name}」，请改用你确定存在的工具。"
                     }
                     // 工具跑完了：内容照旧带上，撤掉 stage。空 content 的快照一律不再发。
@@ -600,6 +636,27 @@ class ChatGenerationService : Service() {
                 }
                 generatedImages.clear()
                 publishPreview()
+            }
+
+            // 对话收尾后的记忆自动提取（v0.0.128，issue #42）。
+            //
+            // 两个前提：本轮用户那句话命中「长期信息」措辞闸门，且模型自己
+            // 没有调用过 save_memory。扔到 appScope 里跑——提取是一次额外的
+            // 模型调用，不该让停止按钮多转两秒、也不该拖慢服务收尾；
+            // 失败当没发生（记忆是增益，不产生错误提示）。
+            val extractUserText = lastUserQuestion
+            if (extractUserText != null) {
+                val alreadyWritten = memoryWrittenThisTurn
+                container.appScope.launch {
+                    runCatching {
+                        container.memoryExtractor.maybeExtract(
+                            userText = extractUserText,
+                            answer = joinThinkingAndAnswer(rounds.answer, rounds.thinking),
+                            profile = profile,
+                            memoryWrittenThisTurn = alreadyWritten
+                        )
+                    }
+                }
             }
         } catch (cancelled: CancellationException) {
             // 用户按了停止 / 服务被销毁：不是失败，保留已收到的内容。

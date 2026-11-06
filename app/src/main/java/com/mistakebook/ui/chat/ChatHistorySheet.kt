@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -75,6 +77,7 @@ import com.mistakebook.di.PendingTool
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
+import com.mistakebook.ui.common.SwipeActionJunctionRadius
 import com.mistakebook.ui.common.SwipeRevealSpring
 import com.mistakebook.ui.common.swipeRevealContentAlpha
 import com.mistakebook.ui.common.swipeRevealProgress
@@ -467,68 +470,89 @@ private fun SwipeableChatRow(
             .background(MaterialTheme.colorScheme.surface)
     ) {
         // 底层：操作区。左滑后从右侧露出，**靠右对齐**——
-        // 卡片往左移，露出的正是最右边这两块。
-        Row(
+        // 卡片往左移，露出的正是最右边这三块。
+        //
+        // v0.0.128（issue #43「对话历史里面的左滑选项没有做圆润化处理」）：
+        // 与首页错题卡改成同一套画法——三块叠画，靠右的那块先画，
+        // 越往左越靠上层；每块向左多铺 [SwipeActionJunctionRadius] 的
+        // 衔接带，被上层块的圆弧压住，交界处是弧线不是直线；
+        // 最左那块（置顶）的左缘取卡片圆角，卡片缩进去时与卡片轮廓同一条曲线。
+        Box(
             modifier = Modifier
                 .matchParentSize()
                 // 与错题卡同一口径：露出内容随进度淡入，绘制期读 offsetX 不重组
                 .graphicsLayer {
                     val progress = swipeRevealProgress(offsetX.value, revealWidthPx)
                     alpha = swipeRevealContentAlpha(progress)
-                },
-            horizontalArrangement = Arrangement.End
+                }
         ) {
-            // v0.0.98 用户拍板：置顶从长按菜单挪进左滑，三个动作一排。
-            // 最左是最温和的动作，越往右越破坏性——删除永远在最外面。
-            SwipeActionBlock(
-                width = SwipeActionBlockWidth,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                icon = Icons.Default.PushPin,
-                label = stringResource(
-                    if (item.session.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
-                ),
-                enabled = revealed,
-                onClick = {
-                    close()
-                    onTogglePin()
-                }
-            )
-            SwipeActionBlock(
-                width = SwipeActionBlockWidth,
-                color = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                icon = Icons.Default.Edit,
-                label = stringResource(R.string.chat_rename),
-                enabled = revealed,
-                onClick = {
-                    close()
-                    onRename()
-                }
-            )
-            SwipeActionBlock(
-                width = SwipeActionBlockWidth,
-                // 两步确认全在这块颜色里：第一击是浅一档的 errorContainer，
-                // 第二击换成饱和的 error。不弹窗、不挪位置，「再点一次」
-                // 的语义靠对比度表达——深浅两档都从 colorScheme 取，
-                // 亮暗主题下方向一致（亮色：浅粉→深红；暗色：深红→亮红）。
-                color = if (confirmingDelete) MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.errorContainer,
-                contentColor = if (confirmingDelete) MaterialTheme.colorScheme.onError
-                else MaterialTheme.colorScheme.onErrorContainer,
-                icon = Icons.Default.Delete,
-                label = if (confirmingDelete) stringResource(R.string.swipe_delete_confirm)
-                else stringResource(R.string.archive_action),
-                enabled = revealed,
-                onClick = {
-                    if (confirmingDelete) {
-                        close()
-                        onDelete()
-                    } else {
-                        confirmingDelete = true
+            // ① 归档（最右/底层）：多铺一段衔接带，多出的部分被上层压住
+            ActionLayer(Modifier.matchParentSize(), inset = 0.dp) {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
+                    // 两步确认全在这块颜色里：第一击是浅一档的 errorContainer，
+                    // 第二击换成饱和的 error。不弹窗、不挪位置，「再点一次」
+                    // 的语义靠对比度表达——深浅两档都从 colorScheme 取，
+                    // 亮暗主题下方向一致（亮色：浅粉→深红；暗色：深红→亮红）。
+                    color = if (confirmingDelete) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.errorContainer,
+                    contentColor = if (confirmingDelete) MaterialTheme.colorScheme.onError
+                    else MaterialTheme.colorScheme.onErrorContainer,
+                    icon = Icons.Default.Delete,
+                    label = if (confirmingDelete) stringResource(R.string.swipe_delete_confirm)
+                    else stringResource(R.string.archive_action),
+                    enabled = revealed,
+                    onClick = {
+                        if (confirmingDelete) {
+                            close()
+                            onDelete()
+                        } else {
+                            confirmingDelete = true
+                        }
                     }
-                }
-            )
+                )
+            }
+
+            // ② 重命名（中间）：左右都是圆弧，两侧都压在邻块上
+            ActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth) {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    icon = Icons.Default.Edit,
+                    label = stringResource(R.string.chat_rename),
+                    enabled = revealed,
+                    shape = junctionShape(),
+                    onClick = {
+                        close()
+                        onRename()
+                    }
+                )
+            }
+
+            // ③ 置顶（最左/最上层）：左缘随卡片圆角
+            ActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth * 2) {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    icon = Icons.Default.PushPin,
+                    label = stringResource(
+                        if (item.session.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
+                    ),
+                    enabled = revealed,
+                    shape = RoundedCornerShape(
+                        topStart = MaterialTheme.shapes.medium.topStart,
+                        bottomStart = MaterialTheme.shapes.medium.bottomStart,
+                        topEnd = CornerSize(SwipeActionJunctionRadius),
+                        bottomEnd = CornerSize(SwipeActionJunctionRadius)
+                    ),
+                    onClick = {
+                        close()
+                        onTogglePin()
+                    }
+                )
+            }
         }
 
         // 上层：卡片内容，跟随手势位移（向左为负）
@@ -563,6 +587,37 @@ private fun SwipeableChatRow(
         }
     }
 }
+
+/**
+ * 一块操作色的定位层：靠右对齐，并按 [inset] 从右边缩进若干块宽。
+ *
+ * 三块用 Box 叠画（而不是 Row 并排），是为了让相邻色块**重叠**
+ * [SwipeActionJunctionRadius] 的宽度：上层的圆角压在邻块的颜色上，
+ * 交界才是弧线；并排铺只会露出父容器的底色，反而更难看。
+ */
+@Composable
+private fun ActionLayer(
+    modifier: Modifier,
+    inset: androidx.compose.ui.unit.Dp,
+    content: @Composable () -> Unit
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.End
+    ) {
+        content()
+        if (inset > 0.dp) Spacer(Modifier.width(inset))
+    }
+}
+
+/** 中间块的形状：两侧都收圆弧（右缘压下一块，左缘被上一块压）。 */
+@Composable
+private fun junctionShape(): androidx.compose.ui.graphics.Shape = RoundedCornerShape(
+    topStart = CornerSize(SwipeActionJunctionRadius),
+    bottomStart = CornerSize(SwipeActionJunctionRadius),
+    topEnd = CornerSize(SwipeActionJunctionRadius),
+    bottomEnd = CornerSize(SwipeActionJunctionRadius)
+)
 
 /** 对话记录一行的内容（标题 + 预览 + 时间）。 */
 @Composable

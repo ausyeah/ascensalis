@@ -215,6 +215,14 @@ data class ChatUiState(
     val contextOverflow: Boolean = false,
 
     /**
+     * 模型正在等用户回答的一张选项卡片（v0.0.128，issue #46）。
+     *
+     * 生成服务在工具分支里挂起等它；null = 没有待答问题。
+     * 卡片是**悬浮**的，不进消息列表——它不是对话内容，是交互提示。
+     */
+    val pendingAsk: com.mistakebook.data.chat.ChatAskBridge.Pending? = null,
+
+    /**
      * 正在后台用 MinerU 识别图片时的阶段文案。
      *
      * 非空时输入栏上方显示一条进度提示。
@@ -449,6 +457,16 @@ class ChatViewModel(
                     loadBubbleImages(_state.value.messages)
                 }
             }
+
+            // 模型抛来的选项卡片（v0.0.128，issue #46）：本会话的才显示；
+            // 切会话时把别人的卡片撤掉，免得答到别的对话上。
+            launch {
+                com.mistakebook.data.chat.ChatAskBridge.pending.collect { pending ->
+                    _state.value = _state.value.copy(
+                        pendingAsk = pending?.takeIf { it.sessionId == session.id }
+                    )
+                }
+            }
             // **恢复输入草稿**。
             //
             // 用户打好的字退出会话再进来就没了——这是纯丢失，没有任何补救。
@@ -641,6 +659,15 @@ class ChatViewModel(
     private var heldStreamSnapshot: ChatGenerationBus.Snapshot? = null
 
     /** 界面根据「是否触底跟随」驱动；终态快照不受冻结影响（见收集器注释）。 */
+    /**
+     * UI 回答 / 跳过模型抛来的选项卡片（v0.0.128，issue #46）。
+     *
+     * @param indexes 选中的选项下标；[skipped] 为 true 表示用户直接跳过。
+     */
+    fun answerAsk(askId: String, indexes: Set<Int>, skipped: Boolean = false) {
+        com.mistakebook.data.chat.ChatAskBridge.submit(askId, indexes, skipped)
+    }
+
     fun setStreamFrozen(frozen: Boolean) {
         if (streamFrozen == frozen) return
         streamFrozen = frozen

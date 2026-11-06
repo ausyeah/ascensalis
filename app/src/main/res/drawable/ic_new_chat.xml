@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  新对话图标（v0.0.128，issue #47）。
+
+  用户给了 ChatGPT 的截图：「右上角的临时对话图标也很丑，重做」。
+  旧图标（ic_temp_chat）是「8 段虚线圆环 + 实心气泡」——在 24dp 下
+  虚线降到 1dp，看起来只是一圈毛刺。
+
+  这枚改成 ChatGPT 手机端同款语义的「圆角方框 + 铅笔」：
+  - 外框描边 2.2（48 视口）：24dp 下约 1.1dp，清晰不糊；
+  - 铅笔斜置、笔尖破框左下角——「新写一条」的意思一眼可见；
+  - 线帽圆、转角圆，和全局圆润口径一致。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- 圆角外框（右下角留口给铅笔出框） -->
+    <path
+        android:pathData="M34,26 L34,35 A6,6 0 0 1 28,41 L13,41 A6,6 0 0 1 7,35 L7,13 A6,6 0 0 1 13,7 L26,7"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- 铅笔：笔杆 + 笔尖 -->
+    <path
+        android:pathData="M40.6,7.4 A3.6,3.6 0 0 0 35.5,7.4 L23.2,19.7 L27.4,23.9 L39.7,11.6 A3.6,3.6 0 0 0 39.7,6.5 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <path
+        android:pathData="M22.4,20.5 L26.6,24.7 L23.4,26.9 L20.2,23.7 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

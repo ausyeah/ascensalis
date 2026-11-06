@@ -1176,20 +1176,17 @@ private fun DailyTrendLine(values: List<Long>) {
 }
 
 
-/** 饼图配色（v0.0.57：换成暖色系，去掉蓝/紫）。 */
-private val PIE_COLORS = listOf(
-    Color(0xFFB0673A), // 赭石
-    Color(0xFF4E8A72), // 灰绿
-    Color(0xFFC08A3E), // 麦黄
-    Color(0xFFA24A63), // 酒红
-    Color(0xFFA94A3F), // 砖红
-    Color(0xFF3E7F86), // 灰青
-    Color(0xFF7C8A4E), // 橄榄
-    Color(0xFF8A6A4F)  // 棕
-)
-
-
-private fun pieColor(index: Int): Color = PIE_COLORS[index % PIE_COLORS.size]
+/**
+ * 饼图配色（v0.0.128，issue #48「番茄钟统计数据的颜色选择太丑了，换鲜亮的颜色」）。
+ *
+ * 旧配色的八个暖灰（赭石/灰绿/麦黄…）是 v0.0.57 为「克制」定的，
+ * 实际看是一片土色：扇区之间分不清，整块统计像蒙了层灰。
+ * 换成高彩度的一组（色相拉开、明度接近），深浅主题都够亮。
+ * 色值放在 Theme 的图表色板里——界面层不写裸色值的契约管组件，
+ * 成体系的调色表归主题。
+ */
+private fun pieColor(index: Int): Color =
+    com.mistakebook.ui.theme.chartColor(index)
 
 
 /**

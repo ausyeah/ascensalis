@@ -144,7 +144,7 @@ interface QuestionDao {
     @Query(
         """
         SELECT COUNT(*) FROM questions
-        WHERE deletedAt IS NULL AND status != 'MASTERED' AND nextReviewAt <= :today
+        WHERE deletedAt IS NULL AND archivedAt IS NULL AND status != 'MASTERED' AND nextReviewAt <= :today
         """
     )
     fun observeDueCount(today: Long): Flow<Int>

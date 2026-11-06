@@ -386,6 +386,15 @@ class AppContainer(context: Context) {
         )
     }
 
+    /** 对话结束后自动提取长期记忆（v0.0.128，issue #42）。 */
+    val memoryExtractor: com.mistakebook.data.chat.MemoryExtractor by lazy {
+        com.mistakebook.data.chat.MemoryExtractor(
+            memoryRepository = memoryRepository,
+            stream = chatCompletionStream,
+            usageStatsStore = usageStatsStore
+        )
+    }
+
     val chatContextCompressor: com.mistakebook.data.chat.ChatContextCompressor by lazy {
         com.mistakebook.data.chat.ChatContextCompressor(database.chatDao(), chatCompletionStream, usageStatsStore)
     }
