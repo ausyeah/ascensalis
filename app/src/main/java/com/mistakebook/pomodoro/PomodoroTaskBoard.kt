@@ -165,7 +165,7 @@ internal fun ManualEntryDialog(
     onDismiss: () -> Unit,
     onTask: (Long?) -> Unit,
     onDay: (String) -> Unit,
-    onTime: (Int, Int) -> Unit,
+    onTimeText: (String) -> Unit,
     onMinutes: (String) -> Unit,
     onConfirm: () -> Unit
 ) {
@@ -213,36 +213,36 @@ internal fun ManualEntryDialog(
                     value = state.manualDay,
                     onValueChange = onDay,
                     label = { Text(stringResource(R.string.pomodoro_backfill_date_hint)) },
+                    supportingText = {
+                        Text(stringResource(R.string.pomodoro_backfill_date_format))
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedTextField(
-                        value = state.manualHour.toString(),
-                        onValueChange = { onTime(it.toIntOrNull() ?: state.manualHour, state.manualMinute) },
-                        label = { Text(stringResource(R.string.pomodoro_backfill_start_hour)) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = state.manualMinute.toString(),
-                        onValueChange = { onTime(state.manualHour, it.toIntOrNull() ?: state.manualMinute) },
-                        label = { Text(stringResource(R.string.pomodoro_backfill_start_minute)) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = state.manualMinutes,
-                        onValueChange = onMinutes,
-                        label = { Text(stringResource(R.string.pomodoro_backfill_duration)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
-                        modifier = Modifier.weight(1.4f)
-                    )
-                }
+                // v0.0.129（issue #51「手动添加记录时间不能完全去掉然后填写，
+                // 而且 UI 异常都换行了」）：
+                // - 时/分两个数字框塞一行，标签在窄屏挤成两行——改成一个
+                //   「HH:mm」整行输入框，占位即格式示例；
+                // - 输入过程零拦截（旧实现清空就被旧值顶回来，等于不能删），
+                //   合法性挪到提交时校验。
+                OutlinedTextField(
+                    value = state.manualTimeText,
+                    onValueChange = onTimeText,
+                    label = { Text(stringResource(R.string.pomodoro_backfill_time_hint)) },
+                    supportingText = {
+                        Text(stringResource(R.string.pomodoro_backfill_time_format))
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = state.manualMinutes,
+                    onValueChange = onMinutes,
+                    label = { Text(stringResource(R.string.pomodoro_backfill_duration)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Text(
                     text = stringResource(R.string.pomodoro_backfill_note),
                     style = MaterialTheme.typography.labelSmall,

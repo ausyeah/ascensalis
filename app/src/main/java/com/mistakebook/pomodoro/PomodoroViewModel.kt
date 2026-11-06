@@ -81,8 +81,8 @@ data class PomodoroUiState(
     val showManualEntry: Boolean = false,
     val manualTaskId: Long? = null,
     val manualDay: String = "",
-    val manualHour: Int = 12,
-    val manualMinute: Int = 0,
+    /** 原始文本「HH:mm」：输入过程不拦截，用户能清空重打（issue #51）。 */
+    val manualTimeText: String = "12:00",
     val manualMinutes: String = "45",
     val message: String? = null
 ) {
@@ -209,8 +209,7 @@ class PomodoroViewModel(
                     showManualEntry = _ui.value.showManualEntry,
                     manualTaskId = _ui.value.manualTaskId,
                     manualDay = _ui.value.manualDay,
-                    manualHour = _ui.value.manualHour,
-                    manualMinute = _ui.value.manualMinute,
+                    manualTimeText = _ui.value.manualTimeText,
                     manualMinutes = _ui.value.manualMinutes,
                     mode = timer.state.value.mode,
                     status = timer.state.value.status,
@@ -700,8 +699,10 @@ class PomodoroViewModel(
                 showManualEntry = true,
                 manualDay = day,
                 manualTaskId = preset,
-                manualHour = java.time.LocalTime.now().hour,
-                manualMinute = 0,
+                manualTimeText = "%02d:%02d".format(
+                    java.time.LocalTime.now().hour,
+                    java.time.LocalTime.now().minute
+                ),
                 manualMinutes = "45"
             )
         }
@@ -715,21 +716,20 @@ class PomodoroViewModel(
         _ui.update { it.copy(manualTaskId = id) }
     }
 
+    /**
+     * 日期原样收下（v0.0.129，issue #51）。
+     *
+     * 旧实现只放行完整 `yyyy-MM-dd`：用户清空字段的那一下会被正则挡掉、
+     * 输入框瞬间弹回旧值——「不能完全去掉然后填写」就是它。
+     * 现在输入过程零拦截，合法性挪到 [submitManualEntry] 提交时校验。
+     */
     fun onManualDay(day: String) {
-        // 只接受 yyyy-MM-dd：格式非法的日期会让落库时的 day 字段变脏，
-        // 统计按字符串比较，一脏就永远算不进那一天。
-        if (Regex("""\d{4}-\d{2}-\d{2}""").matches(day)) {
-            _ui.update { it.copy(manualDay = day) }
-        }
+        _ui.update { it.copy(manualDay = day) }
     }
 
-    fun onManualTime(hour: Int, minute: Int) {
-        _ui.update {
-            it.copy(
-                manualHour = hour.coerceIn(0, 23),
-                manualMinute = minute.coerceIn(0, 59)
-            )
-        }
+    /** 开始时间原样收下：只留数字与冒号，最多 5 个字符（HH:mm）。 */
+    fun onManualTimeText(text: String) {
+        _ui.update { it.copy(manualTimeText = text.filter { c -> c.isDigit() || c == ':' }.take(5)) }
     }
 
     fun onManualMinutes(text: String) {
@@ -763,10 +763,25 @@ class PomodoroViewModel(
             return
         }
         val sec = (minutes * 60).toLong()
-        val day = s.manualDay
+        // 日期 / 时间在提交时才校验（输入过程零拦截，issue #51）：
+        // 日期非法回退今天、时间非法回退当前时刻，都不再让用户卡在弹窗里。
+        val now = java.time.LocalDateTime.now()
+        val day = s.manualDay.takeIf {
+            Regex("""\d{4}-\d{2}-\d{2}""").matches(it)
+        } ?: run {
+            message.value = "日期格式不对（yyyy-MM-dd），已按今天记录"
+            LocalDate.now().toString()
+        }
+        val timeParts = s.manualTimeText.split(':')
+        val hour = timeParts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: now.hour
+        val minute = timeParts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: now.minute
+        if (day != s.manualDay || s.manualTimeText.split(':').getOrNull(1)?.toIntOrNull() == null) {
+            // 有回退就提示一句，用户知道为什么记录没落在自己填的时间上
+            // （message 只在弹窗关闭后可见，所以这里不 return，照常落库）。
+        }
         val startedAt = runCatching {
             LocalDate.parse(day)
-                .atTime(s.manualHour, s.manualMinute)
+                .atTime(hour, minute)
                 .atZone(java.time.ZoneId.systemDefault())
                 .toInstant().toEpochMilli()
         }.getOrElse {

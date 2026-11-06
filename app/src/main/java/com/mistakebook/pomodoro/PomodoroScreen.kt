@@ -294,7 +294,7 @@ fun PomodoroScreen(container: AppContainer) {
             onDismiss = viewModel::closeManualEntry,
             onTask = viewModel::onManualTask,
             onDay = viewModel::onManualDay,
-            onTime = viewModel::onManualTime,
+            onTimeText = viewModel::onManualTimeText,
             onMinutes = viewModel::onManualMinutes,
             onConfirm = viewModel::submitManualEntry
         )

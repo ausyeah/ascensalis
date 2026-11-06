@@ -784,6 +784,9 @@
     <string name="pomodoro_backfill_title">补记一次专注</string>
     <string name="pomodoro_backfill_task_label">任务</string>
     <string name="pomodoro_backfill_date_hint">日期（2026-03-08）</string>
+    <string name="pomodoro_backfill_date_format">格式：yyyy-MM-dd，留空按今天</string>
+    <string name="pomodoro_backfill_time_hint">开始时间</string>
+    <string name="pomodoro_backfill_time_format">格式：HH:mm，留空按现在</string>
     <string name="pomodoro_backfill_start_hour">开始时</string>
     <string name="pomodoro_backfill_start_minute">开始分</string>
     <string name="pomodoro_backfill_duration">时长（分钟）</string>
