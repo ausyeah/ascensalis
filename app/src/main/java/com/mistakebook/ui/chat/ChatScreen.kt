@@ -612,7 +612,10 @@ fun ChatScreen(
                         // 早先无条件传回调，自由会话里图标照画、点下去 saveToNote
                         // 第一行 questionId==null 静默退出——用户看到的就是
                         // 「第二个图标点了没反应」。
-                        onSaveToNote = questionId?.let { viewModel::saveToNote }
+                        onSaveToNote = questionId?.let { viewModel::saveToNote },
+                        // v0.0.126（issue #39）：按下即接管——不等触摸 slop。
+                        onTouchDown = { coordinator.onPointerDown() },
+                        onTouchUp = { coordinator.onPointerUp() }
                     )
                 }
 

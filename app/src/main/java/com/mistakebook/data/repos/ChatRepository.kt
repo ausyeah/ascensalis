@@ -488,6 +488,10 @@ class ChatRepository(
 
     suspend fun insertAttachment(attachment: ChatAttachment): Long = chatDao.insertAttachment(attachment)
 
+    /** 会话全部附件的变化（v0.0.126，issue #38）：气泡图片据此即时刷新。 */
+    fun observeSessionAttachments(sessionId: Long) =
+        chatDao.observeAttachmentsOfSession(sessionId)
+
     /**
      * 把已准备好的附件落到某条消息上。
      *

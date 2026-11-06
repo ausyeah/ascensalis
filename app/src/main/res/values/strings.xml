@@ -21,6 +21,13 @@
     <string name="archived_sessions_title">已归档会话</string>
     <string name="archived_empty_questions">还没有归档的题目</string>
     <string name="archived_empty_sessions">还没有归档的会话</string>
+    <string name="archived_tasks_title">已归档任务</string>
+    <string name="archived_empty_tasks">还没有归档的番茄钟任务</string>
+    <string name="archived_task_keep_history">归档的任务，历史记录都还在</string>
+    <string name="archived_task_delete_title">删除这个任务</string>
+    <string name="archived_task_delete_body">「%1$s」的专注记录会一起删除，且无法恢复。确定吗？</string>
+    <string name="archived_task_delete_confirm">确认删除</string>
+    <string name="settings_archived_tasks">已归档任务</string>
     <string name="archived_restore">恢复</string>
     <string name="archived_delete">删除</string>
     <string name="archived_filter_all">全部</string>

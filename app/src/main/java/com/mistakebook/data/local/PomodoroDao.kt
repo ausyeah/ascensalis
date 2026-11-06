@@ -52,6 +52,19 @@ interface PomodoroDao {
     suspend fun archiveTask(id: Long)
 
     /**
+     * 已归档任务（v0.0.126，issue #37）：用户「任务归档后没有地方能找到」。
+     *
+     * 归档只把任务从选择器里收起来、历史记录照常保留；这里给出唯一的
+     * 找回入口，按创建时间倒序（最近归档/创建的排前）。
+     */
+    @Query("SELECT * FROM pomodoro_tasks WHERE archived = 1 ORDER BY createdAt DESC")
+    fun observeArchivedTasks(): Flow<List<PomodoroTask>>
+
+    /** 恢复归档任务：回到选择器里，历史记录本来就没动过。 */
+    @Query("UPDATE pomodoro_tasks SET archived = 0 WHERE id = :id")
+    suspend fun unarchiveTask(id: Long)
+
+    /**
      * 硬删任务（长按编辑里的「删除」用）。
      *
      * 级联由外键负责：pomodoro_sessions.taskId 是 ON DELETE CASCADE，

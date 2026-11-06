@@ -345,9 +345,8 @@ internal fun MessageBubble(
                         text = thinking,
                         // 「正在思考」= 还在流式**且答案尚未开始**（v0.0.83 简化折叠规则）。
                         streaming = isStreaming && answer.isBlank(),
-                        // 生成全程（思考+作答）禁手动折叠：思考中不可折叠；
-                        // 结束输出正文时自动折叠；只有生成结束后才可自由展开/收起。
-                        locked = isStreaming,
+                        // v0.0.126（issue #39）：不再锁死，生成全程都可手动折叠；
+                        // 结束输出正文时自动折叠（用户手动动过则以用户为准）。
                         mathRenderer = mathRenderer,
                         // 思考块与正文同属一条消息：共用消息 id 隔离防抖
                         debounceKey = message.id,
@@ -667,15 +666,13 @@ internal fun StatusRow(
  * 思考过程可能很长而信息量不大，展开占的正是答案的位置。
  * 用户想看的是结论，想查推导时再展开。
  *
- * ## 折叠规则（v0.0.83 定稿，用户拍板）
+ * ## 折叠规则（v0.0.126 改版，issue #39「思考的时候不能收起思考」）
  *
- * - **思考中**：保持展开且**不可折叠**（[locked]=true，点击无效）——
- *   用户要看到「它在想什么」；
+ * - **思考中**：展开且**可折叠**——折叠是阅读偏好，生成过程中用户想收就收；
  * - **答案开始输出**：自动收起一次（`streaming` 翻假触发 LaunchedEffect），
- *   把位置让给正文；作答期间同样不可点；
- * - **生成结束后**：才可以自由折叠/展开。
- * 早先错传整条消息的流式状态，思考块在作答阶段一直开着、消息结束才猛收——
- * 就是「会跳转但不折叠」的根因。
+ *   把位置让给正文；但如果用户自己动过折叠键，就不再自动收起——
+ *   刚被用户点开的内容不该在生成结束时被程序藏回去；
+ * - **生成结束后**：自由折叠/展开。
  *
  * ## 思考过程同样走 [RichText]
  *
@@ -695,7 +692,6 @@ internal fun ThinkingBlock(
     mathRenderer: com.mistakebook.math.MathRenderer,
     debounceKey: Any? = null,
     /** 生成进行中（思考+作答全程）：折叠/展开点击一律无效。 */
-    locked: Boolean = false,
     onToggle: (Boolean) -> Unit = {},
     /**
      * 展开/收起把按钮顶边推移了多少像素（正数 = 被顶上去）。
@@ -709,9 +705,13 @@ internal fun ThinkingBlock(
     // 收起态，不会先把整段思考渲染一遍再折叠——那笔开销在滚动到每条
     // 带思考的历史消息时都要付一次，是「新 item 进视口就卡一下」的一员。
     // 流式中为 true；流式结束由下面的 LaunchedEffect 收起。
+    // v0.0.126（issue #39「思考的时候不能收起思考」）：
+    // 记录用户是否亲手动过折叠键。动过之后，流式结束**不再**自动收起——
+    // 用户刚点开的内容不该在生成结束时被自己藏回去。
+    var userToggled by remember(debounceKey) { mutableStateOf(false) }
     var expanded by remember(debounceKey) { mutableStateOf(streaming) }
     LaunchedEffect(streaming) {
-        if (!streaming) {
+        if (!streaming && !userToggled) {
             expanded = false
         }
     }
@@ -784,14 +784,18 @@ internal fun ThinkingBlock(
                     .size(40.dp)
                     .clip(CircleShape)
                     .onGloballyPositioned { buttonTopY = it.boundsInWindow().top }
+                    // v0.0.126（issue #39）：流式期间**也能**点。
+                    // 旧实现把可用性绑在「是否流式」上（流式即禁用），
+                    // 整段生成过程都点不动——「思考的时候不能收起思考」就是它。
+                    // 折叠纯属阅读偏好，没有任何理由禁止。
                     .clickable(
-                        enabled = !locked,
                         role = Role.Button,
                         onClick = {
                             // 先记住「点下去那一刻按钮在哪」，布局变了才有得比
                             anchorTopY = buttonTopY
                             val next = !expanded
                             expanded = next
+                            userToggled = true
                             onToggle(next)
                         }
                     ),
@@ -803,7 +807,7 @@ internal fun ThinkingBlock(
                         if (expanded) R.string.chat_thinking_collapse else R.string.chat_thinking_expand
                     ),
                     modifier = Modifier.size(22.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (locked) 0.4f else 1f)
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

@@ -75,6 +75,8 @@ fun MainPortalScreen(
     /** 已归档题目 / 会话入口（v0.0.104），设置页要用。 */
     onOpenArchivedQuestions: () -> Unit = {},
     onOpenArchivedSessions: () -> Unit = {},
+    /** 已归档番茄钟任务（v0.0.126，issue #37）。 */
+    onOpenArchivedTasks: () -> Unit = {},
     /** 记忆库入口（v0.0.108）。 */
     onOpenMemory: () -> Unit = {},
     onSnapAsk: () -> Unit = {},
@@ -196,6 +198,7 @@ fun MainPortalScreen(
                         onOpenBadgeWall = onOpenBadgeWall,
                         onOpenArchivedQuestions = onOpenArchivedQuestions,
                         onOpenArchivedSessions = onOpenArchivedSessions,
+                        onOpenArchivedTasks = onOpenArchivedTasks,
                         onOpenMemory = onOpenMemory
                     )
                 }

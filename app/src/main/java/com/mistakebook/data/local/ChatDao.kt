@@ -378,6 +378,17 @@ interface ChatDao {
     suspend fun attachmentsOfSession(sessionId: Long): List<ChatAttachment>
 
     /**
+     * 会话附件变化的 Flow（v0.0.126，issue #38）。
+     *
+     * 为什么需要它：`observeMessages` 盯的是 `chat_messages` 表，往
+     * `chat_attachments` 插一条不会让它发射——生成图落库后界面毫不知情，
+     * 要退出重进（重建 ViewModel 走一次性查询）才看得到。
+     * 这条 Flow 专门盯附件表，插入即触发气泡图片重载。
+     */
+    @Query("SELECT * FROM chat_attachments WHERE sessionId = :sessionId ORDER BY id ASC")
+    fun observeAttachmentsOfSession(sessionId: Long): Flow<List<ChatAttachment>>
+
+    /**
      * 会话里所有**图片**附件（按 id 倒序，最新的在前）。
      *
      * 用于「模型不识图时补做 OCR」：历史轮次里的图片也得有文字，

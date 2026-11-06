@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
@@ -64,6 +65,8 @@ fun SettingsScreen(
     onOpenArchivedQuestions: () -> Unit = {},
     /** 已归档会话入口（v0.0.104）。 */
     onOpenArchivedSessions: () -> Unit = {},
+    /** 已归档番茄钟任务入口（v0.0.126，issue #37）。 */
+    onOpenArchivedTasks: () -> Unit = {},
     /**
      * 内嵌模式（门户第 4 页）：不画自己的顶栏与返回箭头——
      * 门户顶部 Tab 行就是它的导航，从任何一页都能一步切回来。
@@ -280,6 +283,14 @@ fun SettingsScreen(
                         titleRes = R.string.settings_archived_sessions,
                         icon = Icons.Default.Forum,
                         onOpen = onOpenArchivedSessions
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // v0.0.126（issue #37）：番茄钟任务也能归档，但归档后
+                    // 原本没有任何界面能看到它——用户「找不到、不能恢复」。
+                    SettingsEntryRow(
+                        titleRes = R.string.settings_archived_tasks,
+                        icon = Icons.Default.Timer,
+                        onOpen = onOpenArchivedTasks
                     )
                 }
 

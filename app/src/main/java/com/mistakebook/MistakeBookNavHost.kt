@@ -67,6 +67,7 @@ object Routes {
     const val MEMORY = "memory"
     const val ARCHIVED_QUESTIONS = "archivedQuestions"
     const val ARCHIVED_SESSIONS = "archivedSessions"
+    const val ARCHIVED_TASKS = "archivedTasks"
 
     /**
      * 聊天页路由。
@@ -260,6 +261,7 @@ fun MistakeBookNavHost(
                 onOpenBadgeWall = { navController.navigate(Routes.BADGE_WALL) },
                 onOpenArchivedQuestions = { navController.navigate(Routes.ARCHIVED_QUESTIONS) },
                 onOpenArchivedSessions = { navController.navigate(Routes.ARCHIVED_SESSIONS) },
+                onOpenArchivedTasks = { navController.navigate(Routes.ARCHIVED_TASKS) },
                 onOpenMemory = { navController.navigate(Routes.MEMORY) }
             )
         }
@@ -313,6 +315,14 @@ fun MistakeBookNavHost(
             com.mistakebook.ui.settings.ArchivedItemsScreen(
                 container = container,
                 kind = com.mistakebook.ui.settings.ArchivedKind.SESSIONS,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.ARCHIVED_TASKS) {
+            com.mistakebook.ui.settings.ArchivedItemsScreen(
+                container = container,
+                kind = com.mistakebook.ui.settings.ArchivedKind.POMODORO_TASKS,
                 onBack = { navController.popBackStack() }
             )
         }

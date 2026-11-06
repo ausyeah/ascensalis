@@ -60,6 +60,28 @@ class AutoScrollCoordinator {
      * 动画期间置 [programmaticScroll]，避免位置驱动把回底动画误判成
      * 「用户又滚走了」。
      */
+    /**
+     * 是否有手指按在列表上（**不等触摸 slop**）。
+     *
+     * v0.0.126（issue #39）：`isScrollInProgress` / `collectIsDraggedAsState`
+     * 都要等手指越过 slop 才翻真，之前的十几 dp 里列表仍在自动跟随、
+     * 流式气泡仍在长高——用户体感就是「一抽一抽、不跟手」。
+     * 由列表的 pointerInput 在 Initial pass 里直接写这个标记：
+     * 按下瞬间暂停跟随、按住期间不判位置（松手后才重新按位置恢复）。
+     */
+    var pointerDown: Boolean = false
+
+    /** 按下：立刻交出滚动权。 */
+    fun onPointerDown() {
+        pointerDown = true
+        pause()
+    }
+
+    /** 抬起/取消：交还给位置驱动判定。 */
+    fun onPointerUp() {
+        pointerDown = false
+    }
+
     suspend fun jumpToBottom(state: LazyListState) {
         if (state.layoutInfo.totalItemsCount > 0) {
             programmaticScroll = true
@@ -176,6 +198,8 @@ fun rememberAutoScrollEffect(
     state: LazyListState,
     latestItemKey: Long?
 ): AutoScrollCoordinator {
+    // 手指按下/抬起的钩子在 [AutoScrollCoordinator.onPointerDown/Up]，
+    // 由列表的 pointerInput 直接调用（见 ChatMessageList）。
     val coordinator = remember { AutoScrollCoordinator() }
     val isDragged by state.interactionSource.collectIsDraggedAsState()
     // collect{} 里读的是**组合期捕获**的值，会一直是旧的。
@@ -189,9 +213,18 @@ fun rememberAutoScrollEffect(
 
     // ① 手指接触屏幕：立刻交出滚动权（比等位置变化更快，用户「手一碰就知道
     //    列表不会自己跑了」）。
+    //
+    //    v0.0.126（issue #39「手势的优先级不够」）：`collectIsDraggedAsState`
+    //    要等手指**越过触摸 slop** 才翻真（8~16dp），这一窗口里列表还在按
+    //    「贴底」自动跟、流式气泡还在长高，用户看到的就是「一抽一抽、不跟手」。
+    //    现在由 [AutoScrollCoordinator.onPointerDown] 在**按下那一刻**暂停
+    //    （列表 pointerInput 的 Initial pass 直接调它）——按下即交出滚动权，
+    //    比等 slop 早十几 dp，手感是「一碰就停」。
+    //    这里保留 dragged 的兜底：某些输入法/无障碍手势不发 pointer 事件。
     LaunchedEffect(isDragged) {
         if (isDragged) coordinator.pause()
     }
+
 
     // ② 位置驱动：贴底 → 跟随；离开底部 → 停止跟随并显示回底按钮。
     //
@@ -225,7 +258,13 @@ fun rememberAutoScrollEffect(
             val info = state.layoutInfo
             Pair(newestGapOf(info), newestKeyOf(info))
         }.collect { (gap, newestKey) ->
-            if (draggedNow || coordinator.programmaticScroll) return@collect
+            // 按住/拖拽期间一律不判位置：位置每帧都在变，判出来的
+            // 「在不在底部」没有意义；而且中途 resume 会造成
+            // 「冻结→解冻→一次性补帧→又被顶离底部→再冻结」的抖动
+            // （issue #39 的「一抽一抽」）。恢复跟随只在手指松开后由位置驱动。
+            if (draggedNow || coordinator.pointerDown || coordinator.programmaticScroll) {
+                return@collect
+            }
             // index 0 在场才更新记忆；瞬态期间 index 0 是不可见的，记忆保持原值
             if (newestKey != null) lastNewestKey = newestKey
             val info = state.layoutInfo

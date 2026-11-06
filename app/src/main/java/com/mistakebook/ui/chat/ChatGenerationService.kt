@@ -508,13 +508,27 @@ class ChatGenerationService : Service() {
                             stage = { stage -> publishStage(currentText, stage) }
                         )
 
-                        MediaTools.GENERATE_IMAGE -> executeGenerateImage(
-                            container = container,
-                            settings = settings,
-                            prompt = MediaTools.argument(call.arguments, "prompt"),
-                            generated = generatedImages,
-                            stage = { stage -> publishStage(currentText, stage) }
-                        )
+                        MediaTools.GENERATE_IMAGE -> {
+                            val before = generatedImages.size
+                            val result = executeGenerateImage(
+                                container = container,
+                                settings = settings,
+                                prompt = MediaTools.argument(call.arguments, "prompt"),
+                                generated = generatedImages,
+                                stage = { stage -> publishStage(currentText, stage) }
+                            )
+                            // v0.0.126（issue #38）：生图当场落成会话附件，**不等
+                            // tool loop 结束**。旧实现在循环结束后才复制落库，
+                            // 模型拿着图继续讲几十秒，用户这边一直白着——
+                            // 「画完图第一时间没有渲染出来」正是这一段。
+                            // 落库即触发附件 Flow，气泡图片下一帧就出来。
+                            generatedImages.drop(before).forEach { path ->
+                                runCatching {
+                                    persistGeneratedImage(container, sessionId, assistantId, path)
+                                }
+                            }
+                            result
+                        }
 
                         // 资料库检索（v0.0.120）：走与资料库页同一套
                         // RRF 混合检索，只回最相关的几段，避免模型整份读。
@@ -577,11 +591,14 @@ class ChatGenerationService : Service() {
             // 走附件：图复制到会话目录（删会话一并清理），渲染走已验证的
             // 气泡图片路径，正文保持干净。
             if (generatedImages.isNotEmpty()) {
-                generatedImages.forEach { path ->
+                // 兜底：正常情况下生图那一轮已经落库并从这里移除；
+                // 万一遗漏（旧路径/异常），这里补一次，仍保证只落一份。
+                generatedImages.toList().forEach { path ->
                     runCatching {
                         persistGeneratedImage(container, sessionId, assistantId, path)
                     }
                 }
+                generatedImages.clear()
                 publishPreview()
             }
         } catch (cancelled: CancellationException) {

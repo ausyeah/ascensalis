@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -178,11 +179,18 @@ internal fun MessageList(
     onContinue: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     /** T13：批改结果「存入题目备注」入口；自由会话传 null 不展示。 */
-    onSaveToNote: ((Long) -> Unit)? = null
+    onSaveToNote: ((Long) -> Unit)? = null,
+    /** 手指按下（不等 slop）：自动滚动立刻交出滚动权（issue #39）。 */
+    onTouchDown: () -> Unit = {},
+    /** 手指全部抬起：把控制权交还位置判定（issue #39）。 */
+    onTouchUp: () -> Unit = {}
 ) {
     // 思考块展开/收起后按钮被反向列表顶走的补偿：
     // 列表按位移反着滚同样的量，按钮就留在手指底下，内容只往下长。
     val anchorScope = rememberCoroutineScope()
+    // pointerInput 里跨事件记「当前是否有手指按着」：只在按下/抬起两个
+    // 边沿各回调一次，不随每次 ENTER/MOVE 重复通知。
+    var touchActive by remember { mutableStateOf(false) }
     // 倒序提供数据配合 reverseLayout：最新消息固定在底边，流式气泡增长无需反复重启滚动动画。
     //
     // 流式预览（streamingContent）在**item 作用域内**读取，不在外层：
@@ -193,7 +201,32 @@ internal fun MessageList(
     LazyColumn(
         state = listState,
         reverseLayout = true,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            // v0.0.126（issue #39「手势的优先级不够」）：在 **Initial pass**
+            // 里只观察、不消费，按下瞬间就通知外部交出滚动权。
+            //
+            // 为什么不用 collectIsDraggedAsState：它要等越过触摸 slop
+            // （8~16dp）才翻真，那之前的位移里列表仍在自动跟随、气泡仍在
+            // 长高，用户体感是「一抽一抽、不跟手」。Initial pass 拿到的
+            // 是「手指刚落下」那一刻，比 slop 早十几 dp。
+            // 不消费事件 = 滚动、点击照常，只是把「我在操作」这个事实
+            // 提前告诉自动滚动编排。
+            .pointerInput(onTouchDown, onTouchUp) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        val anyPressed = event.changes.any { it.pressed }
+                        if (anyPressed && !touchActive) {
+                            touchActive = true
+                            onTouchDown()
+                        } else if (!anyPressed && touchActive) {
+                            touchActive = false
+                            onTouchUp()
+                        }
+                    }
+                }
+            },
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {

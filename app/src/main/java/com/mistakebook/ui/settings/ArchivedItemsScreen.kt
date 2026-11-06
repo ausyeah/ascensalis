@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -75,8 +77,12 @@ import kotlin.math.roundToInt
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** 已归档内容的两个入口。 */
-enum class ArchivedKind { QUESTIONS, SESSIONS }
+/**
+ * 已归档内容的入口（v0.0.126 加入番茄钟任务，issue #37）。
+ *
+ * 三者的语义完全一致：**归档 ≠ 删除**，都能在这里找回。
+ */
+enum class ArchivedKind { QUESTIONS, SESSIONS, POMODORO_TASKS }
 
 /**
  * 已归档内容（v0.0.104）。
@@ -103,6 +109,7 @@ fun ArchivedItemsScreen(container: AppContainer, kind: ArchivedKind, onBack: () 
                             when (kind) {
                                 ArchivedKind.QUESTIONS -> R.string.archived_questions_title
                                 ArchivedKind.SESSIONS -> R.string.archived_sessions_title
+                                ArchivedKind.POMODORO_TASKS -> R.string.archived_tasks_title
                             }
                         )
                     )
@@ -121,6 +128,7 @@ fun ArchivedItemsScreen(container: AppContainer, kind: ArchivedKind, onBack: () 
         when (kind) {
             ArchivedKind.QUESTIONS -> ArchivedQuestionsList(container, padding)
             ArchivedKind.SESSIONS -> ArchivedSessionsList(container, padding)
+            ArchivedKind.POMODORO_TASKS -> ArchivedPomodoroTasksList(container, padding)
         }
     }
 }
@@ -258,6 +266,98 @@ private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues
                 }
             }
         }
+    }
+}
+
+/**
+ * 已归档的番茄钟任务（v0.0.126，issue #37）。
+ *
+ * 用户：「任务归档后没有地方能找到啊，不能恢复了」。归档在设计上只是
+ * 「从选择器里收起来、历史记录保留」，但从没有任何界面能看到它——
+ * 等于单向删除。这里按 [ArchiveSwipeRow] 的同一套交互给出恢复与删除：
+ * - **恢复**：`archived = 0`，任务回到学科列表，历史记录原样还在；
+ * - **删除**：连同该任务的全部专注记录一起物理删除（弹窗两步确认，
+ *   与编辑面板里的删除同口径——归档可以后悔，删除不能）。
+ */
+@Composable
+private fun ArchivedPomodoroTasksList(container: AppContainer, padding: PaddingValues) {
+    val scope = rememberCoroutineScope()
+    val tasks by container.pomodoroDao.observeArchivedTasks()
+        .collectAsState(initial = emptyList<com.mistakebook.data.local.entities.PomodoroTask>())
+    var pendingDelete by remember { mutableStateOf<com.mistakebook.data.local.entities.PomodoroTask?>(null) }
+
+    if (tasks.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            EmptyState(
+                title = stringResource(R.string.archived_empty_tasks),
+                subtitle = ""
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(tasks, key = { it.id }) { task ->
+            ArchiveSwipeRow(
+                onRestore = { scope.launch { container.pomodoroDao.unarchiveTask(task.id) } },
+                onDelete = { pendingDelete = task }
+            ) {
+                Card(
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text(
+                            text = task.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.archived_task_keep_history),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    pendingDelete?.let { task ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(R.string.archived_task_delete_title)) },
+            text = {
+                Text(stringResource(R.string.archived_task_delete_body, task.name))
+            },
+            confirmButton = {
+                com.mistakebook.ui.common.TwoStepConfirmTextButton(
+                    text = stringResource(R.string.action_delete),
+                    confirmText = stringResource(R.string.archived_task_delete_confirm),
+                    onConfirm = {
+                        pendingDelete = null
+                        scope.launch { container.pomodoroDao.deleteTask(task.id) }
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
     }
 }
 

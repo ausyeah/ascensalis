@@ -437,6 +437,18 @@ class ChatViewModel(
                 title = session.title,
                 temporary = session.temporary
             )
+
+            // 附件表变化 → 重载气泡图片（v0.0.126，issue #38）。
+            //
+            // `observeMessages` 盯的是 chat_messages，往 chat_attachments
+            // 插一条不会让它发射——生成图落库后界面毫不知情，要退出重进
+            // （重建 ViewModel 走一次性查询）才渲染。这里独立订阅附件表，
+            // 插一条即触发重载，气泡下一帧就出图。
+            launch {
+                repository.observeSessionAttachments(session.id).collect {
+                    loadBubbleImages(_state.value.messages)
+                }
+            }
             // **恢复输入草稿**。
             //
             // 用户打好的字退出会话再进来就没了——这是纯丢失，没有任何补救。
@@ -544,7 +556,12 @@ class ChatViewModel(
                     // 内容倒回旧帧，界面从此卡在「停止」上（审查发现）。
                     heldStreamSnapshot = null
                     val overflow = isContextOverflowError(snap.errorText)
-                    _state.value = current.copy(
+                    // v0.0.126（issue #38）：终态快照是拿**进入本帧前**的
+                    // `current.copy(...)` 整体覆盖 state 的，而
+                    // `loadBubbleImages` 在 IO 线程异步写回——两者赛跑时
+                    // 刚加载好的气泡图片会被这次整体覆盖清空（「退出重进
+                    // 才显示」的真因）。写完终态立刻按当前消息重载一次。
+                    val finalState = current.copy(
                         isStreaming = false,
                         // 终态要把 id 一起清掉：留着它，下一轮的总线快照会被
                         // 「只认同一条消息」的守卫当成别人的快照丢掉——
@@ -562,6 +579,11 @@ class ChatViewModel(
                             current.contextOverflow || overflow
                         } else false
                     )
+                    _state.value = finalState
+                    // 覆盖之后再按当前消息重载一次气泡图片：
+                    // 生成图落库触发的那次重载若先完成，上面这次整体覆盖
+                    // 会把它抹掉（issue #38 的「退出重进才显示」）。
+                    loadBubbleImages(finalState.messages)
                     // **自动压缩（500k 阈值）**：上次请求的输入 token 数到线就压，
                     // 不等用户点。防连发：只有上下文重新长过上一次触发时的量
                     // 才再次触发（压缩后下一轮请求必然大幅回落，不会连环压）。
