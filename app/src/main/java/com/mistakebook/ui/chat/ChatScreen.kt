@@ -196,7 +196,9 @@ fun ChatScreen(
     /** 抽屉里点了另一条历史会话（v0.0.96）：由 NavHost 导航过去。 */
     onOpenSession: (sessionId: Long, questionId: Long?) -> Unit = { _, _ -> },
     /** 右上角：开一条临时对话，退出即删（v0.0.96）。 */
-    onNewTemporaryConversation: () -> Unit = {}
+    onNewTemporaryConversation: () -> Unit = {},
+    /** 抽屉底部「已归档对话」（v0.0.127，issue #41）。 */
+    onOpenArchivedSessions: () -> Unit = {}
 ) {
     val viewModel = containerViewModel(
         container = container,
@@ -497,7 +499,8 @@ fun ChatScreen(
                     container = container,
                     drawerState = drawerState,
                     snackbarHostState = snackbarHost,
-                    onOpenSession = onOpenSession
+                    onOpenSession = onOpenSession,
+                    onOpenArchivedSessions = onOpenArchivedSessions
                 )
             }
         }

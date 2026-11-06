@@ -584,6 +584,7 @@
     <string name="chat_list_empty">还没有对话</string>
     <string name="chat_list_empty_hint">点首页右上角的对话按钮，或从题目详情页提问</string>
     <string name="chat_list_new">新对话</string>
+    <string name="chat_list_archived">已归档对话</string>
     <string name="chat_list_clear_all">清空全部</string>
     <string name="chat_list_clear_confirm_title">清空全部对话？</string>
     <string name="chat_list_clear_confirm_action">确认清空</string>

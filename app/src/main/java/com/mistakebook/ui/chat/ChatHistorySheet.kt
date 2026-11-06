@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -92,7 +93,14 @@ internal fun ChatHistorySheet(
     drawerState: androidx.compose.material3.DrawerState,
     /** 复用对话页的 Snackbar：删除撤销的提示直接落在对话页底部。 */
     snackbarHostState: androidx.compose.material3.SnackbarHostState,
-    onOpenSession: (sessionId: Long, questionId: Long?) -> Unit
+    onOpenSession: (sessionId: Long, questionId: Long?) -> Unit,
+    /**
+     * 跳到「已归档会话」（v0.0.127，issue #41）。
+     *
+     * 用户：「建议加一个归档对话的按钮方便直接跳转查看已归档对话」——
+     * 归档入口原本只藏在设置 → 数据 → 已归档内容里，从对话页要绕三层。
+     */
+    onOpenArchivedSessions: () -> Unit = {}
 ) {
     val viewModel = containerViewModel(container) { c ->
         ChatListViewModel(c.chatRepository, c.database.questionDao())
@@ -314,34 +322,81 @@ internal fun ChatHistorySheet(
             }
         }
 
-        // 底部新对话胶囊：抽屉里最常用的动作固定在最顺手的位置（拇指区）。
-        Surface(
-            onClick = {
-                scope.launch { drawerState.close() }
-                viewModel.startFreeSession { sessionId -> onOpenSession(sessionId, null) }
-            },
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.primary,
+        // 底部两颗等宽胶囊：新对话（主）+ 已归档对话（次）。
+        //
+        // v0.0.127（issue #41）：原来只有一颗「新对话」，且是**按内容宽度**的
+        // 胶囊——右边空一大片（用户截图原话「太小右边空了很多」）。
+        // 现在两颗各 weight(1f) 撑满整行：既填满留白，也顺手把
+        // 「归档的对话去哪儿了」这个高频疑问做成一步可达的入口。
+        Row(
             modifier = Modifier
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            Surface(
+                onClick = {
+                    scope.launch { drawerState.close() }
+                    viewModel.startFreeSession { sessionId -> onOpenSession(sessionId, null) }
+                },
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.chat_list_new),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.chat_list_new),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
+            }
+            Surface(
+                onClick = {
+                    scope.launch { drawerState.close() }
+                    onOpenArchivedSessions()
+                },
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier.weight(1f)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Archive,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.chat_list_archived),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }

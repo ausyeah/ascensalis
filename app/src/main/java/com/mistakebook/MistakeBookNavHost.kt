@@ -733,7 +733,10 @@ fun MistakeBookNavHost(
                         val id = container.chatRepository.openTemporarySession()
                         navController.navigate(Routes.chat(null, id))
                     }
-                }
+                },
+                // 抽屉底部「已归档对话」（v0.0.127，issue #41）：直达归档页，
+                // 不用再从设置里绕三层。
+                onOpenArchivedSessions = { navController.navigate(Routes.ARCHIVED_SESSIONS) }
             )
         }
 

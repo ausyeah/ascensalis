@@ -614,6 +614,24 @@ internal fun StatusRow(
                 }
             }
 
+            // v0.0.127（issue #40「发送出去的文本不能复制」）：
+            // 用户消息同样给复制入口。旧实现只覆盖「助手消息 + DONE」，
+            // 用户自己发的那段字反而拿不出来——引用、转发、放到别处都要它。
+            // 用户消息没有思考段，直接复制正文（图片/文件另走点击预览）。
+            message.role == ChatRole.USER && message.content.isNotBlank() -> {
+                IconButton(
+                    onClick = { onCopy(message.content.trim()) },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = stringResource(R.string.chat_copy),
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             message.status == MessageStatus.DONE && !isUser -> {
                 IconButton(
                     onClick = {
