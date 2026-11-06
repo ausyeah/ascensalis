@@ -49,7 +49,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ViewSidebar
 import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -538,12 +537,16 @@ fun ChatScreen(
                             scope.launch { drawerState.open() }
                         }
                     ) {
-                        // v0.0.128（issue #47）：原来是带箭头的时钟（History），
-                        // 24dp 细节太碎、更像「撤销」。换侧栏图标——现代 AI
-                        // 客户端统一做法，一眼看出是「从左边拉出会话列表」。
+                        // v0.0.129（issue #49「左上角的图标风格不一致重做」）：
+                        // 上一版左边是 Material 的**实心**侧栏图标、右边是自绘
+                        // **线描**方框铅笔——一填充一描边，并排像两套设计。
+                        // 现在两枚都是自绘线描、同一线宽（2/48 视口）、
+                        // 同一 tint 与同一 24dp 尺寸，才是一对。
                         Icon(
-                            Icons.AutoMirrored.Filled.ViewSidebar,
-                            contentDescription = stringResource(R.string.chat_list_title)
+                            painter = painterResource(R.drawable.ic_chat_sidebar),
+                            contentDescription = stringResource(R.string.chat_list_title),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 },
@@ -555,10 +558,13 @@ fun ChatScreen(
                             // v0.0.128（issue #47）：虚线圆环在 24dp 下只剩一圈
                             // 毛刺。换「圆角方框 + 铅笔」的新对话图标
                             // （ChatGPT 手机端同款语义），干净得多。
+                            //
+                            // v0.0.129（issue #49）：tint 与左边统一为 onSurface——
+                            // 左边用默认内容色、右边显式灰一档，并排时右边明显发虚，
+                            // 也是「风格不一致」的一半。
                             painter = painterResource(R.drawable.ic_new_chat),
                             contentDescription = stringResource(R.string.chat_temporary_new),
-                            // 灰：临时对话是「次要动作」，用色重了会和正式对话抢
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -877,7 +883,9 @@ private fun TemporaryChatBanner() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                painter = painterResource(R.drawable.ic_temp_chat),
+                // v0.0.129（issue #49）：横幅里也别再用那枚虚线圆环，
+                // 与顶栏统一成「圆角方框 + 铅笔」。
+                painter = painterResource(R.drawable.ic_new_chat),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp)

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  会话列表（侧栏）图标（v0.0.129，issue #49）。
+
+  用户：「会话左上角的图标风格不一致重做」——上一版左边是 Material 的
+  **实心** ViewSidebar、右边是自绘的**线描**方框铅笔，一个填充一个描边，
+  并排站着像两套设计。
+
+  这枚与 ic_new_chat 同一套口径重画：
+  - 48 视口、**描边 2.0**、圆角线帽与圆角连接（24dp 下正好 1dp 线）；
+  - 不填任何实心块，纯线描；
+  - 语义：圆角方框 + 左侧分隔线 + 右侧两行短横——「左边一栏是目录」，
+    比三条等长横线（汉堡）更像「会话列表」，比时钟更像「打开抽屉」。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- 外层圆角方框 -->
+    <path
+        android:pathData="M14,8 L34,8 A7,7 0 0 1 41,15 L41,33 A7,7 0 0 1 34,40 L14,40 A7,7 0 0 1 7,33 L7,15 A7,7 0 0 1 14,8 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- 左侧分隔线 -->
+    <path
+        android:pathData="M18,10 L18,38"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- 右侧两行短横（会话条目） -->
+    <path
+        android:pathData="M24,19 L34,19"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <path
+        android:pathData="M24,27 L31,27"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>
