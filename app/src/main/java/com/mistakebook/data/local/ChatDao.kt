@@ -26,8 +26,10 @@ interface ChatDao {
     @Insert
     suspend fun insertSession(session: ChatSession): Long
 
-    @Update
-    suspend fun updateSession(session: ChatSession)
+    // 【有意不提供】整行 @Update：v0.0.130 之前 rename/换模型/刷统计都走
+    // 「读整行 → copy → 整行回写」，并发下把 graduateTemporary 刚写的
+    // temporary/archivedAt 打回旧值，会话从两个列表里消失（丢会话报告）。
+    // 现在一律走下方定向 UPDATE，只写自己该写的列。
 
     @Query("SELECT * FROM chat_sessions WHERE id = :id")
     fun observeSession(id: Long): Flow<ChatSession?>
@@ -57,6 +59,7 @@ interface ChatDao {
     @Query(
         """SELECT s.* FROM chat_sessions s
            WHERE s.questionId IS NULL AND s.deletedAt IS NULL AND s.temporary = 0
+             AND s.archivedAt IS NULL
              AND NOT EXISTS (SELECT 1 FROM chat_messages m
                              WHERE m.sessionId = s.id AND m.role <> 'SYSTEM')
            ORDER BY s.updatedAt DESC LIMIT 1"""
@@ -127,10 +130,6 @@ interface ChatDao {
     )
     suspend fun deleteEmptySessions(): Int
 
-    /** 清掉上次进程被杀时残留的临时对话，返回清掉的行数。 */
-    @Query("DELETE FROM chat_sessions WHERE temporary = 1")
-    suspend fun deleteTemporarySessions(): Int
-
     /**
      * 一次性取出全部未删除会话。
      *
@@ -192,10 +191,18 @@ interface ChatDao {
     )
     suspend fun archiveStaleSessions(at: Long, olderThan: Long): Int
 
-    /** 列出归档时刻早于 [before] 的会话（软删的不碰，走回收站自己的保留期）。 */
+    /**
+     * 列出归档时刻早于 [before] 的会话（软删的不碰，走回收站自己的保留期）。
+     *
+     * v0.0.130（「生成过的对话丢失」排查）：补 `updatedAt < :before`——
+     * 只有**归档满三个月且三个月没动过**的才符合删除口径。
+     * 题目会话归档后用户一直在里面聊（refreshSessionStats 刷新 updatedAt），
+     * 旧口径只看 archivedAt，这类活会话照样被整条删掉。
+     */
     @Query(
         """SELECT * FROM chat_sessions
-           WHERE archivedAt IS NOT NULL AND deletedAt IS NULL AND archivedAt < :before"""
+           WHERE archivedAt IS NOT NULL AND deletedAt IS NULL
+             AND archivedAt < :before AND updatedAt < :before"""
     )
     suspend fun listArchivedBefore(before: Long): List<ChatSession>
 
@@ -206,9 +213,48 @@ interface ChatDao {
      */
     @Query(
         """DELETE FROM chat_sessions
-           WHERE archivedAt IS NOT NULL AND deletedAt IS NULL AND archivedAt < :before"""
+           WHERE archivedAt IS NOT NULL AND deletedAt IS NULL
+             AND archivedAt < :before AND updatedAt < :before"""
     )
     suspend fun hardDeleteArchivedBefore(before: Long): Int
+
+    // ---- 定向更新（v0.0.130）：只写自己该写的列。
+    // 整行 copy 覆盖会把别的协程刚写完的状态列（temporary/archivedAt/deletedAt）
+    // 回写成本方法读取时的旧值——graduateTemporary 转正归档后紧跟着的
+    // 一次整行更新就把会话重新打回「两个列表都看不见」的黑洞。
+
+    /**
+     * 只在**未锁定**时更新标题（首条消息摘要、模型生成标题共用）。
+     *
+     * titleLocked 的判断放在 WHERE 里而不是先查后写：锁定的判断和写入
+     * 之间隔着一个挂起窗口，「查时未锁、写时已锁」就会把用户刚改的名
+     * 冲掉。返回 0 表示已锁定（或会话不存在），调用方不该覆盖。
+     */
+    @Query("UPDATE chat_sessions SET title = :title WHERE id = :id AND titleLocked = 0")
+    suspend fun setTitleIfUnlocked(id: Long, title: String): Int
+
+    /** 改名：标题 + 锁定 + 时间戳。 */
+    @Query(
+        """UPDATE chat_sessions SET title = :title, titleLocked = 1, updatedAt = :at
+        WHERE id = :id"""
+    )
+    suspend fun renameSessionById(id: Long, title: String, at: Long)
+
+    /** 换模型 + 时间戳（流式回复开插时记下「这条是哪个模型答的」）。 */
+    @Query("UPDATE chat_sessions SET model = :model, updatedAt = :at WHERE id = :id")
+    suspend fun updateSessionModel(id: Long, model: String, at: Long)
+
+    /**
+     * 用户消息落到已归档会话时自动解除归档（会话重新出现在主列表）。
+     *
+     * WHERE 里带 archivedAt IS NOT NULL：未归档的会话不产生多余写
+     * （也就不惊动盯 archivedAt 的 Flow）。
+     */
+    @Query(
+        """UPDATE chat_sessions SET archivedAt = NULL, updatedAt = :at
+        WHERE id = :id AND archivedAt IS NOT NULL"""
+    )
+    suspend fun unarchiveOnNewMessage(id: Long, at: Long): Int
 
     @Query("UPDATE chat_sessions SET deletedAt = :at, updatedAt = :at WHERE id = :id")
     suspend fun softDeleteSession(id: Long, at: Long)

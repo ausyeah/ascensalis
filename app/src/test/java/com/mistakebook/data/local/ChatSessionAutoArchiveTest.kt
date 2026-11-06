@@ -41,6 +41,10 @@ class ChatSessionAutoArchiveTest {
             query.contains("archivedAt < :before")
         )
         assertTrue(
+            "双闸（v0.0.130 丢会话修复）：归档后仍在用的会话（updatedAt 没过线）不许销毁",
+            query.contains("updatedAt < :before")
+        )
+        assertTrue(
             "软删会话留给回收站的 30 天保留期，这里不许抢",
             query.contains("deletedAt IS NULL")
         )

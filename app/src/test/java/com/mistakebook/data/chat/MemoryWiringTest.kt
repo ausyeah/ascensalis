@@ -83,7 +83,12 @@ class MemoryWiringTest {
             vm.contains("runCatching") && vm.contains("repository.applyGeneratedTitle(sessionId, generated)")
         )
         val repo = readSource("src/main/java/com/mistakebook/data/repos/ChatRepository.kt")
-        assertTrue("手动改名过的会话不许被覆盖", repo.contains("if (session.titleLocked || title.isBlank()) return"))
+        val dao = readSource("src/main/java/com/mistakebook/data/local/ChatDao.kt")
+        assertTrue(
+            "手动改名过的会话不许被覆盖（v0.0.130 起判断进 SQL 的 WHERE，原子）",
+            dao.substringBefore("renameSessionById").contains("titleLocked = 0") &&
+                repo.contains("chatDao.setTitleIfUnlocked(sessionId, title.trim())")
+        )
     }
 
     private fun readSource(path: String): String {

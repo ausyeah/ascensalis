@@ -211,8 +211,10 @@ class ChatRepository(
 
     /** 重命名。改完**锁定自动标题**，否则下次进会话会被首条消息摘要冲掉。 */
     suspend fun renameSession(id: Long, title: String) {
-        val session = chatDao.findSession(id) ?: return
-        chatDao.updateSession(session.copy(title = title.trim(), titleLocked = true, updatedAt = System.currentTimeMillis()))
+        // v0.0.130：定向更新。先读整行再 copy 回写，会把别的协程刚写的
+        // temporary/archivedAt/deletedAt 回写成读取时的旧值（丢更新），
+        // 转正归档后的会话会重新从两个列表里消失。
+        chatDao.renameSessionById(id, title.trim(), System.currentTimeMillis())
     }
 
     /**
@@ -350,6 +352,10 @@ class ChatRepository(
                 updatedAt = now
             )
         )
+        // v0.0.130（丢会话修复）：往归档会话里继续发消息就当场解除归档。
+        // 之前会话留在归档里：主列表看不见它，而归档保留期又只认
+        // archivedAt——一条还在用的对话会被「归档满三个月」的清理线吞掉。
+        chatDao.unarchiveOnNewMessage(sessionId, now)
         touchSessionWith(sessionId, text, now)
         return ChatMessage(
             id = id, sessionId = sessionId, role = ChatRole.USER, content = text,
@@ -425,9 +431,8 @@ class ChatRepository(
             )
         )
         // 记下「这条是哪个模型答的」。会话内换模型不影响历史。
-        chatDao.findSession(sessionId)?.let { session ->
-            chatDao.updateSession(session.copy(model = model, updatedAt = now))
-        }
+        // v0.0.130：定向更新（不碰状态列）。
+        chatDao.updateSessionModel(sessionId, model, now)
         return id
     }
 
@@ -845,21 +850,19 @@ class ChatRepository(
      * 用户自己起的名永远优先于模型。
      */
     suspend fun applyGeneratedTitle(sessionId: Long, title: String) {
-        val session = chatDao.findSession(sessionId) ?: return
-        if (session.titleLocked || title.isBlank()) return
-        chatDao.updateSession(session.copy(title = title.trim()))
+        if (title.isBlank()) return
+        // v0.0.130：锁不锁的判断进了 SQL 的 WHERE（setTitleIfUnlocked），
+        // 不再先读整行——整行 copy 回写会把状态列打回旧值。
+        chatDao.setTitleIfUnlocked(sessionId, title.trim())
     }
 
     /** 首条用户消息的前若干字当标题。已重命名过的会话不覆盖。 */
     private suspend fun touchSessionWith(sessionId: Long, firstUserText: String, now: Long) {
-        val session = chatDao.findSession(sessionId) ?: return
-        if (session.titleLocked) {
-            chatDao.refreshSessionStats(sessionId, now)
-            return
-        }
+        // v0.0.130：标题走条件更新（titleLocked = 0 才写，原子）；
+        // 之前「先读整行、locked 就只刷统计」的两步式写法有丢更新窗口。
         val trimmed = firstUserText.trim().replace(Regex("\\s+"), " ")
         val title = if (trimmed.length <= TITLE_MAX_CHARS) trimmed else trimmed.take(TITLE_MAX_CHARS) + "…"
-        chatDao.updateSession(session.copy(title = title, updatedAt = now))
+        chatDao.setTitleIfUnlocked(sessionId, title)
         chatDao.refreshSessionStats(sessionId, now)
     }
 
