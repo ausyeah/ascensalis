@@ -34,11 +34,31 @@
 # 当前基线：1679 用例，仅 13 个已知 layoutlib 截图基线失败（UiScreenshotTest×4、LazyReverseGeometryTest×5、SettingsLayoutScreenshotTest×4）——这是「全部通过」的定义
 ```
 
-### 模拟器
-- AVD `ascend35`（API 35, x86_64, pixel_6）；启动后 serial `emulator-5554`
+### 模拟器（完整操作手册）
+- AVD `ascend35`（API 35, x86_64, pixel_6）；启动后 serial `emulator-5554`；app 包名 `com.mistakebook`
 - **`hw.keyboard = yes`** 已开（PC 键盘直通，拼音组合可用）
-- 中文输入法 **fcitx5**（`org.fcitx.fcitx5.android/.input.FcitxInputMethodService`，默认）+ **ADBKeyboard**（`com.android.adbkeyboard/.AdbIME`，自动化注入中文：切 IME → `am broadcast -a ADB_INPUT_TEXT --es msg '中文'` → 切回）；两个 APK 在 `local/tools/`
-- 模拟器偶发崩溃（WHPX），重开 `android_start_emulator(ascend35)` 即可，数据在
+- 中文输入法 **fcitx5**（`org.fcitx.fcitx5.android/.input.FcitxInputMethodService`，默认）+ **ADBKeyboard**（`com.android.adbkeyboard/.AdbIME`，自动化注入中文）；两个 APK 在 `local/tools/`
+- 模拟器偶发崩溃（WHPX，本会话两次）：`adb devices` 空了就重启，数据不丢
+
+**怎么操作（按宿主能力二选一）**：
+
+A. 宿主有 android-emulator MCP 插件（本会话用的就是它）：
+   - `android_start_emulator(ascend35)`——MCP 调用 30s 会超时，**属正常**，另开轮询 `adb shell getprop sys.boot_completed` 等 `1`
+   - `android_build_and_run(projectDir, avd)` 一步到位（也可能超时，失败就手动 assembleDebug + install）
+   - `android_install_app(apkPath)` / `android_screenshot` / `android_launch_app(com.mistakebook)`
+   - UI 自动化：`android_ui_describe`（元素树）、`android_ui_resolve("文本")`（拿准确坐标）、`android_ui_tap(x,y)`——**别用缩略图坐标盲点**（截图有缩放，×1.2/×2.4 踩过多次）
+
+B. 纯 adb（任何宿主都能跑，SDK 在 `C:/Users/26315/AppData/Local/Android/Sdk/platform-tools/adb.exe`）：
+   ```
+   emulator -avd ascend35 &                     # 启动（或 Android Studio Device Manager）
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   adb exec-out screencap -p > shot.png          # 截图
+   adb shell input tap <x> <y> / input swipe ... / input keyevent 4(BACK) 3(HOME) 111(ESC)
+   adb shell am start -n com.mistakebook/.ui.settings.SettingsActivity
+   adb shell "logcat -d -t N"                    # 看日志（okhttp 行有每次网络调用）
+   adb root + adb pull /data/data/com.mistakebook/...   # root 读写私有数据
+   ```
+- **UI 自动化要领**：导航别盲点坐标——先 `ui_describe`/`ui_resolve` 拿目标文本的真实坐标再 tap；中文注入 = `ime set com.android.adbkeyboard/.AdbIME` → `am broadcast -a ADB_INPUT_TEXT --es msg '中文'` → 用完切回 fcitx5；发消息类 tap 常因键盘顶起布局偏移，tap 前先截图确认目标位置
 - 宿主机 shell 是 Git Bash：**adb 的远程路径**要 `MSYS_NO_PATHCONV=1` 或双斜杠，本地路径用 `C:/` 形式；heredoc 吃反斜杠（写脚本用 Write 工具）
 
 ### 网络（用户长期挂 VPN 的场景）
