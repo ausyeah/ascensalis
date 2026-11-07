@@ -33,6 +33,9 @@ class AppFiles(context: Context) {
 
     val shareCacheDir: File = File(context.cacheDir, "share")
 
+    /** 资料库扫描 PDF 兜底识别的页图暂存（v0.0.131）：索引完即整目录删。 */
+    val libraryPdfOcrCacheDir: File = File(context.cacheDir, "library_pdf_ocr")
+
     val databaseFile: File = context.getDatabasePath("mistake_book.db")
 
     fun questionDir(taskId: Long): File = File(filesRoot, "questions/$taskId")

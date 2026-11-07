@@ -33,12 +33,16 @@ import kotlinx.coroutines.sync.withLock
  * 重复点击「建立索引」只会排队或直接看到进行中的进度。
  *
  * @param libraryRoot 资料库目录（files/library）。
+ * @param pdfOcrFallback 扫描型 PDF 的转写兜底（v0.0.131）；返回 null/空白
+ *   = 该资料依然没有可检索内容（不算失败）。默认无操作，AppContainer 装配。
  */
 class LibraryIndexer(
     private val libraryRoot: java.io.File,
     private val chunkDao: LibraryChunkDao,
     private val embeddingClient: EmbeddingClient,
-    private val settingsStore: SettingsStore
+    private val settingsStore: SettingsStore,
+    private val pdfOcrFallback: suspend (pdf: java.io.File, onStage: suspend (String) -> Unit) -> String? =
+        { _, _ -> null }
 ) {
 
     /** 索引进度（Idle = 从未跑过；Failed 带原因；Ready 带块数）。 */
@@ -48,7 +52,9 @@ class LibraryIndexer(
         val total: Int = 0,
         val docs: Int = 0,
         val chunks: Int = 0,
-        val lastError: String? = null
+        val lastError: String? = null,
+        /** 阶段文案（OCR 兜底这类长流程用）；有值时优先于「x / y」展示。 */
+        val stage: String? = null
     )
 
     private val mutex = Mutex()
@@ -110,9 +116,23 @@ class LibraryIndexer(
         files.forEach { file ->
             val detailed = runCatching { LibraryStore.readDetailed(file) }.getOrNull()
             val text = detailed?.text.orEmpty()
-            // 扫描 PDF/空文档切不出块：不算失败，只是没有可检索的内容
-            if (detailed != null && !detailed.scannedPdf) {
+            if (detailed == null) return@forEach
+            if (!detailed.scannedPdf) {
                 docs.add(DocChunks(file.name, LibraryChunker.chunk(file.name, text)))
+                return@forEach
+            }
+            // 扫描/无 ToUnicode PDF（v0.0.131）：零依赖抽取器读不出可读文本，
+            // 走 OCR 兜底——渲染页图交给当前识别渠道逐页转写。转写失败
+            // （无渠道配置/网络断）不算索引失败，只是这份资料没有可检索内容，
+            // 与此前「直接跳过」的语义一致，只是多了一次抢救机会。
+            _progress.value = Progress(running = true, stage = "正在识别 ${file.name} …")
+            val ocrText = runCatching {
+                pdfOcrFallback(file) { stage ->
+                    _progress.value = Progress(running = true, stage = stage)
+                }
+            }.getOrNull().orEmpty()
+            if (ocrText.isNotBlank()) {
+                docs.add(DocChunks(file.name, LibraryChunker.chunk(file.name, ocrText)))
             }
         }
         val total = docs.sumOf { it.chunks.size }
@@ -243,6 +263,21 @@ class LibraryIndexer(
         } else emptyList()
 
         return LibrarySearchFusion.fuse(vectorRanked, keywordRanked, topK)
+    }
+
+    companion object {
+        /**
+         * 把逐页 OCR 结果拼成整册正文（v0.0.131）。
+         *
+         * 列表按**原 PDF 页序**排列，失败的页是 null——页码用「位置 + 1」
+         * 标注，第 3 页失败不会让第 4 页被错标成第 3 页；空白/失败页整页
+         * 剔除，正文引用「第 N 页」时必须与 PDF 实际页码对得上。
+         */
+        internal fun assembleOcrPages(pages: List<String?>): String =
+            pages.mapIndexed { index, text ->
+                val body = text?.trim().orEmpty()
+                if (body.isEmpty()) null else "【第 ${index + 1} 页】\n$body"
+            }.filterNotNull().joinToString("\n\n")
     }
 }
 

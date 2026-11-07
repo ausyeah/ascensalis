@@ -374,7 +374,39 @@ class AppContainer(context: Context) {
             libraryRoot = com.mistakebook.data.library.LibraryStore.ensureDir(files.rootDir),
             chunkDao = database.libraryChunkDao(),
             embeddingClient = embeddingClient,
-            settingsStore = settingsStore
+            settingsStore = settingsStore,
+            // 扫描/无 ToUnicode PDF 的转写兜底（v0.0.131）：渲染页图 →
+            // 当前识别渠道（与拍题共用，含用量统计口径）逐页转写。
+            // 上限 50 页：免费档 MinerU 每页几十秒，再厚就该人工拆卷了。
+            pdfOcrFallback = { pdf, onStage ->
+                val settings = settingsStore.snapshotNow()
+                val engine = com.mistakebook.net.ocr.OcrEngine.forSettings(settings, ocrEngineDeps)
+                val tempDir = files.libraryPdfOcrCacheDir
+                runCatching { tempDir.mkdirs() }
+                try {
+                    val pages = com.mistakebook.data.pdf.PdfPageRenderer.render(
+                        pdf,
+                        wanted = (1..MAX_LIBRARY_OCR_PAGES).toList()
+                    ) {
+                        java.io.File(tempDir, "page_%03d.jpg".format(System.nanoTime()))
+                    }
+                    val texts = mutableListOf<String?>()
+                    pages.forEachIndexed { index, image ->
+                        onStage("正在识别 ${pdf.name} 第 ${index + 1} / ${pages.size} 页…")
+                        texts += when (
+                            val result = engine.recognizeText(image, settings) { }
+                        ) {
+                            is com.mistakebook.net.ApiResult.Success -> result.data
+                            is com.mistakebook.net.ApiResult.Failure -> null
+                        }
+                    }
+                    com.mistakebook.data.library.LibraryIndexer
+                        .assembleOcrPages(texts)
+                        .ifBlank { null }
+                } finally {
+                    runCatching { tempDir.deleteRecursively() }
+                }
+            }
         )
     }
 
@@ -597,6 +629,9 @@ class AppContainer(context: Context) {
 
     private companion object {
         const val LLM_PLACEHOLDER_BASE_URL = "https://placeholder.invalid/"
+
+        /** 资料库 OCR 兜底的页数上限：免费档每页几十秒，再厚就该人工拆卷。 */
+        const val MAX_LIBRARY_OCR_PAGES = 50
     }
 }
 

@@ -720,7 +720,10 @@ private fun LibraryIndexCard(
         ) {
             val statusText = when (indexStatusKind(progress, hasFiles)) {
                 IndexStatusKind.RUNNING ->
-                    stringResource(R.string.library_index_running, progress.done, progress.total)
+                    // OCR 兜底阶段（v0.0.131）没有「x / y」可报，只带阶段文案
+                    // （「正在识别 xxx 第 n / m 页…」）；此时优先展示它
+                    progress.stage?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.library_index_running, progress.done, progress.total)
                 IndexStatusKind.FAILED ->
                     stringResource(R.string.library_index_failed, progress.lastError.orEmpty())
                 IndexStatusKind.READY ->
