@@ -141,9 +141,9 @@ class SwipeActionGeometryTest {
                 chat.contains("coordinator.revealedId = if (opened) myId else null")
         )
         assertTrue(
-            "错题卡必须接入协调器",
+            "错题卡必须接入协调器（v0.0.132 双向滑：三态吸附登记）",
             home.contains("coordinator: SwipeRevealCoordinator") &&
-                home.contains("coordinator.revealedId = if (opened) myId else null")
+                home.contains("coordinator.revealedId = if (openedLeft || openedRight) myId else null")
         )
         assertTrue(
             "归档页必须接入协调器（题目/会话/任务三个列表都要传）",

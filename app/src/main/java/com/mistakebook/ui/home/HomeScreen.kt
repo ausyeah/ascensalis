@@ -118,6 +118,8 @@ import com.mistakebook.ui.common.ReorderDragHandle
 import com.mistakebook.ui.common.moveItem
 import com.mistakebook.ui.common.orderByIds
 import com.mistakebook.ui.common.containerViewModel
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionGap
 import com.mistakebook.ui.common.swipeActionTileShape
@@ -127,6 +129,7 @@ import com.mistakebook.ui.common.SwipeActionJunctionRadius
 import com.mistakebook.ui.common.SwipeRevealSpring
 import com.mistakebook.ui.common.swipeRevealContentAlpha
 import com.mistakebook.ui.common.swipeRevealProgress
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -834,6 +837,11 @@ private fun SwipeableQuestionCard(
     val revealWidthPx = with(density) { (SwipeDeleteRevealWidth + SwipeActionGap).toPx() }
 
     val offsetX = remember { Animatable(0f) }
+    // 右滑露出题目图片的行程（v0.0.132）：offset 从 [-revealWidth, 0] 扩到
+    // [-revealWidth, +imageReveal]——右滑从左侧拉出完整题图（Fit 不裁切），
+    // 左滑维持操作块不变。
+    val imageRevealPx = with(density) { SwipeImageRevealWidth.toPx() }
+    var previewing by remember { mutableStateOf(false) }
     // 「是否已划开」是**离散状态**，只在松手时翻转。
     //
     // 早先写成 `val isRevealed = offsetX.value <= ...`，那是在组合期读 Animatable，
@@ -843,14 +851,26 @@ private fun SwipeableQuestionCard(
 
     fun close() {
         revealed = false
+        previewing = false
         coordinator.revealedId = null
         scope.launch { offsetX.animateTo(0f) }
     }
 
-    // 互斥（v0.0.132）：别的卡滑开时，已开的自己自动收回
+    // 归档两步确认：4 秒无操作自动回落，不让「确认归档」悬着等人来点
+    var confirmingArchive by remember { mutableStateOf(false) }
+    LaunchedEffect(confirmingArchive) {
+        if (confirmingArchive) {
+            delay(4_000)
+            confirmingArchive = false
+        }
+    }
+
+    // 互斥（v0.0.132）：别的卡滑开时，已开的自己（左滑操作或右滑预览）自动收回
     LaunchedEffect(coordinator.revealedId) {
-        if (revealed && coordinator.revealedId != myId) {
+        if ((revealed || previewing) && coordinator.revealedId != myId) {
             revealed = false
+            previewing = false
+            confirmingArchive = false
             offsetX.animateTo(0f)
         }
     }
@@ -892,8 +912,35 @@ private fun SwipeableQuestionCard(
                     alpha = swipeRevealContentAlpha(progress)
                 }
         ) {
-            // v0.0.132（用户设计图：「）（这样的两个都是完整图形的拼贴」）：
-            // 两块各自四角圆润的独立图形并排，块间留细缝——不再叠画互压。
+            // 右滑露出层（v0.0.132 用户：「右滑展示题目，尽可能大的展示，
+            // 不允许裁切」）：左侧整块放题目原图，ContentScale.Fit 完整显示
+            // 不裁切；没有图（PDF 文本路线/图被删）时退回题干文字封面。
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            ) {
+                if (com.mistakebook.util.CoverFallback.isLikelyImage(question.printImagePath)) {
+                    AsyncImage(
+                        model = question.printImagePath,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Text(
+                        text = question.stem,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp)
+                    )
+                }
+            }
+            // 左滑操作层（不变）：完整图形拼贴——置顶在左、归档在右。
             Row(
                 modifier = Modifier.matchParentSize(),
                 horizontalArrangement = Arrangement.spacedBy(SwipeActionGap, Alignment.End)
@@ -912,15 +959,27 @@ private fun SwipeableQuestionCard(
                 )
                 SwipeActionBlock(
                     width = SwipeActionBlockWidth,
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    // 两步确认（v0.0.132 用户：「杜绝一次滑动连跳两级直接从
+                    // 错题到删除」）：第一击只翻确认态（4 秒无操作自动回落），
+                    // 第二击才真归档——与对话历史的两步删除同一模式。
+                    color = if (confirmingArchive) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.errorContainer,
+                    contentColor = if (confirmingArchive) MaterialTheme.colorScheme.onError
+                    else MaterialTheme.colorScheme.onErrorContainer,
                     icon = Icons.Default.Delete,
-                    label = stringResource(R.string.archive_action),
+                    label = stringResource(
+                        if (confirmingArchive) R.string.swipe_archive_confirm
+                        else R.string.archive_action
+                    ),
                     enabled = revealed,
                     shape = swipeActionTileShape(),
                     onClick = {
-                        close()
-                        onDelete()
+                        if (confirmingArchive) {
+                            close()
+                            onDelete()
+                        } else {
+                            confirmingArchive = true
+                        }
                     }
                 )
             }
@@ -994,18 +1053,29 @@ private fun SwipeableQuestionCard(
                                     // snapTo 是挂起函数，awaitEachGesture 的受限作用域
                                     // 不允许直接调（编译错误）——与旧 rememberDraggableState
                                     // 一致，经外层 scope.launch 落盘，帧内顺序由互斥锁保证。
-                                    curOffset = (curOffset + dx).coerceIn(-revealWidthPx, 0f)
+                                    curOffset = (curOffset + dx).coerceIn(-revealWidthPx, imageRevealPx)
                                     scope.launch { offsetX.snapTo(curOffset) }
                                 }
                             }
                         } finally {
                             if (claimed) {
-                                val opened = curOffset < -revealWidthPx * 0.35f
-                                revealed = opened
-                                coordinator.revealedId = if (opened) myId else null
+                                // 三态吸附（v0.0.132）：左滑过 35% 阈值 → 操作块；
+                                // 右滑过 35% 阈值 → 题目图片预览；否则归零。
+                                // 阈值取半程而不是四分之一：滑一半以上才算明确意图，
+                                // 杜绝「一次滑动连跳两级直接到归档/删除」的误触。
+                                val openedLeft = curOffset < -revealWidthPx * 0.5f
+                                val openedRight = curOffset > imageRevealPx * 0.5f
+                                revealed = openedLeft
+                                previewing = openedRight
+                                coordinator.revealedId = if (openedLeft || openedRight) myId else null
+                                val target = when {
+                                    openedLeft -> -revealWidthPx
+                                    openedRight -> imageRevealPx
+                                    else -> 0f
+                                }
                                 scope.launch {
                                     offsetX.animateTo(
-                                        targetValue = if (opened) -revealWidthPx else 0f,
+                                        targetValue = target,
                                         animationSpec = SwipeRevealSpring
                                     )
                                 }
@@ -1166,6 +1236,9 @@ private fun FilterRow(
  * 拇指能点中，又不至于把整张卡都推走（推太多用户会失去「这是同一张卡」的感觉）。
  */
 private val SwipeDeleteRevealWidth = SwipeActionBlockWidth * 2
+
+/** 右滑露出题目图片的宽度（v0.0.132 用户：「尽可能大的展示，不允许裁切」）。 */
+private val SwipeImageRevealWidth = 260.dp
 
 /**
  * 横向手势定向判定（v0.0.89 重写；单测见 HomeScreenSwipeClaimTest）。
