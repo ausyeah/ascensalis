@@ -61,8 +61,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
+import com.mistakebook.ui.common.SwipeActionJunctionRadius
+import com.mistakebook.ui.common.SwipeActionLayer
 import com.mistakebook.ui.common.swipeRevealContentAlpha
 import com.mistakebook.ui.common.swipeRevealProgress
 import com.mistakebook.data.local.entities.Question
@@ -418,43 +422,56 @@ private fun ArchiveSwipeRow(
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        Row(
-            // v0.0.116：原来是「按内容高度居中」，色块只有图标加一行字那么高，
-            // 滑开是一小块飘在卡片中间；对话历史用 matchParentSize() 恰好等于
-            // 卡片高度，饱满得多。归档页跟着对齐——三处左滑必须一套观感。
+        // v0.0.131（用户看截图：「恢复块左边没有倒角，看着别扭」）：
+        // 与对话历史抽屉（issue #43）改成同一套叠画——恢复块压在删除块上、
+        // 各多铺 [SwipeActionJunctionRadius] 的衔接带，交界是弧线不是直线；
+        // 恢复块（最左/上层）的左缘取卡片圆角，与卡片轮廓同一条曲线。
+        // 原来的 Row 并排画法里，恢复块左缘是悬在卡片中间的直角。
+        Box(
             modifier = Modifier
                 .matchParentSize()
                 .graphicsLayer {
                     val progress = swipeRevealProgress(offset, revealWidthPx)
                     alpha = swipeRevealContentAlpha(progress)
-                },
-            horizontalArrangement = Arrangement.End
+                }
         ) {
-            SwipeActionBlock(
-                width = SwipeActionBlockWidth,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                icon = Icons.Default.Restore,
-                label = stringResource(R.string.archived_restore),
-                // 滑开前点不到（被卡片挡住），显式收紧与另两处一致
-                enabled = offset < -revealWidthPx * 0.35f,
-                onClick = {
-                    offset = 0f
-                    scope.launch { onRestore() }
-                }
-            )
-            SwipeActionBlock(
-                width = SwipeActionBlockWidth,
-                color = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                icon = Icons.Default.Delete,
-                label = stringResource(R.string.archived_delete),
-                enabled = offset < -revealWidthPx * 0.35f,
-                onClick = {
-                    offset = 0f
-                    scope.launch { onDelete() }
-                }
-            )
+            // ① 删除（最右/底层）：右缘被外层 clip 裁出卡片圆角
+            SwipeActionLayer(Modifier.matchParentSize(), inset = 0.dp) {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    icon = Icons.Default.Delete,
+                    label = stringResource(R.string.archived_delete),
+                    // 滑开前点不到（被卡片挡住），显式收紧与另两处一致
+                    enabled = offset < -revealWidthPx * 0.35f,
+                    onClick = {
+                        offset = 0f
+                        scope.launch { onDelete() }
+                    }
+                )
+            }
+            // ② 恢复（最左/上层）：左缘随卡片圆角，右缘压在删除块上收圆弧
+            SwipeActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth) {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    icon = Icons.Default.Restore,
+                    label = stringResource(R.string.archived_restore),
+                    enabled = offset < -revealWidthPx * 0.35f,
+                    shape = RoundedCornerShape(
+                        topStart = MaterialTheme.shapes.medium.topStart,
+                        bottomStart = MaterialTheme.shapes.medium.bottomStart,
+                        topEnd = CornerSize(SwipeActionJunctionRadius),
+                        bottomEnd = CornerSize(SwipeActionJunctionRadius)
+                    ),
+                    onClick = {
+                        offset = 0f
+                        scope.launch { onRestore() }
+                    }
+                )
+            }
         }
         Box(
             modifier = Modifier

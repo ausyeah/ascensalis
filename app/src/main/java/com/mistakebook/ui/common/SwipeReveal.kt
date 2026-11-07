@@ -5,9 +5,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -134,3 +138,39 @@ internal fun SwipeActionBlock(
         }
     }
 }
+
+/**
+ * 叠画操作层的公共排布（v0.0.131，从对话历史抽屉提取）。
+ *
+ * 靠右对齐：先画的块在最右，`inset` 把后面的块往左顶——每块都多铺一段
+ * [SwipeActionJunctionRadius] 的衔接带，被上层块的圆弧压住，交界处才是
+ * 弧线不是直线。错题卡、对话历史、归档页三处左滑共用一套画法。
+ */
+@Composable
+internal fun SwipeActionLayer(
+    modifier: Modifier,
+    inset: Dp,
+    content: @Composable () -> Unit
+) {
+    Row(modifier = modifier, horizontalArrangement = Arrangement.End) {
+        content()
+        if (inset > 0.dp) Spacer(Modifier.width(inset))
+    }
+}
+
+/**
+ * 中间块的形状（v0.0.131 修正）：**左缘直角、右缘收 [SwipeActionJunctionRadius]
+ * 圆弧**。
+ *
+ * 为什么左缘不能也收弧：中间块向左多铺的那段衔接带，正是用来补住
+ * 上层块右缘圆弧削掉的月牙缺口的——左缘若也收弧，两道弧「弧对弧」
+ * 都缺料，交界处露出父容器底色（用户截图里的缝隙就是它）。方角铺满
+ * + 右缘收弧，每条交界恰好一条弧线：左边的弧由上层块提供，右边的
+ * 弧由自己提供，缺口全部被下层块的方角实体补满，零缝隙。
+ */
+internal fun swipeActionJunctionShape(): Shape = RoundedCornerShape(
+    topStart = CornerSize(0.dp),
+    topEnd = CornerSize(SwipeActionJunctionRadius),
+    bottomStart = CornerSize(0.dp),
+    bottomEnd = CornerSize(SwipeActionJunctionRadius)
+)

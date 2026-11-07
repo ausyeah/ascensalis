@@ -78,6 +78,8 @@ import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.ui.common.SwipeActionJunctionRadius
+import com.mistakebook.ui.common.SwipeActionLayer
+import com.mistakebook.ui.common.swipeActionJunctionShape
 import com.mistakebook.ui.common.SwipeRevealSpring
 import com.mistakebook.ui.common.swipeRevealContentAlpha
 import com.mistakebook.ui.common.swipeRevealProgress
@@ -487,7 +489,7 @@ private fun SwipeableChatRow(
                 }
         ) {
             // ① 归档（最右/底层）：多铺一段衔接带，多出的部分被上层压住
-            ActionLayer(Modifier.matchParentSize(), inset = 0.dp) {
+            SwipeActionLayer(Modifier.matchParentSize(), inset = 0.dp) {
                 SwipeActionBlock(
                     width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
                     // 两步确认全在这块颜色里：第一击是浅一档的 errorContainer，
@@ -514,7 +516,7 @@ private fun SwipeableChatRow(
             }
 
             // ② 重命名（中间）：左右都是圆弧，两侧都压在邻块上
-            ActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth) {
+            SwipeActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth) {
                 SwipeActionBlock(
                     width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
                     color = MaterialTheme.colorScheme.primary,
@@ -522,7 +524,7 @@ private fun SwipeableChatRow(
                     icon = Icons.Default.Edit,
                     label = stringResource(R.string.chat_rename),
                     enabled = revealed,
-                    shape = junctionShape(),
+                    shape = swipeActionJunctionShape(),
                     onClick = {
                         close()
                         onRename()
@@ -531,7 +533,7 @@ private fun SwipeableChatRow(
             }
 
             // ③ 置顶（最左/最上层）：左缘随卡片圆角
-            ActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth * 2) {
+            SwipeActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth * 2) {
                 SwipeActionBlock(
                     width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -587,37 +589,6 @@ private fun SwipeableChatRow(
         }
     }
 }
-
-/**
- * 一块操作色的定位层：靠右对齐，并按 [inset] 从右边缩进若干块宽。
- *
- * 三块用 Box 叠画（而不是 Row 并排），是为了让相邻色块**重叠**
- * [SwipeActionJunctionRadius] 的宽度：上层的圆角压在邻块的颜色上，
- * 交界才是弧线；并排铺只会露出父容器的底色，反而更难看。
- */
-@Composable
-private fun ActionLayer(
-    modifier: Modifier,
-    inset: androidx.compose.ui.unit.Dp,
-    content: @Composable () -> Unit
-) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.End
-    ) {
-        content()
-        if (inset > 0.dp) Spacer(Modifier.width(inset))
-    }
-}
-
-/** 中间块的形状：两侧都收圆弧（右缘压下一块，左缘被上一块压）。 */
-@Composable
-private fun junctionShape(): androidx.compose.ui.graphics.Shape = RoundedCornerShape(
-    topStart = CornerSize(SwipeActionJunctionRadius),
-    bottomStart = CornerSize(SwipeActionJunctionRadius),
-    topEnd = CornerSize(SwipeActionJunctionRadius),
-    bottomEnd = CornerSize(SwipeActionJunctionRadius)
-)
 
 /** 对话记录一行的内容（标题 + 预览 + 时间）。 */
 @Composable
