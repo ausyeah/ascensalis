@@ -35,6 +35,9 @@ object NetworkRouter {
      */
     val DIRECT_HOSTS: Set<String> = setOf(
         "mineru.net",
+        // 商汤日日新（token.sensenova.cn）部署在国内：走代理出口既慢又可能
+        // 被境外节点拒绝，直连才是国内供应商的正确姿势（v0.0.132）。
+        "sensenova.cn",
         "mineru.openxlab.org.cn",
         "cdn-mineru.openxlab.org.cn",
         "openxlab.org.cn",

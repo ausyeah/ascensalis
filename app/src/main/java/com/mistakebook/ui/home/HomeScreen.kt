@@ -119,6 +119,9 @@ import com.mistakebook.ui.common.moveItem
 import com.mistakebook.ui.common.orderByIds
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.common.SwipeActionBlock
+import com.mistakebook.ui.common.SwipeActionGap
+import com.mistakebook.ui.common.swipeActionTileShape
+import com.mistakebook.ui.common.SwipeRevealCoordinator
 import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.ui.common.SwipeActionJunctionRadius
 import com.mistakebook.ui.common.SwipeRevealSpring
@@ -239,6 +242,8 @@ fun HomeScreen(
         viewModel.setNotebook(picked)
     }
     val snackbarHostState = remember { SnackbarHostState() }
+    // 单开互斥（v0.0.132）：错题卡与对话历史/归档页同一行为——同时只有一张卡展开
+    val swipeCoordinator = remember { SwipeRevealCoordinator() }
     val scope = rememberCoroutineScope()
     var showAddSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
@@ -551,6 +556,8 @@ fun HomeScreen(
                             // animateItem：拖动换位时其他卡片平滑滑到新位置，
                             // 没有它就是「瞬移」，排序体感很生硬
                             modifier = Modifier.animateItem(),
+                            coordinator = swipeCoordinator,
+                            myId = question.id,
                             question = question,
                             subjectName = subjectName,
                             dueToday = state.dueCount > 0 && isDue(question, todayEpochDay),
@@ -809,6 +816,8 @@ private fun AddSheetItem(
 @Composable
 private fun SwipeableQuestionCard(
     modifier: Modifier = Modifier,
+    coordinator: SwipeRevealCoordinator,
+    myId: Long,
     question: Question,
     subjectName: String?,
     dueToday: Boolean,
@@ -822,7 +831,7 @@ private fun SwipeableQuestionCard(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
-    val revealWidthPx = with(density) { SwipeDeleteRevealWidth.toPx() }
+    val revealWidthPx = with(density) { (SwipeDeleteRevealWidth + SwipeActionGap).toPx() }
 
     val offsetX = remember { Animatable(0f) }
     // 「是否已划开」是**离散状态**，只在松手时翻转。
@@ -834,7 +843,16 @@ private fun SwipeableQuestionCard(
 
     fun close() {
         revealed = false
+        coordinator.revealedId = null
         scope.launch { offsetX.animateTo(0f) }
+    }
+
+    // 互斥（v0.0.132）：别的卡滑开时，已开的自己自动收回
+    LaunchedEffect(coordinator.revealedId) {
+        if (revealed && coordinator.revealedId != myId) {
+            revealed = false
+            offsetX.animateTo(0f)
+        }
     }
 
     Box(
@@ -874,28 +892,11 @@ private fun SwipeableQuestionCard(
                     alpha = swipeRevealContentAlpha(progress)
                 }
         ) {
-            // 红（归档）：宽度多出一段衔接带，多出的部分被上层蓝块的圆角盖住
+            // v0.0.132（用户设计图：「）（这样的两个都是完整图形的拼贴」）：
+            // 两块各自四角圆润的独立图形并排，块间留细缝——不再叠画互压。
             Row(
                 modifier = Modifier.matchParentSize(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                SwipeActionBlock(
-                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    icon = Icons.Default.Delete,
-                    label = stringResource(R.string.archive_action),
-                    enabled = revealed,
-                    onClick = {
-                        close()
-                        onDelete()
-                    }
-                )
-            }
-            // 蓝（置顶）：左缘随卡片圆角、右缘圆弧压进红色
-            Row(
-                modifier = Modifier.matchParentSize(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.spacedBy(SwipeActionGap, Alignment.End)
             ) {
                 SwipeActionBlock(
                     width = SwipeActionBlockWidth,
@@ -906,15 +907,22 @@ private fun SwipeableQuestionCard(
                         if (question.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
                     ),
                     enabled = revealed,
-                    shape = RoundedCornerShape(
-                        topStart = MaterialTheme.shapes.medium.topStart,
-                        bottomStart = MaterialTheme.shapes.medium.bottomStart,
-                        topEnd = CornerSize(SwipeActionJunctionRadius),
-                        bottomEnd = CornerSize(SwipeActionJunctionRadius)
-                    ),
+                    shape = swipeActionTileShape(),
                     onClick = { close(); onPin() }
                 )
-                Spacer(Modifier.width(SwipeActionBlockWidth))
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    icon = Icons.Default.Delete,
+                    label = stringResource(R.string.archive_action),
+                    enabled = revealed,
+                    shape = swipeActionTileShape(),
+                    onClick = {
+                        close()
+                        onDelete()
+                    }
+                )
             }
         }
 
@@ -974,6 +982,8 @@ private fun SwipeableQuestionCard(
                                 if (!claimed && (abs(accX) > slop || abs(accY) > slop)) {
                                     if (shouldClaimCardSwipe(accX, accY)) {
                                         claimed = true
+                                        // 起手就收回别的卡（互斥）：登记权留给滑到位的自己
+                                        if (coordinator.revealedId != myId) coordinator.revealedId = null
                                     } else {
                                         break
                                     }
@@ -992,6 +1002,7 @@ private fun SwipeableQuestionCard(
                             if (claimed) {
                                 val opened = curOffset < -revealWidthPx * 0.35f
                                 revealed = opened
+                                coordinator.revealedId = if (opened) myId else null
                                 scope.launch {
                                     offsetX.animateTo(
                                         targetValue = if (opened) -revealWidthPx else 0f,

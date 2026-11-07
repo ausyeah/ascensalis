@@ -78,8 +78,9 @@ import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.common.SwipeActionBlock
 import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.ui.common.SwipeActionJunctionRadius
-import com.mistakebook.ui.common.SwipeActionLayer
-import com.mistakebook.ui.common.swipeActionJunctionShape
+import com.mistakebook.ui.common.SwipeRevealCoordinator
+import com.mistakebook.ui.common.SwipeActionGap
+import com.mistakebook.ui.common.swipeActionTileShape
 import com.mistakebook.ui.common.SwipeRevealSpring
 import com.mistakebook.ui.common.swipeRevealContentAlpha
 import com.mistakebook.ui.common.swipeRevealProgress
@@ -107,6 +108,9 @@ internal fun ChatHistorySheet(
      */
     onOpenArchivedSessions: () -> Unit = {}
 ) {
+    // 单开互斥（v0.0.132）：同一时刻只有一行处于展开态。
+    // 协调器随抽屉销毁——「回到对话自动收回」由 composition 生命周期保证。
+    val swipeCoordinator = remember { SwipeRevealCoordinator() }
     val viewModel = containerViewModel(container) { c ->
         ChatListViewModel(c.chatRepository, c.database.questionDao())
     }
@@ -296,6 +300,10 @@ internal fun ChatHistorySheet(
                 val deletedText = stringResource(R.string.chat_session_deleted)
                 val undoText = stringResource(R.string.action_undo)
                 SwipeableChatRow(
+                    coordinator = swipeCoordinator,
+                    myId = item.session.id,
+                    drawerOpen = drawerState.currentValue == androidx.compose.material3.DrawerValue.Open,
+                    closeDrawer = { scope.launch { drawerState.close() } },
                     item = item,
                     // 必须传 sessionId，不只是 questionId：
                     // 自由会话 questionId 是 null，光传它等于没传——
@@ -424,6 +432,10 @@ internal fun ChatHistorySheet(
  */
 @Composable
 private fun SwipeableChatRow(
+    coordinator: SwipeRevealCoordinator,
+    myId: Long,
+    drawerOpen: Boolean,
+    closeDrawer: () -> Unit,
     item: ChatListItemUi,
     onOpen: () -> Unit,
     onRename: () -> Unit,
@@ -432,7 +444,7 @@ private fun SwipeableChatRow(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
-    val revealWidthPx = with(density) { SwipeActionRevealWidth.toPx() }
+    val revealWidthPx = with(density) { (SwipeActionRevealWidth + SwipeActionGap * 2).toPx() }
 
     val offsetX = remember { Animatable(0f) }
     // 「是否已划开」是**离散状态**，只在松手时翻转。
@@ -453,7 +465,23 @@ private fun SwipeableChatRow(
         }
     }
 
+    // 互斥（v0.0.132）：别的行滑开（revealedId 不是自己）时，已开的自己
+    // 自动收回；拖动中的行尚未「已开」，不会被误拽。
+    LaunchedEffect(coordinator.revealedId) {
+        if (revealed && coordinator.revealedId != myId) {
+            revealed = false
+            confirmingDelete = false
+            offsetX.animateTo(0f)
+        }
+    }
+
     val dragState = rememberDraggableState { delta ->
+        // 向右拖已收起的行 = 想关抽屉：把手势交还给抽屉（close 幂等），
+        // 不然行卡在 0 不动、抽屉也关不上，就是「卡住」的手感。
+        if (delta > 0 && offsetX.value >= 0f && !revealed) {
+            closeDrawer()
+            return@rememberDraggableState
+        }
         scope.launch {
             offsetX.snapTo((offsetX.value + delta).coerceIn(-revealWidthPx, 0f))
         }
@@ -462,6 +490,7 @@ private fun SwipeableChatRow(
     fun close() {
         revealed = false
         confirmingDelete = false
+        coordinator.revealedId = null
         scope.launch { offsetX.animateTo(0f) }
     }
 
@@ -471,27 +500,64 @@ private fun SwipeableChatRow(
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // 底层：操作区。左滑后从右侧露出，**靠右对齐**——
-        // 卡片往左移，露出的正是最右边这三块。
+        // 底层：操作区。左滑后从右侧露出，**靠右对齐**。
         //
-        // v0.0.128（issue #43「对话历史里面的左滑选项没有做圆润化处理」）：
-        // 与首页错题卡改成同一套画法——三块叠画，靠右的那块先画，
-        // 越往左越靠上层；每块向左多铺 [SwipeActionJunctionRadius] 的
-        // 衔接带，被上层块的圆弧压住，交界处是弧线不是直线；
-        // 最左那块（置顶）的左缘取卡片圆角，卡片缩进去时与卡片轮廓同一条曲线。
-        Box(
+        // v0.0.132（用户给设计图：「）（这样的两个都是完整图形的拼贴」）：
+        // 三块是**各自四角圆润的独立图形**，并排拼贴、块间留 [SwipeActionGap]
+        // 细缝——交界的圆是每块自己的轮廓，不再叠画互压。
+        Row(
             modifier = Modifier
                 .matchParentSize()
                 // 与错题卡同一口径：露出内容随进度淡入，绘制期读 offsetX 不重组
                 .graphicsLayer {
                     val progress = swipeRevealProgress(offsetX.value, revealWidthPx)
                     alpha = swipeRevealContentAlpha(progress)
-                }
+                },
+            horizontalArrangement = Arrangement.spacedBy(SwipeActionGap, Alignment.End)
         ) {
-            // ① 归档（最右/底层）：多铺一段衔接带，多出的部分被上层压住
-            SwipeActionLayer(Modifier.matchParentSize(), inset = 0.dp) {
+// ① 置顶（最左）：完整图形
+            Row {
                 SwipeActionBlock(
-                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
+                    width = SwipeActionBlockWidth,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    icon = Icons.Default.PushPin,
+                    label = stringResource(
+                        if (item.session.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
+                    ),
+                    enabled = revealed,
+                    shape = swipeActionTileShape(),
+                    onClick = {
+                        close()
+                        onTogglePin()
+                    }
+                )
+            }
+// ② 重命名（中间）：完整图形
+            Row {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth,
+                    shape = swipeActionTileShape(),
+                    // v0.0.132（用户：「颜色风格全部保持一致，和错题一样」）：
+                    // 亮蓝 primary 是三处左滑里唯一跳出色板的——错题卡基准是
+                    // 柔和的「容器色 + on 容器色」，改用 secondaryContainer 同族。
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    icon = Icons.Default.Edit,
+                    label = stringResource(R.string.chat_rename),
+                    enabled = revealed,
+                    onClick = {
+                        close()
+                        onRename()
+                    }
+                )
+            }
+
+            // ③ 归档（最右）：完整图形，右缘与卡片圆角同向
+            Row {
+                SwipeActionBlock(
+                    width = SwipeActionBlockWidth,
+                    shape = swipeActionTileShape(),
                     // 两步确认全在这块颜色里：第一击是浅一档的 errorContainer，
                     // 第二击换成饱和的 error。不弹窗、不挪位置，「再点一次」
                     // 的语义靠对比度表达——深浅两档都从 colorScheme 取，
@@ -515,59 +581,29 @@ private fun SwipeableChatRow(
                 )
             }
 
-            // ② 重命名（中间）：左右都是圆弧，两侧都压在邻块上
-            SwipeActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth) {
-                SwipeActionBlock(
-                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
-                    color = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    icon = Icons.Default.Edit,
-                    label = stringResource(R.string.chat_rename),
-                    enabled = revealed,
-                    shape = swipeActionJunctionShape(),
-                    onClick = {
-                        close()
-                        onRename()
                     }
-                )
-            }
-
-            // ③ 置顶（最左/最上层）：左缘随卡片圆角
-            SwipeActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth * 2) {
-                SwipeActionBlock(
-                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    icon = Icons.Default.PushPin,
-                    label = stringResource(
-                        if (item.session.pinned) R.string.swipe_unpin_action else R.string.swipe_pin_action
-                    ),
-                    enabled = revealed,
-                    shape = RoundedCornerShape(
-                        topStart = MaterialTheme.shapes.medium.topStart,
-                        bottomStart = MaterialTheme.shapes.medium.bottomStart,
-                        topEnd = CornerSize(SwipeActionJunctionRadius),
-                        bottomEnd = CornerSize(SwipeActionJunctionRadius)
-                    ),
-                    onClick = {
-                        close()
-                        onTogglePin()
-                    }
-                )
-            }
-        }
 
         // 上层：卡片内容，跟随手势位移（向左为负）
         Box(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                // v0.0.132（用户：「滑动拉出抽屉超级容易卡住」）：行的横向拖动
+                // 与抽屉开合手势抢事件（子先于父）——手指落在行上拉抽屉就被
+                // 行吞掉。抽屉没**完全**打开时不认领，让 ModalNavigationDrawer
+                // 的手势接管；完全打开后才轮到行内左滑。
                 .draggable(
                     state = dragState,
                     orientation = Orientation.Horizontal,
+                    enabled = drawerOpen,
+                    onDragStarted = {
+                        // 起手就收回别的行（互斥）：登记权留给滑到位的自己
+                        if (coordinator.revealedId != myId) coordinator.revealedId = null
+                    },
                     onDragStopped = {
                         val opened = offsetX.value < -revealWidthPx * 0.35f
                         revealed = opened
                         if (!opened) confirmingDelete = false
+                        coordinator.revealedId = if (opened) myId else null
                         scope.launch {
                             offsetX.animateTo(
                                 targetValue = if (opened) -revealWidthPx else 0f,
@@ -580,7 +616,12 @@ private fun SwipeableChatRow(
             ChatRowContent(
                 item = item,
                 onClick = {
-                    if (revealed) close() else onOpen()
+                    if (revealed) close() else {
+                        // 进对话前清登记 + 收回：防止返回时残留展开行误触
+                        coordinator.revealedId = null
+                        close()
+                        onOpen()
+                    }
                 },
                 onRename = onRename,
                 onDelete = onDelete,

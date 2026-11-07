@@ -5,8 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -16,6 +14,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +52,24 @@ val SwipeRevealSpring: androidx.compose.animation.core.SpringSpec<Float> = sprin
     stiffness = Spring.StiffnessMediumLow
 )
 
+/**
+ * 左滑展开的**互斥协调器**（v0.0.132，用户：「同时不能展开两个，切换
+ * 其他页面要自动收回防止误触」）。
+ *
+ * 由列表父级 [androidx.compose.runtime.remember] 持有，同一列表的每行
+ * 拿到同一个实例并带上自己的 id：
+ * - 某行滑开 → 写入自己的 id，其余行监听到「不是自己」就自动收回；
+ * - 开始一次新的滑动 → 先清空（收回已开的行），自己滑到位再登记；
+ * - 页面/抽屉关闭 → 父级销毁，状态随之消失，回到页面不会残留展开行。
+ *
+ * 谁该收回由各行自行判断（`revealed && revealedId != 我的id`）：
+ * 拖动中的行尚未「已开」，不会被别的手势误拽。
+ */
+@androidx.compose.runtime.Stable
+class SwipeRevealCoordinator {
+    var revealedId: Any? by androidx.compose.runtime.mutableStateOf<Any?>(null)
+}
+
 /** 露出内容的起始淡入进度：前 1/4 不出现，避免刚起手就看见图标闪一下。 */
 private const val SwipeRevealFadeInStart = 0.25f
 
@@ -79,13 +97,18 @@ internal fun swipeRevealContentAlpha(progress: Float): Float {
 }
 
 /**
- * 红蓝两块相接处的圆角半径（v0.0.121）。
+ * 每个操作块自身的圆角半径（v0.0.132，口径从「交界衔接弧」改为「完整
+ * 图形拼贴」）。
  *
- * 用户看截图说「蓝色左边缘没有做圆润化处理，红蓝连接的方式也没有做
- * 圆润化处理」。左缘的圆角跟卡片走，相接处用这个独立半径：整条操作区
- * 高度几十 dp，16dp 的弧既看得见圆润，又不会把色块削成胶囊。
+ * 用户给的设计图：「）（这样的两个都是完整图形的拼贴」——每块是**独立
+ * 的完整圆角矩形**并排，块间留一道细缝，交界的圆是每块自己的轮廓，
+ * 不再叠画互压。
  */
 val SwipeActionJunctionRadius: Dp = 16.dp
+
+/** 相邻两块之间的缝（v0.0.132 初为 4dp，用户「最好没有缝隙」→ 归零：
+ * 完整图形紧贴拼贴，交界上下角的小凹是各块自身圆角的天然轮廓）。 */
+val SwipeActionGap: Dp = 0.dp
 
 /**
  * 滑动露出的**操作块**：整块色底 + 居中的图标和一行小字。
@@ -140,37 +163,15 @@ internal fun SwipeActionBlock(
 }
 
 /**
- * 叠画操作层的公共排布（v0.0.131，从对话历史抽屉提取）。
+ * 操作块的统一形状（v0.0.132）：**四角全圆的完整图形**。
  *
- * 靠右对齐：先画的块在最右，`inset` 把后面的块往左顶——每块都多铺一段
- * [SwipeActionJunctionRadius] 的衔接带，被上层块的圆弧压住，交界处才是
- * 弧线不是直线。错题卡、对话历史、归档页三处左滑共用一套画法。
+ * 用户给的设计图推翻了叠画（「ui重叠」「我希望两个都是完整图形的
+ * 拼贴」）——每块独立、完整、四角圆润，并排时块间留 [SwipeActionGap]
+ * 细缝。交界不再互压，也就没有补弧/缺料的问题。
  */
-@Composable
-internal fun SwipeActionLayer(
-    modifier: Modifier,
-    inset: Dp,
-    content: @Composable () -> Unit
-) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.End) {
-        content()
-        if (inset > 0.dp) Spacer(Modifier.width(inset))
-    }
-}
-
-/**
- * 中间块的形状（v0.0.131 修正）：**左缘直角、右缘收 [SwipeActionJunctionRadius]
- * 圆弧**。
- *
- * 为什么左缘不能也收弧：中间块向左多铺的那段衔接带，正是用来补住
- * 上层块右缘圆弧削掉的月牙缺口的——左缘若也收弧，两道弧「弧对弧」
- * 都缺料，交界处露出父容器底色（用户截图里的缝隙就是它）。方角铺满
- * + 右缘收弧，每条交界恰好一条弧线：左边的弧由上层块提供，右边的
- * 弧由自己提供，缺口全部被下层块的方角实体补满，零缝隙。
- */
-internal fun swipeActionJunctionShape(): Shape = RoundedCornerShape(
-    topStart = CornerSize(0.dp),
+internal fun swipeActionTileShape(): Shape = RoundedCornerShape(
+    topStart = CornerSize(SwipeActionJunctionRadius),
     topEnd = CornerSize(SwipeActionJunctionRadius),
-    bottomStart = CornerSize(0.dp),
+    bottomStart = CornerSize(SwipeActionJunctionRadius),
     bottomEnd = CornerSize(SwipeActionJunctionRadius)
 )

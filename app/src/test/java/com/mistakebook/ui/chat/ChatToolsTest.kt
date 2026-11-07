@@ -187,13 +187,14 @@ class ChatToolsTest {
         assertTrue("重命名块在", blocks.contains("R.string.chat_rename"))
         // v0.0.104：主列表不再直接删除，最后一块改成归档（删除只在「已归档」页里）
         assertTrue("归档块在", blocks.contains("R.string.archive_action"))
-        // v0.0.128（issue #43）：三块改成**叠画**（底层先画、上层压圆弧），
-        // 声明顺序从「左→右」变成「右→左」：归档最底、置顶最上层。
-        // 视觉上的顺序不变（置顶在最左、归档在最右），所以只钉「谁压着谁」。
+        // v0.0.132（用户设计图）：叠画废弃，三块是**独立完整图形并排拼贴**，
+        // 声明顺序恢复「左→右」：置顶（左）、重命名（中）、归档（右）。
         assertTrue(
-            "归档必须在底层（先声明），置顶在最上层（后声明）",
-            blocks.indexOf("R.string.archive_action") < blocks.indexOf("R.string.swipe_pin_action") &&
-                blocks.indexOf("R.string.archive_action") < blocks.indexOf("R.string.chat_rename")
+            "拼贴顺序必须从左到右：置顶、重命名、归档",
+            blocks.indexOf("R.string.swipe_pin_action") <
+                blocks.indexOf("R.string.chat_rename") &&
+                blocks.indexOf("R.string.chat_rename") <
+                blocks.indexOf("R.string.archive_action")
         )
     }
 

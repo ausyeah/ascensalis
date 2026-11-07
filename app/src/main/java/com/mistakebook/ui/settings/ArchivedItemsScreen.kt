@@ -64,9 +64,11 @@ import com.mistakebook.R
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.mistakebook.ui.common.SwipeActionBlock
+import com.mistakebook.ui.common.SwipeRevealCoordinator
 import com.mistakebook.ui.common.SwipeActionBlockWidth
 import com.mistakebook.ui.common.SwipeActionJunctionRadius
-import com.mistakebook.ui.common.SwipeActionLayer
+import com.mistakebook.ui.common.SwipeActionGap
+import com.mistakebook.ui.common.swipeActionTileShape
 import com.mistakebook.ui.common.swipeRevealContentAlpha
 import com.mistakebook.ui.common.swipeRevealProgress
 import com.mistakebook.data.local.entities.Question
@@ -190,6 +192,8 @@ private fun ArchivedQuestionsList(container: AppContainer, padding: PaddingValue
             return@Column
         }
 
+        // 单开互斥（v0.0.132）：同一时刻只展开一行；页面销毁状态随之消失
+        val swipeCoordinator = remember { SwipeRevealCoordinator() }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
@@ -197,6 +201,8 @@ private fun ArchivedQuestionsList(container: AppContainer, padding: PaddingValue
         ) {
             items(questions, key = { it.id }) { question ->
                 ArchiveSwipeRow(
+                    coordinator = swipeCoordinator,
+                    myId = question.id,
                     onRestore = {
                         scope.launch { container.questionRepository.unarchive(question.id) }
                     },
@@ -227,6 +233,8 @@ private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues
         return
     }
 
+    // 单开互斥（v0.0.132）：同一时刻只展开一行
+    val swipeCoordinator = remember { SwipeRevealCoordinator() }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
@@ -234,6 +242,8 @@ private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues
     ) {
         items(sessions, key = { it.id }) { session ->
             ArchiveSwipeRow(
+                coordinator = swipeCoordinator,
+                myId = session.id,
                 onRestore = { scope.launch { container.chatRepository.unarchiveSession(session.id) } },
                 onDelete = { scope.launch { container.chatRepository.softDeleteSession(session.id) } }
             ) {
@@ -286,6 +296,8 @@ private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues
 @Composable
 private fun ArchivedPomodoroTasksList(container: AppContainer, padding: PaddingValues) {
     val scope = rememberCoroutineScope()
+    // 单开互斥（v0.0.132）：同一时刻只展开一行；页面销毁状态随之消失
+    val swipeCoordinator = remember { SwipeRevealCoordinator() }
     val tasks by container.pomodoroDao.observeArchivedTasks()
         .collectAsState(initial = emptyList<com.mistakebook.data.local.entities.PomodoroTask>())
     var pendingDelete by remember { mutableStateOf<com.mistakebook.data.local.entities.PomodoroTask?>(null) }
@@ -307,6 +319,8 @@ private fun ArchivedPomodoroTasksList(container: AppContainer, padding: PaddingV
     ) {
         items(tasks, key = { it.id }) { task ->
             ArchiveSwipeRow(
+                coordinator = swipeCoordinator,
+                myId = task.id,
                 onRestore = { scope.launch { container.pomodoroDao.unarchiveTask(task.id) } },
                 onDelete = { pendingDelete = task }
             ) {
@@ -403,16 +417,27 @@ private fun QuestionArchiveCard(question: Question) {
  */
 @Composable
 private fun ArchiveSwipeRow(
+    coordinator: SwipeRevealCoordinator,
+    myId: Any,
     onRestore: () -> Unit,
     onDelete: () -> Unit,
     content: @Composable () -> Unit
 ) {
     val density = LocalDensity.current
-    val revealWidthPx = with(density) { (SwipeActionBlockWidth * 2).toPx() }
+    val revealWidthPx = with(density) { (SwipeActionBlockWidth * 2 + SwipeActionGap).toPx() }
     // 用纯 State + 横向手势，不用 Animatable：
     // 松手直接归位（开或关），少一层动画状态机，也就少一类「手势与动画抢状态」的坑。
     var offset by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
+    // 拖动标志：互斥收回不能拽正在拖的行
+    var dragging by remember { mutableStateOf(false) }
+
+    // 互斥（v0.0.132）：别的行滑开时，已开且不在拖动的自己自动收回
+    LaunchedEffect(coordinator.revealedId) {
+        if (!dragging && offset < 0f && coordinator.revealedId != myId) {
+            offset = 0f
+        }
+    }
 
     // 外层的 clip + surface 底与对话历史抽屉同一口径：色块要「长」在卡片里，
     // 由父级圆角统一裁外沿，越界的方块才不会是直角的。
@@ -422,64 +447,66 @@ private fun ArchiveSwipeRow(
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // v0.0.131（用户看截图：「恢复块左边没有倒角，看着别扭」）：
-        // 与对话历史抽屉（issue #43）改成同一套叠画——恢复块压在删除块上、
-        // 各多铺 [SwipeActionJunctionRadius] 的衔接带，交界是弧线不是直线；
-        // 恢复块（最左/上层）的左缘取卡片圆角，与卡片轮廓同一条曲线。
-        // 原来的 Row 并排画法里，恢复块左缘是悬在卡片中间的直角。
-        Box(
+        // v0.0.132（用户设计图：「）（这样的两个都是完整图形的拼贴」）：
+        // 恢复 / 删除两块各自四角圆润的独立图形并排拼贴——交界的圆是
+        // 每块自己的轮廓，不再叠画互压；主操作（恢复）在左，危险操作
+        // （删除）在右。
+        Row(
             modifier = Modifier
                 .matchParentSize()
                 .graphicsLayer {
                     val progress = swipeRevealProgress(offset, revealWidthPx)
                     alpha = swipeRevealContentAlpha(progress)
-                }
+                },
+            horizontalArrangement = Arrangement.spacedBy(SwipeActionGap, Alignment.End)
         ) {
-            // ① 删除（最右/底层）：右缘被外层 clip 裁出卡片圆角
-            SwipeActionLayer(Modifier.matchParentSize(), inset = 0.dp) {
-                SwipeActionBlock(
-                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    icon = Icons.Default.Delete,
-                    label = stringResource(R.string.archived_delete),
-                    // 滑开前点不到（被卡片挡住），显式收紧与另两处一致
-                    enabled = offset < -revealWidthPx * 0.35f,
-                    onClick = {
-                        offset = 0f
-                        scope.launch { onDelete() }
-                    }
-                )
-            }
-            // ② 恢复（最左/上层）：左缘随卡片圆角，右缘压在删除块上收圆弧
-            SwipeActionLayer(Modifier.matchParentSize(), inset = SwipeActionBlockWidth) {
-                SwipeActionBlock(
-                    width = SwipeActionBlockWidth + SwipeActionJunctionRadius,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    icon = Icons.Default.Restore,
-                    label = stringResource(R.string.archived_restore),
-                    enabled = offset < -revealWidthPx * 0.35f,
-                    shape = RoundedCornerShape(
-                        topStart = MaterialTheme.shapes.medium.topStart,
-                        bottomStart = MaterialTheme.shapes.medium.bottomStart,
-                        topEnd = CornerSize(SwipeActionJunctionRadius),
-                        bottomEnd = CornerSize(SwipeActionJunctionRadius)
-                    ),
-                    onClick = {
-                        offset = 0f
-                        scope.launch { onRestore() }
-                    }
-                )
-            }
+            SwipeActionBlock(
+                width = SwipeActionBlockWidth,
+                shape = swipeActionTileShape(),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                icon = Icons.Default.Restore,
+                label = stringResource(R.string.archived_restore),
+                // 滑开前点不到（被卡片挡住），显式收紧与另两处一致
+                enabled = offset < -revealWidthPx * 0.35f,
+                onClick = {
+                    offset = 0f
+                    scope.launch { onRestore() }
+                }
+            )
+            SwipeActionBlock(
+                width = SwipeActionBlockWidth,
+                shape = swipeActionTileShape(),
+                color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                icon = Icons.Default.Delete,
+                label = stringResource(R.string.archived_delete),
+                enabled = offset < -revealWidthPx * 0.35f,
+                onClick = {
+                    offset = 0f
+                    scope.launch { onDelete() }
+                }
+            )
         }
         Box(
             modifier = Modifier
                 .offset { IntOffset(offset.roundToInt(), 0) }
                 .pointerInput(revealWidthPx) {
                     detectHorizontalDragGestures(
+                        onDragStart = {
+                            dragging = true
+                            // 起手就收回别的行（互斥）：登记权留给滑到位的自己
+                            if (coordinator.revealedId != myId) coordinator.revealedId = null
+                        },
                         onDragEnd = {
-                            offset = if (offset < -revealWidthPx * 0.35f) -revealWidthPx else 0f
+                            dragging = false
+                            val opened = offset < -revealWidthPx * 0.35f
+                            offset = if (opened) -revealWidthPx else 0f
+                            coordinator.revealedId = if (opened) myId else null
+                        },
+                        onDragCancel = {
+                            dragging = false
+                            coordinator.revealedId = null
                         },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()

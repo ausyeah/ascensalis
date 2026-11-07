@@ -433,11 +433,20 @@ class RecognitionEngine(
         settings: SettingsSnapshot
     ): String {
         taskRepository.setStage(taskId, "上传照片…", System.currentTimeMillis())
+        // v0.0.132（全流程自测抓到的真 bug）：OCR 渠道卡保存的 Key 存在
+        // ocr_profiles_json 里，本方法却只读旧字段 settings.mineruKey——
+        // 用户在设置里配好渠道，拍题识别照样报「请先到设置填写 API Key」。
+        // 与 OcrEngine.forSettings 同语义：激活的 MinerU 渠道 Key 优先，
+        // 为空回退旧字段（兼容只写过存量字段的用户）。
+        val mineruKey = settings.activeOcrProfile
+            ?.takeIf { it.type == com.mistakebook.data.prefs.OcrType.MINERU }
+            ?.apiKey?.trim()?.ifBlank { null }
+            ?: settings.mineruKey
         val result = mineruClient.recognize(
             taskId = taskId,
             file = file,
             fileName = file.name,
-            mineruKey = settings.mineruKey,
+            mineruKey = mineruKey,
             modelVersion = settings.mineruModelVersion,
             language = settings.ocrLanguage,
             forceOcr = settings.forceOcr,

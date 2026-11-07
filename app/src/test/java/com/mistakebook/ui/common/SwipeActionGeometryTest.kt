@@ -1,5 +1,6 @@
 package com.mistakebook.ui.common
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -39,8 +40,8 @@ class SwipeActionGeometryTest {
             body.contains(".matchParentSize()")
         )
         assertTrue(
-            "色块靠右排列，去掉 align(CenterEnd) 后必须用 Arrangement.End",
-            body.contains("horizontalArrangement = Arrangement.End")
+            "色块靠右排列（v0.0.132 拼贴：End 写进 spacedBy 参数）",
+            body.contains("Arrangement.spacedBy(SwipeActionGap, Alignment.End)")
         )
     }
 
@@ -60,114 +61,97 @@ class SwipeActionGeometryTest {
     }
 
     /**
-     * v0.0.121 圆润化（用户：「蓝色左边缘没有做圆润化处理，红蓝连接的
-     * 方式也没有做圆润化处理」）：蓝块左缘随卡片圆角，右缘以衔接圆弧
-     * 压在向左多铺一段的红块上——交界处是弧线不是直线。
+     * v0.0.132 完整图形拼贴（用户给设计图：「）（这样的两个都是完整
+     * 图形的拼贴」，并明确「ui重叠」不可接受）：叠画画法整体废弃——
+     * 每块是**四角全圆的独立图形**，并排留 [SwipeActionGap] 细缝，
+     * 交界的圆是每块自己的轮廓。
      */
     @Test
-    fun `首页红蓝双块圆润过渡`() {
+    fun `三处左滑都是独立完整图形的拼贴`() {
         val swipeReveal = readSource("src/main/java/com/mistakebook/ui/common/SwipeReveal.kt")
-        assertTrue(
-            "公共块必须支持 shape（默认直角，圆润页自己传）",
-            swipeReveal.contains("shape: Shape = RectangleShape")
-        )
-        val body = home.substringAfter("private fun SwipeableQuestionCard(")
-            .substringBefore("private val SwipeDeleteRevealWidth")
-
-        assertTrue(
-            "蓝块必须带 RoundedCornerShape（左缘随卡片、右缘压红）",
-            body.contains("shape = RoundedCornerShape(")
-        )
-        assertTrue(
-            "红块必须向左多铺衔接带（SwipeActionBlockWidth + SwipeActionJunctionRadius），否则蓝块圆角下漏缝",
-            body.contains("width = SwipeActionBlockWidth + SwipeActionJunctionRadius")
-        )
-        assertTrue(
-            "红块先画、蓝块后画（Box 子级顺序），蓝块圆弧才压得住红",
-            body.indexOf("color = MaterialTheme.colorScheme.errorContainer") <
-                body.indexOf("color = MaterialTheme.colorScheme.primaryContainer")
-        )
-    }
-
-    /**
-     * v0.0.131（用户看已归档会话页截图：「恢复这个左边的蓝色左边没有
-     * 倒角啊看着怪别扭的」）：归档页两块也从 Row 并排改成叠画——
-     * 恢复块左缘取卡片圆角、右缘以衔接圆弧压在删除块上。三处左滑
-     * （错题卡 / 对话历史 / 归档页）到此共用同一套画法与形状。
-     */
-    @Test
-    fun `归档页双块叠画且恢复块左缘随卡片圆角`() {
-        val body = archived.substringAfter("private fun ArchiveSwipeRow(")
-
-        assertTrue(
-            "归档页必须用共享的叠画层（与对话历史同一画法）",
-            body.contains("SwipeActionLayer(Modifier.matchParentSize()")
-        )
-        assertTrue(
-            "删除块必须向左多铺衔接带，恢复块的圆弧才压得住",
-            body.contains("width = SwipeActionBlockWidth + SwipeActionJunctionRadius")
-        )
-        assertTrue(
-            "恢复块必须带形状：左缘随卡片圆角、右缘衔接圆弧",
-            body.contains(
-                "topStart = MaterialTheme.shapes.medium.topStart"
-            ) && body.contains("topEnd = CornerSize(SwipeActionJunctionRadius)")
-        )
-        assertTrue(
-            "删除块先画、恢复块后画（Box 子级顺序），恢复块圆弧才压得住删除块",
-            body.indexOf("R.string.archived_delete") <
-                body.indexOf("R.string.archived_restore")
-        )
-    }
-
-    @Test
-    fun `叠画层与衔接形状只此一份——三处共用不各抄`() {
-        val swipeReveal = readSource("src/main/java/com/mistakebook/ui/common/SwipeReveal.kt")
-        val chatHistory = chatHistory()
+        val chat = chatHistory()
+        val archived = readSource("src/main/java/com/mistakebook/ui/settings/ArchivedItemsScreen.kt")
         val home = home()
 
         assertTrue(
-            "SwipeReveal 必须提供共享叠画层 SwipeActionLayer",
-            swipeReveal.contains("internal fun SwipeActionLayer(")
+            "统一形状必须是四角全圆的 tile",
+            swipeReveal.contains("internal fun swipeActionTileShape()") &&
+                swipeReveal.contains("topStart = CornerSize(SwipeActionJunctionRadius)") &&
+                swipeReveal.contains("bottomEnd = CornerSize(SwipeActionJunctionRadius)")
         )
         assertTrue(
-            "SwipeReveal 必须提供共享衔接形状 swipeActionJunctionShape",
-            swipeReveal.contains("internal fun swipeActionJunctionShape()")
+            "块间必须有细缝常量",
+            swipeReveal.contains("val SwipeActionGap: Dp = 0.dp")
+        )
+        data class TileCase(val name: String, val src: String, val minTiles: Int)
+        listOf(
+            TileCase("对话历史", chat, 3),
+            TileCase("归档页", archived, 2),
+            TileCase("首页错题卡", home, 2)
+        ).forEach { case ->
+            assertTrue(
+                "${case.name} 必须用 tile 形状（×${case.minTiles}）",
+                case.src.split("shape = swipeActionTileShape()").size - 1 >= case.minTiles
+            )
+            assertFalse(
+                "${case.name} 不许再出现叠画层",
+                case.src.contains("SwipeActionLayer(")
+            )
+            assertFalse(
+                "${case.name} 不许再有方角补弧的中间块",
+                case.src.contains("swipeActionJunctionShape")
+            )
+        }
+        assertTrue(
+            "对话历史露出宽度 = 三块 + 两道缝",
+            chat.contains("SwipeActionRevealWidth + SwipeActionGap * 2")
         )
         assertTrue(
-            "对话历史必须改用共享叠画层，不许留私有副本",
-            chatHistory.contains("SwipeActionLayer(Modifier.matchParentSize()") &&
-                !chatHistory.contains("private fun ActionLayer(")
+            "归档页露出宽度 = 两块 + 一道缝",
+            archived.contains("SwipeActionBlockWidth * 2 + SwipeActionGap")
         )
         assertTrue(
-            "对话历史必须改用共享衔接形状",
-            chatHistory.contains("shape = swipeActionJunctionShape()") &&
-                !chatHistory.contains("private fun junctionShape(")
+            "首页露出宽度 = 两块 + 一道缝",
+            home.contains("SwipeDeleteRevealWidth + SwipeActionGap")
         )
     }
 
     /**
-     * v0.0.131 二轮（用户看对话历史截图：「中间不要留空隙，不能够有
-     * 不圆润的边角」）：中间块四角全收弧时，左缘弧与上层块右缘弧
-     * 「弧对弧」双双缺料，交界露出父容器底色月牙。中间块必须
-     * **左缘直角**（方角填满上层弧的缺口）、右缘收弧（自己成为
-     * 下一条交界弧线）——每条交界恰好一条弧线，零缝隙。
+     * v0.0.132 互斥与自动收回（用户：「焦点在他上面的时候可以展开，
+     * 同时不能展开两个，切换其他页面要自动收回防止误触」）：
+     * 三处左滑共用 SwipeRevealCoordinator——某行滑开登记自己，别的行
+     * 监听到「不是自己」自动收回；页面/抽屉关闭时协调器随 composition
+     * 销毁，回到页面不残留展开行。
      */
     @Test
-    fun `中间块左直角右弧——弧对弧露底色的缝隙必须消失`() {
+    fun `三处左滑接入互斥协调器`() {
         val swipeReveal = readSource("src/main/java/com/mistakebook/ui/common/SwipeReveal.kt")
-        val body = swipeReveal
-            .substringAfter("internal fun swipeActionJunctionShape()")
-            .take(400)
+        val chat = chatHistory()
+        val archived = readSource("src/main/java/com/mistakebook/ui/settings/ArchivedItemsScreen.kt")
+        val home = home()
+
         assertTrue(
-            "中间块左缘必须直角（topStart/bottomStart = 0），方角才能补住上层弧缺口",
-            body.contains("topStart = CornerSize(0.dp)") &&
-                body.contains("bottomStart = CornerSize(0.dp)")
+            "协调器必须是共享组件",
+            swipeReveal.contains("class SwipeRevealCoordinator")
         )
         assertTrue(
-            "中间块右缘必须收衔接弧，作为与底层块的交界弧线",
-            body.contains("topEnd = CornerSize(SwipeActionJunctionRadius)") &&
-                body.contains("bottomEnd = CornerSize(SwipeActionJunctionRadius)")
+            "对话历史必须接入协调器（行签名 + 起手收别行 + 滑开登记）",
+            chat.contains("coordinator: SwipeRevealCoordinator") &&
+                chat.contains("if (coordinator.revealedId != myId) coordinator.revealedId = null") &&
+                chat.contains("coordinator.revealedId = if (opened) myId else null")
+        )
+        assertTrue(
+            "错题卡必须接入协调器",
+            home.contains("coordinator: SwipeRevealCoordinator") &&
+                home.contains("coordinator.revealedId = if (opened) myId else null")
+        )
+        assertTrue(
+            "归档页必须接入协调器（题目/会话/任务三个列表都要传）",
+            archived.split("coordinator = swipeCoordinator").size - 1 >= 3
+        )
+        assertTrue(
+            "互斥收回必须放过拖动中的行（只在「已开」时响应）",
+            chat.contains("if (revealed && coordinator.revealedId != myId)")
         )
     }
 
