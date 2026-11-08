@@ -307,7 +307,9 @@ fun MistakeBookNavHost(
             com.mistakebook.ui.settings.ArchivedItemsScreen(
                 container = container,
                 kind = com.mistakebook.ui.settings.ArchivedKind.QUESTIONS,
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                // 点归档题目 → 详情（v0.0.141：看不见内容就没法决定恢复还是删）
+                onOpenQuestion = { id -> navController.navigate(Routes.detail(id)) }
             )
         }
 
@@ -315,7 +317,12 @@ fun MistakeBookNavHost(
             com.mistakebook.ui.settings.ArchivedItemsScreen(
                 container = container,
                 kind = com.mistakebook.ui.settings.ArchivedKind.SESSIONS,
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                // 点归档会话 → 对话页（v0.0.141）。只查看不解档：
+                // 往归档会话发消息时 insertUserMessage 会自动解除归档。
+                onOpenSession = { sessionId, questionId ->
+                    navController.navigate(Routes.chat(questionId, sessionId))
+                }
             )
         }
 

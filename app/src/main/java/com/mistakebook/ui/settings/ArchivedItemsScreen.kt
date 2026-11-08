@@ -105,7 +105,15 @@ enum class ArchivedKind { QUESTIONS, SESSIONS, POMODORO_TASKS }
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ArchivedItemsScreen(container: AppContainer, kind: ArchivedKind, onBack: () -> Unit) {
+fun ArchivedItemsScreen(
+    container: AppContainer,
+    kind: ArchivedKind,
+    onBack: () -> Unit,
+    /** 点归档题目 → 题目详情（v0.0.141）。 */
+    onOpenQuestion: (Long) -> Unit = {},
+    /** 点归档会话 → 对话页（v0.0.141；只查看不解档，发消息时自动解档）。 */
+    onOpenSession: (Long, Long?) -> Unit = { _, _ -> }
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -132,15 +140,15 @@ fun ArchivedItemsScreen(container: AppContainer, kind: ArchivedKind, onBack: () 
         }
     ) { padding ->
         when (kind) {
-            ArchivedKind.QUESTIONS -> ArchivedQuestionsList(container, padding)
-            ArchivedKind.SESSIONS -> ArchivedSessionsList(container, padding)
+            ArchivedKind.QUESTIONS -> ArchivedQuestionsList(container, padding, onOpenQuestion)
+            ArchivedKind.SESSIONS -> ArchivedSessionsList(container, padding, onOpenSession)
             ArchivedKind.POMODORO_TASKS -> ArchivedPomodoroTasksList(container, padding)
         }
     }
 }
 
 @Composable
-private fun ArchivedQuestionsList(container: AppContainer, padding: PaddingValues) {
+private fun ArchivedQuestionsList(container: AppContainer, padding: PaddingValues, onOpenQuestion: (Long) -> Unit) {
     var subjectId by remember { mutableStateOf<Long?>(null) }
     var status by remember { mutableStateOf<MasteryStatus?>(null) }
     var keyword by remember { mutableStateOf("") }
@@ -203,6 +211,7 @@ private fun ArchivedQuestionsList(container: AppContainer, padding: PaddingValue
                 ArchiveSwipeRow(
                     coordinator = swipeCoordinator,
                     myId = question.id,
+                    onClick = { onOpenQuestion(question.id) },
                     onRestore = {
                         scope.launch { container.questionRepository.unarchive(question.id) }
                     },
@@ -218,7 +227,7 @@ private fun ArchivedQuestionsList(container: AppContainer, padding: PaddingValue
 }
 
 @Composable
-private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues) {
+private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues, onOpenSession: (Long, Long?) -> Unit) {
     val scope = rememberCoroutineScope()
     val sessions by container.chatRepository.observeArchivedSessions()
         .collectAsState(initial = emptyList<com.mistakebook.data.local.entities.ChatSession>())
@@ -244,6 +253,7 @@ private fun ArchivedSessionsList(container: AppContainer, padding: PaddingValues
             ArchiveSwipeRow(
                 coordinator = swipeCoordinator,
                 myId = session.id,
+                onClick = { onOpenSession(session.id, session.questionId) },
                 onRestore = { scope.launch { container.chatRepository.unarchiveSession(session.id) } },
                 onDelete = { scope.launch { container.chatRepository.softDeleteSession(session.id) } }
             ) {
@@ -321,6 +331,9 @@ private fun ArchivedPomodoroTasksList(container: AppContainer, padding: PaddingV
             ArchiveSwipeRow(
                 coordinator = swipeCoordinator,
                 myId = task.id,
+                // 任务行没有详情页（名称与专注记录已直接显示在行上），
+                // 点击不跳转，但滑开状态下点行要能收回——交给行内收回逻辑。
+                onClick = {},
                 onRestore = { scope.launch { container.pomodoroDao.unarchiveTask(task.id) } },
                 onDelete = { pendingDelete = task }
             ) {
@@ -419,6 +432,10 @@ private fun QuestionArchiveCard(question: Question) {
 private fun ArchiveSwipeRow(
     coordinator: SwipeRevealCoordinator,
     myId: Any,
+    /** 点击行内容 = 打开查看（v0.0.141，用户：「已归档的题目和对话不能
+     * 查看，点击没反应，怎么知道是不是我想要恢复的或者删除的」）。
+     * 归档 ≠ 删除：看不见内容就没法决定恢复还是删。 */
+    onClick: () -> Unit,
     onRestore: () -> Unit,
     onDelete: () -> Unit,
     content: @Composable () -> Unit
@@ -491,6 +508,17 @@ private fun ArchiveSwipeRow(
         Box(
             modifier = Modifier
                 .offset { IntOffset(offset.roundToInt(), 0) }
+                // 点击打开查看（v0.0.141）；滑开状态下点行内容先收回
+                // （与对话历史同手感），所以 clickable 挂在 offset 之后、
+                // pointerInput 之前——手势消费过拖动后不会误触发点击。
+                .clickable {
+                    if (offset < 0f) {
+                        offset = 0f
+                        coordinator.revealedId = null
+                    } else {
+                        onClick()
+                    }
+                }
                 .pointerInput(revealWidthPx) {
                     detectHorizontalDragGestures(
                         onDragStart = {
