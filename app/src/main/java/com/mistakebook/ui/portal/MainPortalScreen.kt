@@ -26,6 +26,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import kotlinx.coroutines.Job
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,6 +92,16 @@ fun MainPortalScreen(
 ) {
     val pagerState = rememberPagerState(initialPage = 0) { 4 }
     val scope = rememberCoroutineScope()
+    // 单一滚动入口（v0.0.142 修「四个大页面滑动卡在一半」）：
+    // 原来 Tab 点击 / 返回键 / filterDueRequest 三处各自 launch
+    // animateScrollToPage，两个动画并发时后启动的会取消前一个，
+    // 被取消的动画把 pager 留在半页不动（用户看到「卡在一半的页面」）。
+    // 收敛成一个互斥 Job：新请求先取消旧的再启动，永远只有一个滚动在跑。
+    var scrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val scrollToPage: (Int) -> Unit = { page ->
+        scrollJob?.cancel()
+        scrollJob = scope.launch { pagerState.animateScrollToPage(page) }
+    }
     // 翻页过程中 currentPage 会连续变化，直接读它会让**整个顶栏逐帧重组**
     // （Tab 行 + 右侧图标）。用 derivedStateOf 收敛成「真正变了才发」。
     val currentPage = remember { derivedStateOf { pagerState.currentPage } }.value
@@ -96,14 +110,12 @@ fun MainPortalScreen(
     // 停在设置页（第 4 页）时同样先回首页——设置的所有修改都是即时生效的，
     // 不存在「没保存」状态，不需要二次确认。
     BackHandler(enabled = currentPage != 0) {
-        scope.launch {
-            pagerState.animateScrollToPage(0)
-        }
+        scrollToPage(0)
     }
 
     LaunchedEffect(filterDueRequest) {
         if (filterDueRequest > 0) {
-            pagerState.animateScrollToPage(0)
+            scrollToPage(0)
         }
     }
 
@@ -138,9 +150,7 @@ fun MainPortalScreen(
                     PortalTabRow(
                         selectedIndex = currentPage,
                         onSelectIndex = { index ->
-                            scope.launch {
-                                pagerState.animateScrollToPage(index)
-                            }
+                            scrollToPage(index)
                         },
                         modifier = Modifier.fillMaxWidth()
                     )
