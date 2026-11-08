@@ -143,7 +143,11 @@ class SwipeActionGeometryTest {
         assertTrue(
             "错题卡必须接入协调器（v0.0.132 双向滑：三态吸附登记）",
             home.contains("coordinator: SwipeRevealCoordinator") &&
-                home.contains("coordinator.revealedId = if (openedLeft || openedRight) myId else null")
+                // v0.0.142：三态落点抽成纯函数 resolveCardSwipeSettle，
+                // 登记改写它的结果——两层任一露出即登记，与旧口径等价
+                home.contains(
+                    "if (settle.revealActions || settle.revealImage) myId else null"
+                )
         )
         assertTrue(
             "归档页必须接入协调器（题目/会话/任务三个列表都要传）",

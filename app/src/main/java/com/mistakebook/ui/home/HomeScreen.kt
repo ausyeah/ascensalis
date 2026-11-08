@@ -28,6 +28,9 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
+// positionChange() 是扩展函数，必须显式导入：PointerInputChange 上有一个
+// 同名的 internal 成员（消费标记），不导入会解析到它而编译不过。
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -252,6 +255,8 @@ fun HomeScreen(
     val swipeCoordinator = remember { SwipeRevealCoordinator() }
     val scope = rememberCoroutineScope()
     var showAddSheet by remember { mutableStateOf(false) }
+    // 右滑题图 → 全屏看图（v0.0.142）
+    var previewImagePath by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState()
     val context = LocalContext.current
     var importing by remember { mutableStateOf(false) }
@@ -572,6 +577,7 @@ fun HomeScreen(
                             onReorder = ::updateQuestionDrag,
                             onReorderEnd = ::finishQuestionDrag,
                             onClick = { onOpenQuestion(question.id) },
+                            onPreviewImage = { path -> previewImagePath = path },
                             onPin = { viewModel.setPinned(question.id, !question.pinned) },
                             onDelete = {
                                 viewModel.archive(question)
@@ -594,6 +600,14 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    // 全屏看图：与对话/详情同一套（双指缩放、拖动、长按存图、点一下退出）
+    previewImagePath?.let { path ->
+        com.mistakebook.ui.common.FullScreenImageDialog(
+            imagePath = path,
+            onDismiss = { previewImagePath = null }
+        )
     }
 
     if (showAddSheet) {
@@ -833,13 +847,24 @@ private fun SwipeableQuestionCard(
     onReorderEnd: () -> Unit,
     onClick: () -> Unit,
     onPin: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    /** 点右滑露出的题图 → 全屏看图（v0.0.142）。 */
+    onPreviewImage: (String) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val revealWidthPx = with(density) { (SwipeDeleteRevealWidth + SwipeActionGap).toPx() }
 
-    val offsetX = remember { Animatable(0f) }
+    // v0.0.142：从 Animatable 换成普通 float 状态。
+    //
+    // 旧写法每个指针事件都 `scope.launch { offsetX.snapTo(...) }`——
+    // 协程调度不保证顺序，慢速微动时多次 snapTo 会乱序落地，
+    // 表现就是「拉住滑块慢慢动一直闪」；而且松手读 offsetX.value 可能
+    // 读到滞后的旧值，把「从预览态往回拖」的起点算成 0，于是拖多少都
+    // 判成「继续展开」——「拉不回来」的真因。
+    // 现在手势里**同步**赋值（非挂起调用，受限作用域允许），只有松手
+    // 时的吸附动画走协程，且用 animate() 单目标驱动。
+    var cardOffset by remember { mutableFloatStateOf(0f) }
     // 右滑露出题目图片的行程（v0.0.134 用户：「不够大，尽可能只留一点点
     // 滑块在外面」）：行程 = 整卡宽 - 24dp 残留边。列表横向 padding 12dp×2，
     // 所以卡宽 = screenWidth - 24dp；再留 24dp 卡身在外面，手指有落点。
@@ -847,10 +872,7 @@ private fun SwipeableQuestionCard(
     val screenWidthDp = config.screenWidthDp.dp
     val imageRevealWidth = (screenWidthDp - 48.dp).coerceAtLeast(220.dp)
     val imageRevealPx = with(density) { imageRevealWidth.toPx() }
-    // 预览态卡片高度（v0.0.135）：卡片内能用的高度就是列表行高，Fit 后图
-    // 必然小。右滑吸附到预览态时把卡片长高到屏高的 55%——图在露出的整块
-    // 区域里完整显示，用完收回，列表布局由 animateContentSize 平滑过渡。
-    val previewCardHeight = (config.screenHeightDp.dp * 0.55f).coerceAtLeast(320.dp)
+
     var previewing by remember { mutableStateOf(false) }
     // 「是否已划开」是**离散状态**，只在松手时翻转。
     //
@@ -859,11 +881,22 @@ private fun SwipeableQuestionCard(
     // 位移本身走 `Modifier.offset { }`（只跑布局阶段，不重组），这是正确写法。
     var revealed by remember { mutableStateOf(false) }
 
+    // 松手/收回的吸附动画：唯一一处协程驱动，目标单一，不会打架。
+    fun settleTo(target: Float) {
+        scope.launch {
+            androidx.compose.animation.core.animate(
+                initialValue = cardOffset,
+                targetValue = target,
+                animationSpec = SwipeRevealSpring
+            ) { value, _ -> cardOffset = value }
+        }
+    }
+
     fun close() {
         revealed = false
         previewing = false
         coordinator.revealedId = null
-        scope.launch { offsetX.animateTo(0f) }
+        settleTo(0f)
     }
 
     // 归档两步确认：4 秒无操作自动回落，不让「确认归档」悬着等人来点
@@ -881,17 +914,16 @@ private fun SwipeableQuestionCard(
             revealed = false
             previewing = false
             confirmingArchive = false
-            offsetX.animateTo(0f)
+            settleTo(0f)
         }
     }
 
     Box(
         modifier = modifier
-            // 预览态长高（v0.0.135）：右滑看图时卡片撑到 previewCardHeight，
-            // 图才有足够空间。高度切换放在 animateItem 之外的一层——
-            // （实测：不叠加 animateContentSize，否则与 animateItem 两层
-            //  SubcomposeLayout 抢手势，右滑会被内层点击判定吃掉。）
-            .then(if (previewing) Modifier.height(previewCardHeight) else Modifier)
+            // v0.0.142（用户：「条状右滑后仅在自己原来那个区域显示图片」）：
+            // 不再撑高卡片——图就铺在卡片原本的矩形里（右侧只留一条
+            // 窄边当拉手），高度变化会触发 LazyColumn 重排，也是手势
+            // 打架的来源之一。
             .clip(MaterialTheme.shapes.medium)
             // 底层背景由各操作块自己铺（置顶 primaryContainer、删除 errorContainer），
             // 外层保持透明——两块颜色不同，铺在同一层就分不开了。
@@ -923,7 +955,7 @@ private fun SwipeableQuestionCard(
                 // lambda 是 draw 阶段，不重组）：图标像被手指带出来，而不是
                 // 一开始就静止贴在底层、被卡片切成一半。
                 .graphicsLayer {
-                    val progress = swipeRevealProgress(offsetX.value, revealWidthPx)
+                    val progress = swipeRevealProgress(cardOffset, revealWidthPx)
                     alpha = swipeRevealContentAlpha(progress)
                 }
         ) {
@@ -938,11 +970,16 @@ private fun SwipeableQuestionCard(
                     .width(imageRevealWidth)
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
                     .graphicsLayer {
-                        val progress = if (offsetX.value >= 0f) {
-                            swipeRevealProgress(offsetX.value, imageRevealPx)
+                        val progress = if (cardOffset >= 0f) {
+                            swipeRevealProgress(cardOffset, imageRevealPx)
                         } else 0f
                         alpha = swipeRevealContentAlpha(progress)
                     }
+                    // 点图看大图（v0.0.142 用户：「单击放大这个图片全屏看，
+                    // 跟对话图片一样，点一下退出，可以放大」）——复用
+                    // FullScreenImageDialog（双指缩放/拖动/长按存图/点一下退出）。
+                    // 只在预览态可点：收起时本层被卡片盖住，无需抢触摸。
+                    .clickable(enabled = previewing) { onPreviewImage(question.printImagePath) }
             ) {
                 if (com.mistakebook.util.CoverFallback.isLikelyImage(question.printImagePath)) {
                     AsyncImage(
@@ -973,8 +1010,8 @@ private fun SwipeableQuestionCard(
                 modifier = Modifier
                     .matchParentSize()
                     .graphicsLayer {
-                        val progress = if (offsetX.value <= 0f) {
-                            swipeRevealProgress(offsetX.value, revealWidthPx)
+                        val progress = if (cardOffset <= 0f) {
+                            swipeRevealProgress(cardOffset, revealWidthPx)
                         } else 0f
                         alpha = swipeRevealContentAlpha(progress)
                     },
@@ -1037,20 +1074,22 @@ private fun SwipeableQuestionCard(
         // 或卡片以外的空白处起手。
         Box(
             modifier = Modifier
-                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                .offset { IntOffset(cardOffset.roundToInt(), 0) }
                 .pointerInput(revealWidthPx) {
                     awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        var lastX = down.position.x
-                        var lastY = down.position.y
+                        awaitFirstDown(requireUnconsumed = false)
                         var accX = 0f
                         var accY = 0f
                         var claimed = false
                         val slop = viewConfiguration.touchSlop
-                        // 本手势累计到的位移。snapTo 经 scope.launch 异步落盘，
-                        // 松手判定不能读 offsetX.value（可能还是上一帧的旧值），
-                        // 用本地累计值才能准确决定「吸附展开 / 回弹归零」。
-                        var curOffset = offsetX.value
+                        // 手势起始位移（v0.0.142）：松手判定必须相对**起点**
+                        // 而不是相对 0——预览态 offset 已是满程，用绝对阈值
+                        // 的话往回拖大半程仍判「开」，永远拉不回来。
+                        val startOffset = cardOffset
+                        // 本手势累计到的位移：松手判定用本地累计值，不读
+                        // cardOffset（吸附动画可能正在改写它）。
+                        var curOffset = cardOffset
+                        val rightOpenSlopPx = with(density) { 80.dp.toPx() }
 
                         try {
                             while (true) {
@@ -1058,14 +1097,26 @@ private fun SwipeableQuestionCard(
                                 val pressed = event.changes.filter { it.pressed }
                                 if (pressed.isEmpty()) break
 
-                                // 列表滚动已接手：立即让位
+                                // 列表滚动 / 门户 Pager 已接手：立即让位
                                 if (event.changes.any { it.isConsumed }) break
 
                                 val change = pressed.first()
-                                val dx = change.position.x - lastX
-                                val dy = change.position.y - lastY
-                                lastX = change.position.x
-                                lastY = change.position.y
+                                // **必须用 positionChange()，不能手工算
+                                // position - lastX**（v0.0.142 修「拉住滑块
+                                // 慢慢动一直闪」与「拖到底也拉不回来」的真因）。
+                                //
+                                // 本节点自己正被 Modifier.offset 位移，而
+                                // change.position 是**节点本地**坐标：卡片每
+                                // 往右挪一帧，下一帧读到的本地位移就被扣掉
+                                // 同等量，形成反馈回路。实测一次 800px 的手工
+                                // 累加只走出 379.8px，且相邻事件正负交替
+                                // （+44.8 / −18.6 / +48.6 / −21.8 …）——位移
+                                // 来回抖就是「闪烁」，净行程只剩一半就是
+                                // 「拉不回来」。
+                                // positionChange() 由框架把前后两点放在
+                                // **同一帧的变换**下相减，天然不含节点自身位移。
+                                val dx = change.positionChange().x
+                                val dy = change.positionChange().y
                                 accX += dx
                                 accY += dy
 
@@ -1089,33 +1140,34 @@ private fun SwipeableQuestionCard(
                                     // 不允许直接调（编译错误）——与旧 rememberDraggableState
                                     // 一致，经外层 scope.launch 落盘，帧内顺序由互斥锁保证。
                                     curOffset = (curOffset + dx).coerceIn(-revealWidthPx, imageRevealPx)
-                                    scope.launch { offsetX.snapTo(curOffset) }
+                                    // 同步赋值：跟手且不会乱序（旧写法每次 launch 一个
+                                    // snapTo，慢速微动时闪烁的来源）
+                                    cardOffset = curOffset
                                 }
                             }
                         } finally {
                             if (claimed) {
-                                // 三态吸附（v0.0.132）：左滑过 35% 阈值 → 操作块；
-                                // 右滑过 35% 阈值 → 题目图片预览；否则归零。
-                                // 阈值取半程而不是四分之一：滑一半以上才算明确意图，
-                                // 杜绝「一次滑动连跳两级直接到归档/删除」的误触。
-                                val openedLeft = curOffset < -revealWidthPx * 0.5f
-                                // 右滑阈值 80dp（v0.0.135 实测下调）：行程接近整屏后
-                                // 按半程算要滑过大半屏太累；80dp 轻推即吸附。
-                                val openedRight = curOffset > with(density) { 80.dp.toPx() }
-                                revealed = openedLeft
-                                previewing = openedRight
-                                coordinator.revealedId = if (openedLeft || openedRight) myId else null
-                                val target = when {
-                                    openedLeft -> -revealWidthPx
-                                    openedRight -> imageRevealPx
-                                    else -> 0f
-                                }
-                                scope.launch {
-                                    offsetX.animateTo(
-                                        targetValue = target,
-                                        animationSpec = SwipeRevealSpring
-                                    )
-                                }
+                                // 三态吸附，阈值**相对手势起点**（v0.0.142 修
+                                // 「拉不回来」）：
+                                // - 从 0 起手：左滑过半程 → 操作块；右滑过 80dp
+                                //   （轻推即看图）→ 预览；
+                                // - 从预览态起手（startOffset>0）：往回拖过预览
+                                //   行程的一半才收，否则保持预览——绝对阈值下
+                                //   往回拖多少都判「开」，就是拉不回来的根因；
+                                // - 从展开态起手（startOffset<0）：往回拖过操作
+                                //   区一半才收，否则保持展开（与左滑原逻辑同构）。
+                                val settle = resolveCardSwipeSettle(
+                                    startOffset = startOffset,
+                                    curOffset = curOffset,
+                                    revealWidthPx = revealWidthPx,
+                                    imageRevealPx = imageRevealPx,
+                                    rightOpenSlopPx = rightOpenSlopPx
+                                )
+                                revealed = settle.revealActions
+                                previewing = settle.revealImage
+                                coordinator.revealedId =
+                                    if (settle.revealActions || settle.revealImage) myId else null
+                                settleTo(settle.target)
                             }
                         }
                     }
@@ -1130,7 +1182,9 @@ private fun SwipeableQuestionCard(
                 onReorder = onReorder,
                 onReorderEnd = onReorderEnd,
                 onClick = {
-                    if (revealed) close() else onClick()
+                    // 预览态点卡片（右侧那条窄拉手就在卡片上）= 收回，
+                    // 而不是进详情——「拉不回来」的另一半根因（v0.0.142）。
+                    if (revealed || previewing) close() else onClick()
                 }
             )
         }
@@ -1291,5 +1345,45 @@ private val SwipeImageRevealWidth = 260.dp
  */
 internal fun shouldClaimCardSwipe(accX: Float, accY: Float): Boolean {
     return abs(accX) > abs(accY)
+}
+
+/**
+ * 松手后的落点判定（纯函数，单测见 HomeScreenSwipeClaimTest）。
+ *
+ * 阈值**相对手势起点**，这是「拉不回来」的正解：预览态下起点已是满程
+ * [imageRevealPx]，若拿绝对阈值判「curOffset 还大于半程」，往回拖多少
+ * 都算「继续展开」——手指松开就弹回去。
+ *
+ * - 左滑过半程 → 操作块（-revealWidthPx）；
+ * - 从 0 起手右滑过 80dp → 看题图（轻推即预览）；
+ * - 从预览态起手（startOffset > 0）→ 往回拖过预览行程一半才收。
+ *
+ * [revealActions] 与 [revealImage] 互斥：同一个 offset 不可能既负又
+ * 大于 80dp，所以不会出现两层同时点亮。
+ */
+internal data class CardSwipeSettle(
+    val revealActions: Boolean,
+    val revealImage: Boolean,
+    val target: Float
+)
+
+internal fun resolveCardSwipeSettle(
+    startOffset: Float,
+    curOffset: Float,
+    revealWidthPx: Float,
+    imageRevealPx: Float,
+    rightOpenSlopPx: Float
+): CardSwipeSettle {
+    val revealActions = curOffset < -revealWidthPx * 0.5f
+    val revealImage = when {
+        startOffset > 0f -> curOffset > imageRevealPx * 0.5f
+        else -> curOffset > rightOpenSlopPx
+    }
+    val target = when {
+        revealActions -> -revealWidthPx
+        revealImage -> imageRevealPx
+        else -> 0f
+    }
+    return CardSwipeSettle(revealActions, revealImage, target)
 }
 

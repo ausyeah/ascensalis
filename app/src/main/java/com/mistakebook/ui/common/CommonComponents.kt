@@ -277,6 +277,10 @@ fun FullScreenImageDialog(
             ZoomableImage(
                 imagePath = imagePath,
                 contentDescription = contentDescription,
+                // v0.0.142（用户：「点一下退出」）：全屏看图统一支持单击关闭——
+                // 缩放/拖动仍然可用（gestures 只有在真的产生位移时才消费），
+                // 单击是「看完了」的自然手势。
+                onTap = onDismiss,
                 modifier = Modifier.fillMaxSize()
             )
             IconButton(
@@ -376,7 +380,9 @@ internal fun saveToGallery(context: android.content.Context, imagePath: String):
 private fun ZoomableImage(
     imagePath: String,
     contentDescription: String?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 单击回调（v0.0.142）：全屏看图里用来「点一下退出」。 */
+    onTap: (() -> Unit)? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     // 不能用 rememberSaveable：Offset 不可被 Saver 序列化，会在配置变更时崩溃
@@ -393,6 +399,7 @@ private fun ZoomableImage(
             // 长按 = 保存到相册（v0.0.114 用户指定）
             .pointerInput(imagePath) {
                 detectTapGestures(
+                    onTap = { onTap?.invoke() },
                     onLongPress = {
                         android.widget.Toast.makeText(
                             context,
