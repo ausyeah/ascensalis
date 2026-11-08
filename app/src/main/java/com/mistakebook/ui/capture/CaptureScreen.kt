@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
@@ -461,6 +462,15 @@ fun CaptureScreen(
                 )
             }
 
+            // 张数胶囊（v0.0.134 用户：「张数放在顶端，扁平胶囊样式；右上角
+            // 遮挡了 UI」）：从取景器右上角的圆徽章移到顶栏居中——既不遮挡
+            // 取景内容，风格也与底部提示胶囊同一套扁平语言。空批不显示。
+            if (batchActive) {
+                // 顶栏 Row 已 verticalAlignment = CenterVertically，这里不再
+                // 额外 align——竖向流的布局契约禁止在流式容器里用重叠定位。
+                CaptureCountPill(text = countText)
+            }
+
             Row(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -544,30 +554,24 @@ fun CaptureScreen(
                 // 拍成瞬间的白边高亮：先在整张卡片上压一层白 + 描白边，
                 // 再迅速淡出。这一步的意义是「照片真的拿到了」，
                 // 与后面的飞行是两件事——飞行是「它去哪了」。
-                val flashAlpha = captureFlash.value
-                if (flashAlpha > 0f) {
+                //
+                // v0.0.134（用户：「拍照动画非常不流畅」）：白闪此前在
+                // **组合期**读 captureFlash.value——每帧重组整个取景器
+                // 子树。现在 alpha 挪进 graphicsLayer（绘制期读，零重组），
+                // 层内白底/白边的透明度固定为终值、由层 alpha 统一缩放。
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = captureFlash.value }
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.White.copy(alpha = flashAlpha * 0.55f))
-                            .border(
-                                width = 3.dp,
-                                color = Color.White.copy(alpha = flashAlpha),
-                                shape = RoundedCornerShape(24.dp)
-                            )
+                            .background(Color.White.copy(alpha = 0.55f))
+                            .border(width = 3.dp, color = Color.White, shape = RoundedCornerShape(24.dp))
                     )
                 }
 
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.TopEnd
-                ) {
-                    CaptureCountBadge(
-                        count = batchSize,
-                        description = countText,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                }
             }
         } else {
             // 没权限时占同一个格子：卡片多大这块就多大，底部操作区位置不变。
@@ -850,45 +854,66 @@ private val CaptureScrim = Color(0xFF14151A)
 private val ViewfinderBorder = Color.White.copy(alpha = 0.08f)
 
 /**
- * 取景器四角的 L 形角标。
+ * 取景器四角的角标（v0.0.134 用户：「四个角太粗糙了不圆润没有美感」）。
+ *
+ * 旧版是直角 L 形线段——与 24dp 圆角卡片的轮廓对不上，角标「切」在
+ * 圆角外面，看着粗糙。现在改画**与卡片圆角同曲率的一段 90° 圆弧**
+ * （半径 = 卡片圆角 24dp - 内缩 4dp， Stroke 圆帽），角标与卡片轮廓
+ * 是同一条曲线的高亮版，视觉上贴合圆润。
  *
  * 圆角卡片 + 九宫格已经够了，再补角标是因为「框」的边界感对拍照很重要：
  * 用户要知道题目的哪一侧会被切出去。角标比四周边框更克制——
- * 只有四个角有线，中间干干净净，不会和九宫格抢注意力。
+ * 只有四个角有弧，中间干干净净，不会和九宫格抢注意力。
  */
 @Composable
 private fun ViewfinderCorners(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
-        val arm = size.minDimension * 0.09f
-        val thickness = arm * 0.18f
-        val inset = size.minDimension * 0.04f
+        // 半径/内缩与卡片 24dp 圆角同曲率：弧心距边缘 3dp，弧线贴着卡片
+        // 轮廓内侧走，看起来是同一条曲线的高亮，而不是另画一个框。
+        val radius = 21.dp.toPx()
+        val inset = 3.dp.toPx()
+        val stroke = 2.5.dp.toPx()
         val color = Color.White.copy(alpha = 0.85f)
         val w = size.width
         val h = size.height
-        val corners = listOf(
-            Triple(inset, inset, true),           // 左上：向右、向下
-            Triple(w - inset, inset, false),      // 右上：向左、向下
-            Triple(inset, h - inset, true),       // 左下：向右、向上
-            Triple(w - inset, h - inset, false)   // 右下：向左、向上
+        // 四段 90° 圆弧：每段以「角圆心」为中心（内缩 radius），只画
+        // 靠外的 90° 扇区，strokeCap 圆帽让弧的两端自然收细。
+        val cx = listOf(inset + radius, w - inset - radius)
+        val cy = listOf(inset + radius, h - inset - radius)
+        // 左上 / 右上 / 左下 / 右下的起始角（度）：0 = 右，90 = 下
+        val arcs = listOf(
+            Quadrant(cx[0], cy[0], 180f),
+            Quadrant(cx[1], cy[0], 270f),
+            Quadrant(cx[0], cy[1], 90f),
+            Quadrant(cx[1], cy[1], 0f)
         )
-        corners.forEach { (x, y, openRight) ->
-            val dirX = if (openRight) 1f else -1f
-            val dirY = if (y < h / 2f) 1f else -1f
-            drawLine(
-                color = color,
-                start = androidx.compose.ui.geometry.Offset(x, y),
-                end = androidx.compose.ui.geometry.Offset(x + dirX * arm, y),
-                strokeWidth = thickness
+        // 双描边（v0.0.134 实机发现）：纯白角标在白纸/白墙的取景内容上
+        // 完全看不见。先画一圈深色垫底、再叠白色细弧——任何背景上都可辨，
+        // 也不像加粗的单色弧那样抢眼。
+        arcs.forEach { q ->
+            drawArc(
+                color = Color.Black.copy(alpha = 0.18f),
+                startAngle = q.start,
+                sweepAngle = 90f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(q.x - radius, q.y - radius),
+                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                style = Stroke(width = stroke * 1.9f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
             )
-            drawLine(
+            drawArc(
                 color = color,
-                start = androidx.compose.ui.geometry.Offset(x, y),
-                end = androidx.compose.ui.geometry.Offset(x, y + dirY * arm),
-                strokeWidth = thickness
+                startAngle = q.start,
+                sweepAngle = 90f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(q.x - radius, q.y - radius),
+                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                style = Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
             )
         }
     }
 }
+
+private data class Quadrant(val x: Float, val y: Float, val start: Float)
 
 /**
  * 居中的半透明提示胶囊（错误 / 相册导入中）。

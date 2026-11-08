@@ -161,13 +161,18 @@ internal data class CaptureFlight(val path: String, val bitmap: ImageBitmap)
  * 没有任何信息量，读「本批 3 张」才知道是什么。
  */
 @Composable
-internal fun CaptureCountBadge(
-    count: Int,
-    description: String,
+/**
+ * 批次张数胶囊（v0.0.134 用户：「张数放在顶端，扁平胶囊样式」）：
+ * 从取景器右上角的 30dp 白色圆徽章改为**扁平胶囊**——黑 42% 底 + 白字，
+ * 与闪光/翻转的磨砂圆钮同一底色语言，但无描边、直排文本（「本批 N 张」）。
+ * 数字变化的弹跳保留（graphicsLayer scale，绘制期读，不重组）。
+ */
+internal fun CaptureCountPill(
+    text: String,
     modifier: Modifier = Modifier
 ) {
-    if (count <= 0) return
     val pop = remember { Animatable(1f) }
+    val count = text.filter(Char::isDigit).toIntOrNull() ?: 0
     LaunchedEffect(count) {
         // 从 0.7 弹回 1：数字变了要有一眼可见的「又进一张」，
         // 但幅度不能大到像报错——所以只压 30% 再用弹簧回位。
@@ -180,16 +185,16 @@ internal fun CaptureCountBadge(
                 scaleX = pop.value
                 scaleY = pop.value
             }
-            .size(30.dp)
-            .clip(CircleShape)
-            .background(Color.White)
-            .border(1.dp, Color.Black.copy(alpha = 0.08f), CircleShape)
-            .clearAndSetSemantics { contentDescription = description },
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.Black.copy(alpha = 0.42f))
+            .border(0.5.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .clearAndSetSemantics { contentDescription = text },
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = count.toString(),
-            color = Color(0xFF14151A),
+            text = text,
+            color = Color.White,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.labelLarge
         )
@@ -303,23 +308,27 @@ internal fun CaptureFlightOverlay(
         progress.animateTo(1f, tween(durationMillis = 430, easing = FastOutSlowInEasing))
         landed()
     }
-    val rect = flightRect(from, to, progress.value)
-    val corner = flightCornerDp(progress.value)
-    val density = LocalDensity.current
+    // v0.0.134（用户：「拍照动画非常不流畅」）：rect 插值此前在**组合期**
+    // 算——每帧重测重绘整层。现在全部挪进 graphicsLayer（绘制期）：
+    // 固定基准尺寸 = 起始取景器矩形，平移用 translation、尺寸变化用
+    // scaleX/scaleY（transformOrigin 钉在左上，缩放方向与插值一致）。
+    // 430ms 的动画从 ~26 次重组降到 0 次。
+    val baseW = from.width
+    val baseH = from.height
     Box(
         modifier = Modifier
-            .offset {
-                IntOffset(
-                    (rect.left - rootOrigin.x).roundToInt(),
-                    (rect.top - rootOrigin.y).roundToInt()
-                )
+            .graphicsLayer {
+                val rect = flightRect(from, to, progress.value)
+                translationX = rect.left - rootOrigin.x
+                translationY = rect.top - rootOrigin.y
+                scaleX = rect.width / baseW
+                scaleY = rect.height / baseH
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                shape = RoundedCornerShape(flightCornerDp(progress.value).dp)
+                clip = true
             }
-            .size(
-                width = with(density) { rect.width.toDp() },
-                height = with(density) { rect.height.toDp() }
-            )
-            .clip(RoundedCornerShape(corner.dp))
-            .border(2.dp, Color.White, RoundedCornerShape(corner.dp))
+            .size(width = with(LocalDensity.current) { baseW.toDp() }, height = with(LocalDensity.current) { baseH.toDp() })
+            .border(2.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
     ) {
         Image(
             bitmap = flight.bitmap,

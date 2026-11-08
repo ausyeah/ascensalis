@@ -32,7 +32,11 @@ class CaptureFxContractTest {
             screen.contains("CaptureThumbnailStack(")
         )
         assertTrue(
-            "取景器右上角必须有张数气泡",
+            "顶栏必须有张数胶囊（v0.0.134：从取景器右上角移到顶栏居中，扁平胶囊）",
+            screen.contains("CaptureCountPill(")
+        )
+        assertFalse(
+            "取景器内不许再叠张数徽章——右上角会遮挡取景内容",
             screen.contains("CaptureCountBadge(")
         )
         assertTrue(
