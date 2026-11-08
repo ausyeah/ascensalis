@@ -57,7 +57,6 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -101,6 +100,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mistakebook.di.AppContainer
 import com.mistakebook.data.prefs.SettingsStore
+import com.mistakebook.ui.common.AppLinearProgressIndicator
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.theme.LocalDarkTheme
 import com.mistakebook.ui.theme.PaperBorderLight
@@ -149,7 +149,7 @@ internal fun StatsView(
                     Spacer(Modifier.height(12.dp))
                     val isDark = LocalDarkTheme.current
                     val progressRatio = (state.masteredCount.toFloat() / state.totalVocabCount.coerceAtLeast(1)).coerceIn(0f, 1f)
-                    LinearProgressIndicator(
+                    AppLinearProgressIndicator(
                         progress = { progressRatio },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -723,7 +723,7 @@ internal fun WeeklyAccuracyCard(stats: List<DayStat>) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
-            LinearProgressIndicator(
+            AppLinearProgressIndicator(
                 progress = { rate },
                 modifier = Modifier
                     .fillMaxWidth()

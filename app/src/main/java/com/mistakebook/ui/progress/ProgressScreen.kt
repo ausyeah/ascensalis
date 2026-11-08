@@ -19,7 +19,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -43,6 +42,7 @@ import com.mistakebook.R
 import com.mistakebook.data.local.entities.CaptureTask
 import com.mistakebook.di.AppContainer
 import com.mistakebook.domain.TaskStatus
+import com.mistakebook.ui.common.AppLinearProgressIndicator
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.common.displayText
 import com.mistakebook.ui.common.errorKindOf
@@ -151,7 +151,7 @@ private fun RunningContent(state: ProgressUiState, onCancel: () -> Unit) {
         }
         if (percent != null) {
             val animated by animateFloatAsState(targetValue = percent / 100f, label = "parseProgress")
-            LinearProgressIndicator(
+            AppLinearProgressIndicator(
                 progress = { animated },
                 modifier = Modifier.fillMaxWidth()
             )

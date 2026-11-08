@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +52,35 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.SmallFloatingActionButton
 import com.mistakebook.R
+
+/**
+ * 应用统一的线性进度条（v0.0.142）。
+ *
+ * Material3 1.3 起，LinearProgressIndicator 会在轨道末端画一个圆形
+ * 「停止指示点」，并把轨道切出对应缺口——于是每个进度条右边都多出一个
+ * 颜色小点（用户实测：「所有的进度条都在右边有一个颜色的小点，UI 异常」）。
+ * 本项目不要这个点：gapSize = 0 不切缺口，drawStopIndicator = {} 不画点。
+ *
+ * 写在一处而不是六个调用点各写一遍：漏一处就是一处残留的小点，而新加的
+ * 进度条也不会再顺手带回这个默认装饰（单测 AppProgressBarStyleTest 钉住
+ * 「main 源码里不得再直接调用 LinearProgressIndicator」）。
+ */
+@Composable
+fun AppLinearProgressIndicator(
+    progress: () -> Float,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceVariant
+) {
+    LinearProgressIndicator(
+        progress = progress,
+        modifier = modifier,
+        color = color,
+        trackColor = trackColor,
+        gapSize = 0.dp,
+        drawStopIndicator = {}
+    )
+}
 
 // 学科色点
 @Composable

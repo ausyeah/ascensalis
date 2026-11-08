@@ -19,7 +19,6 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +44,7 @@ import com.mistakebook.R
 import com.mistakebook.data.update.AppUpdate
 import com.mistakebook.data.update.UpdateState
 import kotlinx.coroutines.launch
+import com.mistakebook.ui.common.AppLinearProgressIndicator
 
 /**
  * 「关于与更新」区块：当前版本、检查更新、给 star。
@@ -200,7 +200,7 @@ internal fun AboutUpdateSection() {
                 when {
                     downloadingFor != null -> {
                         Column {
-                            LinearProgressIndicator(
+                            AppLinearProgressIndicator(
                                 progress = { downloadingFor.progress },
                                 modifier = Modifier.fillMaxWidth()
                             )
