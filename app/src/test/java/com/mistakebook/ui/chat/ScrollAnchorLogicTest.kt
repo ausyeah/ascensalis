@@ -31,6 +31,8 @@ class ScrollAnchorLogicTest {
         val offset: Int = 0,
         val scrolling: Boolean = false,
         val dragged: Boolean = false,
+        /** 手指按在屏幕上（无位移，v0.0.134）：与拖动同等对待。 */
+        val pointerDown: Boolean = false,
         val programmaticScroll: Boolean = false,
         val following: Boolean = false,
         /**
@@ -57,6 +59,7 @@ class ScrollAnchorLogicTest {
                 frameOffset = frame.offset,
                 scrolling = frame.scrolling,
                 dragged = frame.dragged,
+                pointerDown = frame.pointerDown,
                 programmaticScroll = frame.programmaticScroll,
                 following = frame.following,
                 awayFromBottom = frame.awayFromBottom,
@@ -68,6 +71,38 @@ class ScrollAnchorLogicTest {
     }
 
     // ---- 基线：首帧 / 锚点 key 变化 ----
+
+    // ---- v0.0.134：按住定住（pointerDown） ----
+
+    /**
+     * 用户反馈「生成的时候手势还是定不住会往下滑动」：手指按住不动
+     * （dragged=false、pointerDown=true）时流式内容每帧长高，此前会掉进
+     * following 分支直接返回（无补偿）。现在按住期间必须补偿，把视口
+     * 钉在用户正在读的段落上。
+     */
+    @Test
+    fun `按住时内容增长必须补偿——视觉静止`() {
+        val s = Session()
+        // 首帧取基线（offset 100）
+        s.feed(Frame(offset = 100, pointerDown = true))
+        // 内容长高 30px：按住中 → 全额补偿，视口不动
+        assertEquals(30, s.feed(Frame(offset = 130, pointerDown = true)))
+        // 补偿后再长 20：继续补偿
+        assertEquals(20, s.feed(Frame(offset = 150, pointerDown = true)))
+    }
+
+    @Test
+    fun `松手后回到正常判定——按住期间的偏移作为新基线`() {
+        val s = Session()
+        s.feed(Frame(offset = 100, pointerDown = true))
+        s.feed(Frame(offset = 130, pointerDown = true))
+        // 松手：内容不再增长（offset 稳定在补偿后的位置）→ 无补偿
+        assertEquals(0, s.feed(Frame(offset = 130, pointerDown = false)))
+        // 松手后用户自己上翻（offset 减小）→ 不补偿（那是他要的方向）。
+        // feed 返回负 drift 也成立：调用方只在 >0 时 scrollBy。
+        val back = s.feed(Frame(offset = 80, pointerDown = false))
+        assertTrue("上翻不补偿（<=0 都不会 scrollBy）", back <= 0)
+    }
 
     @Test
     fun `首帧只取基线不补偿`() {

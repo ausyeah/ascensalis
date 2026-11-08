@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -913,12 +914,21 @@ private fun SwipeableQuestionCard(
                 }
         ) {
             // 右滑露出层（v0.0.132 用户：「右滑展示题目，尽可能大的展示，
-            // 不允许裁切」）：左侧整块放题目原图，ContentScale.Fit 完整显示
-            // 不裁切；没有图（PDF 文本路线/图被删）时退回题干文字封面。
+            // 不允许裁切」）：固定占 imageReveal 宽、贴左缘——Fit 图在这个
+            // 完整矩形内显示；铺满整卡宽的话 Fit 居中的图大部分被卡片盖住。
+            // v0.0.134（issue #52「做好隔离，不要左滑右滑内容打架」）：
+            // alpha 只跟正向位移——左滑（offset<0）时本层全透明。
             Box(
                 modifier = Modifier
-                    .matchParentSize()
+                    .fillMaxHeight()
+                    .width(SwipeImageRevealWidth)
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .graphicsLayer {
+                        val progress = if (offsetX.value >= 0f) {
+                            swipeRevealProgress(offsetX.value, imageRevealPx)
+                        } else 0f
+                        alpha = swipeRevealContentAlpha(progress)
+                    }
             ) {
                 if (com.mistakebook.util.CoverFallback.isLikelyImage(question.printImagePath)) {
                     AsyncImage(
@@ -940,9 +950,20 @@ private fun SwipeableQuestionCard(
                     )
                 }
             }
-            // 左滑操作层（不变）：完整图形拼贴——置顶在左、归档在右。
+            // 左滑操作层：完整图形拼贴——置顶在左、归档在右。
+            // v0.0.134（issue #52）：alpha 只跟负向位移——此前
+            // swipeRevealProgress 取 abs(offset)，右滑看图时操作块会按
+            // 正向位移半透明浮现叠在图上（「内容打架」）。offset 在右
+            // 半程时本层强制全透明。
             Row(
-                modifier = Modifier.matchParentSize(),
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        val progress = if (offsetX.value <= 0f) {
+                            swipeRevealProgress(offsetX.value, revealWidthPx)
+                        } else 0f
+                        alpha = swipeRevealContentAlpha(progress)
+                    },
                 horizontalArrangement = Arrangement.spacedBy(SwipeActionGap, Alignment.End)
             ) {
                 SwipeActionBlock(

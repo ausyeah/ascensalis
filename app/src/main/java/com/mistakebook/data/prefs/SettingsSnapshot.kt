@@ -237,7 +237,10 @@ data class SettingsSnapshot(
      * 存 DataStore 而不是 Room：它是一条用户偏好，不是题目数据，
      * 不值得为它动 schema。
      */
-    val examDateEpochDay: Long? = null
+    val examDateEpochDay: Long? = null,
+
+    /** 自定义未来事件（v0.0.134，issue #56）：名称 + 目标日期，首页倒计时区展示。 */
+    val customEvents: List<CustomEvent> = emptyList()
 ) {
     // ===== 以下三项已固定，不再暴露给用户 =====
     //
@@ -352,3 +355,17 @@ internal fun normalizeDailyNewLimit(stored: Int?): Int = when {
     stored > MAX_DAILY_NEW_LIMIT -> MAX_DAILY_NEW_LIMIT
     else -> stored
 }
+
+
+/**
+ * 自定义未来事件（v0.0.134，issue #56「没有自定义未来事件」）。
+ *
+ * 与考试日期并列的轻量倒计时：用户自己起名 + 选日期，首页倒计时卡
+ * 逐条展示「距 XX 还有 N 天」。存 DataStore JSON 列表（条目少、无查询
+ * 需求，不值得为它建 Room 表 + 迁移）。
+ */
+@kotlinx.serialization.Serializable
+data class CustomEvent(
+    val name: String = "",
+    val dateEpochDay: Long = 0
+)

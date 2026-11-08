@@ -38,6 +38,7 @@ import androidx.lifecycle.viewModelScope
 import com.mistakebook.R
 import com.mistakebook.di.AppContainer
 import com.mistakebook.plan.ExamPlan
+import com.mistakebook.data.prefs.CustomEvent
 import com.mistakebook.plan.ExamPlanner
 import com.mistakebook.plan.PlanQuestion
 import com.mistakebook.ui.common.TwoStepConfirmTextButton
@@ -61,6 +62,7 @@ fun ExamCountdownCard(container: AppContainer) {
     val state by viewModel.uiState.collectAsState()
     var showPlan by remember { mutableStateOf(false) }
     var showDateEditor by remember { mutableStateOf(false) }
+    var showEventEditor by remember { mutableStateOf(false) }
 
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -70,11 +72,15 @@ fun ExamCountdownCard(container: AppContainer) {
             // v0.0.121 起这张卡是列表条目：横向留白由 LazyColumn 的
             // contentPadding 统一给（与题目卡对齐），这里只留上下呼吸。
             .padding(vertical = 4.dp)
-            .clickable { if (state.examDate != null) showPlan = true else showDateEditor = true }
     ) {
+        // v0.0.134（issue #56「没有自定义未来事件」）：卡片改成纵向多行——
+        // 考试倒计时行（点击进排期）+ 自定义事件行们（逐条倒计时，可删）
+        // + 添加入口。clickable 也从整卡移到考试行：点自定义事件行不该
+        // 弹出考试排期对话框。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable { if (state.examDate != null) showPlan = true else showDateEditor = true }
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -114,6 +120,58 @@ fun ExamCountdownCard(container: AppContainer) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+
+        // 自定义未来事件行（v0.0.134，issue #56）：逐条倒计时，行尾删除。
+        state.customEvents.forEach { event ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("📅", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = event.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                val days = event.dateEpochDay - LocalDate.now().toEpochDay()
+                Text(
+                    text = stringResource(
+                        if (days == 0L) R.string.custom_event_today
+                        else R.string.custom_event_days_left, days
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.action_delete),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.clickable { viewModel.removeCustomEvent(event) }
+                )
+            }
+        }
+        Text(
+            text = stringResource(R.string.custom_event_add),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clickable { showEventEditor = true }
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+        )
+    }
+
+    if (showEventEditor) {
+        CustomEventEditorDialog(
+            onSave = { name, date ->
+                viewModel.addCustomEvent(name, date)
+                showEventEditor = false
+            },
+            onDismiss = { showEventEditor = false }
+        )
     }
 
     if (showPlan) {
@@ -287,7 +345,9 @@ data class ExamCountdownUiState(
     val examDate: LocalDate? = null,
     val daysLeft: Int = 0,
     val plan: ExamPlan? = null,
-    val applying: Boolean = false
+    val applying: Boolean = false,
+    /** 自定义未来事件（v0.0.134，issue #56）：按日期升序、只保留今天及以后。 */
+    val customEvents: List<CustomEvent> = emptyList()
 )
 
 class ExamCountdownViewModel(private val container: AppContainer) : ViewModel() {
@@ -314,9 +374,10 @@ class ExamCountdownViewModel(private val container: AppContainer) : ViewModel() 
         viewModelScope.launch {
             val snapshot = container.settingsStore.snapshotNow()
             val examDate = snapshot.examDateEpochDay?.let(LocalDate::ofEpochDay)
+            val events = upcomingCustomEvents(snapshot.customEvents, LocalDate.now())
             dueJob?.cancel()
             if (examDate == null) {
-                _uiState.value = ExamCountdownUiState()
+                _uiState.value = ExamCountdownUiState(customEvents = events)
                 return@launch
             }
             val today = LocalDate.now()
@@ -332,7 +393,8 @@ class ExamCountdownViewModel(private val container: AppContainer) : ViewModel() 
                     _uiState.value = ExamCountdownUiState(
                         examDate = examDate,
                         daysLeft = plan.daysLeft,
-                        plan = plan
+                        plan = plan,
+                        customEvents = events
                     )
                 }
             }
@@ -352,6 +414,28 @@ class ExamCountdownViewModel(private val container: AppContainer) : ViewModel() 
         }
     }
 
+    /** 添加自定义事件（v0.0.134，issue #56）：名称必填、日期必须晚于今天。 */
+    fun addCustomEvent(name: String, date: LocalDate) {
+        if (name.isBlank()) return
+        if (!date.isAfter(LocalDate.now())) return
+        viewModelScope.launch {
+            val snapshot = container.settingsStore.snapshotNow()
+            val updated = snapshot.customEvents +
+                CustomEvent(name = name.trim(), dateEpochDay = date.toEpochDay())
+            container.settingsStore.saveCustomEvents(updated)
+            refresh()
+        }
+    }
+
+    /** 删除自定义事件。 */
+    fun removeCustomEvent(event: CustomEvent) {
+        viewModelScope.launch {
+            val snapshot = container.settingsStore.snapshotNow()
+            container.settingsStore.saveCustomEvents(snapshot.customEvents.filterNot { it == event })
+            refresh()
+        }
+    }
+
     /** 把规划好的下一复习日写进库。写完刷新计划（schedule 变空，防止重复应用）。 */
     fun applyPlan() {
         val plan = _uiState.value.plan ?: return
@@ -363,3 +447,89 @@ class ExamCountdownViewModel(private val container: AppContainer) : ViewModel() 
         }
     }
 }
+
+/**
+ * 自定义事件编辑对话框（v0.0.134，issue #56）：名称 + 年/月/日，
+ * 日期必须晚于今天（与考试日期编辑器同一约束与文案风格）。
+ */
+@Composable
+private fun CustomEventEditorDialog(
+    onSave: (name: String, date: LocalDate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var year by remember { mutableStateOf("") }
+    var month by remember { mutableStateOf("") }
+    var day by remember { mutableStateOf("") }
+
+    fun parseOrNull(): LocalDate? = runCatching {
+        LocalDate.of(year.toInt(), month.toInt(), day.toInt())
+    }.getOrNull()
+
+    val date = parseOrNull()
+    val valid = name.isNotBlank() && date != null && date.isAfter(LocalDate.now())
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.custom_event_add)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.custom_event_name_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = stringResource(R.string.custom_event_date_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = year,
+                        onValueChange = { year = it.filter(Char::isDigit).take(4) },
+                        label = { Text(stringResource(R.string.exam_date_year)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = month,
+                        onValueChange = { month = it.filter(Char::isDigit).take(2) },
+                        label = { Text(stringResource(R.string.exam_date_month)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = day,
+                        onValueChange = { day = it.filter(Char::isDigit).take(2) },
+                        label = { Text(stringResource(R.string.exam_date_day)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = { onSave(name, date!!) }) {
+                Text(stringResource(R.string.action_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        }
+    )
+}
+
+/**
+ * 自定义事件的展示过滤与排序（v0.0.134，issue #56）：只保留今天及
+ * 以后（过去的倒计时没有意义），按日期升序——最近的最先看到。
+ * 纯函数，单测见 [CustomEventsTest]。
+ */
+internal fun upcomingCustomEvents(
+    events: List<CustomEvent>,
+    today: LocalDate
+): List<CustomEvent> = events
+    .filter { it.dateEpochDay >= today.toEpochDay() }
+    .sortedBy { it.dateEpochDay }

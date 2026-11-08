@@ -157,7 +157,10 @@ class SettingsStore(context: Context) {
             pomodoroBreakMinutes = prefs[KEY_POMODORO_BREAK_MINUTES] ?: 10,
             wordbookDailyNewLimit = normalizeDailyNewLimit(prefs[KEY_WORDBOOK_DAILY_NEW]),
             // DataStore 没有"可空 long"，-1 是"未设置"哨兵
-            examDateEpochDay = (prefs[KEY_EXAM_DATE] ?: -1L).takeIf { it > 0 }
+            examDateEpochDay = (prefs[KEY_EXAM_DATE] ?: -1L).takeIf { it > 0 },
+            customEvents = prefs[KEY_CUSTOM_EVENTS]?.let { raw ->
+                runCatching { json.decodeFromString<List<CustomEvent>>(raw) }.getOrDefault(emptyList())
+            } ?: emptyList()
         )
     }
 
@@ -686,6 +689,13 @@ class SettingsStore(context: Context) {
             else prefs[KEY_EXAM_DATE] = epochDay
         }
     }
+
+    /** 保存自定义未来事件（v0.0.134，issue #56）：整表覆盖，条目少无所谓。 */
+    suspend fun saveCustomEvents(events: List<CustomEvent>) {
+        appContext.settingsDataStore.edit { prefs ->
+            prefs[KEY_CUSTOM_EVENTS] = json.encodeToString(events)
+        }
+    }
     // ===== 番茄钟（T2 到点闭环） =====
 
     /** 开关「到点自动记录」。 */
@@ -854,6 +864,9 @@ class SettingsStore(context: Context) {
         val KEY_WORDBOOK_DAILY_GOAL = intPreferencesKey("wordbook_daily_goal")
         val KEY_WORDBOOK_REMINDER = booleanPreferencesKey("wordbook_reminder_enabled")
         val KEY_EXAM_DATE = longPreferencesKey("exam_date_epoch_day")
+
+        /** 自定义未来事件列表（v0.0.134，issue #56）：JSON 数组，见 CustomEvent。 */
+        private val KEY_CUSTOM_EVENTS = stringPreferencesKey("custom_events_json")
 
         // 番茄钟（T2）
         val KEY_POMODORO_AUTO_RECORD = booleanPreferencesKey("pomodoro_auto_record")

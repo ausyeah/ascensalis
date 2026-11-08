@@ -311,7 +311,12 @@ fun rememberAutoScrollEffect(
         // 等一帧：确保新消息已经进布局（index 0 已是最新那条），
         // 否则 animateScrollToItem(0) 会滚到「上一条」上。
         withFrameNanos { }
-        if (draggedNow || coordinator.programmaticScroll || !wasFollowing) return@LaunchedEffect
+        // v0.0.134（用户：「生成的时候手势还是定不住会往下滑动」）：
+        // 手指按在屏幕上时新消息到达，不能 animateScrollToItem 强拉回底——
+        // 那会拖着用户的手指跑。按住 = 暂停，松手后由位置驱动恢复。
+        if (draggedNow || coordinator.pointerDown || coordinator.programmaticScroll || !wasFollowing) {
+            return@LaunchedEffect
+        }
         coordinator.programmaticScroll = true
         try {
             state.animateScrollToItem(0)
@@ -386,6 +391,9 @@ fun rememberAutoScrollEffect(
                 frameOffset = frame.offset,
                 scrolling = frame.scrolling,
                 dragged = draggedNow,
+                // v0.0.134：按住不动（非拖动）也要传进去——流式内容变长时
+                // 锚定补偿得顶上，否则用户正在读的段落被顶走（「定不住」）。
+                pointerDown = coordinator.pointerDown,
                 programmaticScroll = coordinator.programmaticScroll,
                 following = coordinator.following,
                 awayFromBottom = frame.awayFromBottom,
@@ -518,6 +526,8 @@ internal fun scrollAnchorDecision(
     frameOffset: Int,
     scrolling: Boolean,
     dragged: Boolean,
+    /** 手指按在屏幕上（不含位移，v0.0.134）：与拖动同等对待。 */
+    pointerDown: Boolean,
     programmaticScroll: Boolean,
     following: Boolean,
     awayFromBottom: Boolean,
@@ -541,11 +551,24 @@ internal fun scrollAnchorDecision(
             compensatePx = 0
         )
     }
-    // 手指按着 / 自己的回底动画进行中：同样不插手。
-    // 注意这里**不**重取基线——否则松手后的静止帧会把「按下时的位置」当基线，
-    // 把手势期间攒下的增长当成该补的量，反而跟用户打架。
+    // 手指拖动中 / 自己的回底动画进行中：不插手、也不重取基线——
+    // 否则松手后的静止帧会把「按下时的位置」当基线，把手势期间攒下的
+    // 增长当成该补的量，反而跟用户打架。
     if (dragged || programmaticScroll) {
         return ScrollAnchorOutcome(baseline, compensatePx = 0)
+    }
+    // v0.0.134（用户：「生成的时候手势还是定不住会往下滑动」）：手指**按住
+    // 不动**（无位移，dragged=false）时流式内容每长一行，用户正在读的
+    // 段落就被顶走一行——此前这个情形会掉进下面的 following 分支直接
+    // 返回（无补偿）。按住 = 明确的「暂停」意图：绕过跟随/贴底分支，
+    // 一律走锚定补偿把视口钉住；基线同步前移，漂移不积累；松手后由
+    // 位置驱动恢复跟随。注意必须排在 following 分支之前。
+    if (pointerDown) {
+        if (frameKey != baseline.anchorKey) {
+            return ScrollAnchorOutcome(baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset), compensatePx = 0)
+        }
+        val drift = frameOffset - baseline.anchorOffset
+        return ScrollAnchorOutcome(baseline.copy(anchorOffset = frameOffset), compensatePx = drift)
     }
     // 跟随态下内容上推就是「跟随」本身，不能干扰。
     // 贴底时同理（哪怕跟随态被误置为 false）——理由见函数注释里
