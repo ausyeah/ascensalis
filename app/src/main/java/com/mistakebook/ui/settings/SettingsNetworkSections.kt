@@ -95,6 +95,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mistakebook.R
 import com.mistakebook.data.prefs.LlmKeyEntry
+import com.mistakebook.data.prefs.SettingsSnapshot
 import com.mistakebook.data.prefs.MAX_DAILY_NEW_LIMIT
 import com.mistakebook.data.prefs.MIN_DAILY_NEW_LIMIT
 import com.mistakebook.data.prefs.LlmProfile
@@ -253,3 +254,69 @@ internal fun SearchProviderSection(
     }
 }
 
+/**
+ * 上下文与防循环分区（v0.0.135，用户：「设置里面加 2 个对话相关功能：
+ * ①压缩上下文可以自己设置多大的时候压缩；②防止循环输出的小心思，
+ * 循环输出就会触发中断」）。
+ *
+ * 两件事都发生在「发请求之前/请求之中」，跟搜索/代理同属网络行为
+ * 一侧，放这个文件而不是外观文件。
+ */
+@Composable
+internal fun ContextLoopSection(
+    state: SettingsUiState,
+    viewModel: SettingsViewModel
+) {
+    val snapshot = state.snapshot
+    SettingsGroup(title = stringResource(R.string.settings_context_title)) {
+        Text(
+            text = stringResource(R.string.settings_context_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = stringResource(R.string.settings_context_threshold),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SettingsSnapshot.AUTO_COMPRESS_TOKEN_OPTIONS.forEach { tokens ->
+                FilterChip(
+                    selected = snapshot.autoCompressTokens == tokens,
+                    onClick = { viewModel.setAutoCompressTokens(tokens) },
+                    label = {
+                        Text(
+                            text = "${tokens / 10_000}" +
+                                stringResource(R.string.settings_context_unit)
+                        )
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            text = stringResource(R.string.settings_loop_title),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.settings_loop_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        SwitchRow(
+            label = stringResource(R.string.settings_loop_enabled),
+            checked = snapshot.loopGuardEnabled,
+            onChange = viewModel::setLoopGuardEnabled
+        )
+    }
+}

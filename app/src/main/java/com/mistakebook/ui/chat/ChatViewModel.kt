@@ -18,6 +18,7 @@ import com.mistakebook.data.local.entities.ChatAttachment
 import com.mistakebook.data.local.entities.ChatMessage
 import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.ReasoningEffort
+import com.mistakebook.data.prefs.SettingsSnapshot
 import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.data.repos.ChatRepository
@@ -266,6 +267,9 @@ data class ChatUiState(
     /** 思考强度（模型面板右上角设置里可调，与设置页同一数据源）。 */
     val reasoningEffort: ReasoningEffort = ReasoningEffort.HIGH,
 
+    /** 自动压缩阈值（v0.0.135）：设置页可改，默认 500k。 */
+    val autoCompressTokens: Int = SettingsSnapshot.DEFAULT_AUTO_COMPRESS_TOKENS,
+
     /**
      * 本会话当前选中的模型。
      *
@@ -392,6 +396,7 @@ class ChatViewModel(
                 val profile = s.activeProfile
                 _state.value = _state.value.copy(
                     reasoningEffort = s.reasoningEffort,
+                    autoCompressTokens = s.autoCompressTokens,
                     chatSearchEnabled = s.chatSearchEnabled,
                     chatSearchProvider = s.chatSearchProvider,
                     providerOptions = s.llmProfiles.map { p ->
@@ -602,10 +607,11 @@ class ChatViewModel(
                     // 生成图落库触发的那次重载若先完成，上面这次整体覆盖
                     // 会把它抹掉（issue #38 的「退出重进才显示」）。
                     loadBubbleImages(finalState.messages)
-                    // **自动压缩（500k 阈值）**：上次请求的输入 token 数到线就压，
-                    // 不等用户点。防连发：只有上下文重新长过上一次触发时的量
-                    // 才再次触发（压缩后下一轮请求必然大幅回落，不会连环压）。
-                    if (snap.promptTokens >= AUTO_COMPRESS_TOKENS &&
+                    // **自动压缩（v0.0.135：阈值可在设置里调）**：上次请求的
+                    // 输入 token 数到线就压，不等用户点。防连发：只有上下文
+                    // 重新长过上一次触发时的量才再次触发（压缩后下一轮请求
+                    // 必然大幅回落，不会连环压）。
+                    if (snap.promptTokens >= _state.value.autoCompressTokens &&
                         snap.promptTokens > lastAutoCompressTokens
                     ) {
                         lastAutoCompressTokens = snap.promptTokens
@@ -1690,13 +1696,6 @@ class ChatViewModel(
          * 200k 门槛下失败会话永远到不了线，压缩按钮一次都不会出现。
          */
         const val MANUAL_COMPRESS_TOKENS = 100_000
-
-        /**
-         * 自动压缩阈值。到 500k 不再等用户点，直接压——
-         * 这个量级的上下文再拖下去请求体与费用都会失控，
-         * 自动压缩是安全网不是可选项。
-         */
-        const val AUTO_COMPRESS_TOKENS = 500_000
 
         /**
          * 进会话时的模型回填决策（纯函数，可单测）。

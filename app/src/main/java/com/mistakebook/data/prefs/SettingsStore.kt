@@ -124,6 +124,8 @@ class SettingsStore(context: Context) {
             cornerStyle = CornerStyle.fromKey(prefs[KEY_CORNER_STYLE]),
             networkMode = NetworkMode.fromKey(prefs[KEY_NETWORK_MODE]),
             reasoningEffort = ReasoningEffort.fromKey(prefs[KEY_REASONING_EFFORT]),
+            autoCompressTokens = normalizeAutoCompressTokens(prefs[KEY_AUTO_COMPRESS_TOKENS]),
+            loopGuardEnabled = prefs[KEY_LOOP_GUARD] ?: true,
             // mineruModelVersion / ocrLanguage / forceOcr 已固定，不再从 prefs 读。
             // 旧版本存下的值会被自然忽略——它们不再是 SettingsSnapshot 的构造参数。
             attachOriginalImage = prefs[KEY_ATTACH_IMAGE] ?: true,
@@ -785,6 +787,16 @@ class SettingsStore(context: Context) {
         editString(KEY_REASONING_EFFORT, effort.key ?: "off")
     }
 
+    /** 自动压缩阈值（v0.0.135）：非法值收敛到默认档，见 [normalizeAutoCompressTokens]。 */
+    suspend fun setAutoCompressTokens(tokens: Int) {
+        editInt(KEY_AUTO_COMPRESS_TOKENS, normalizeAutoCompressTokens(tokens))
+    }
+
+    /** 循环输出保护开关（v0.0.135）。 */
+    suspend fun setLoopGuardEnabled(enabled: Boolean) {
+        editBoolean(KEY_LOOP_GUARD, enabled)
+    }
+
     // ===== 清空（恢复出厂） =====
 
     fun clearSecrets() {
@@ -841,6 +853,9 @@ class SettingsStore(context: Context) {
         val KEY_DEEPSEEK_OCR_MODEL = stringPreferencesKey("deepseek_ocr_model")
         val KEY_NETWORK_MODE = stringPreferencesKey("network_mode")
         val KEY_REASONING_EFFORT = stringPreferencesKey("reasoning_effort")
+
+        val KEY_AUTO_COMPRESS_TOKENS = intPreferencesKey("auto_compress_tokens")
+        val KEY_LOOP_GUARD = booleanPreferencesKey("loop_guard_enabled")
         val KEY_ATTACH_IMAGE = booleanPreferencesKey("attach_original_image")
         val KEY_IMAGE_LONG_EDGE = intPreferencesKey("image_long_edge")
         val KEY_RECOGNITION_MODE = stringPreferencesKey("recognition_mode")

@@ -388,6 +388,16 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     // ---- 联网搜索（v0.0.43）：配置从模型面板挪进设置页 ----
 
     /** 开关联网搜索（下一次请求生效）。 */
+    /** 自动压缩阈值（v0.0.135）。 */
+    fun setAutoCompressTokens(tokens: Int) = viewModelScope.launch {
+        store.setAutoCompressTokens(tokens)
+    }
+
+    /** 循环输出保护开关（v0.0.135）。 */
+    fun setLoopGuardEnabled(enabled: Boolean) = viewModelScope.launch {
+        store.setLoopGuardEnabled(enabled)
+    }
+
     fun setChatSearchEnabled(value: Boolean) = viewModelScope.launch {
         store.setChatSearchEnabled(value)
     }

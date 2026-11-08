@@ -964,6 +964,16 @@
     <string name="settings_group_vision_model">识图模型</string>
     <string name="settings_group_image_gen">生图渠道</string>
     <string name="settings_group_websearch">联网搜索</string>
+    <string name="settings_group_context">上下文与防循环</string>
+    <string name="settings_context_title">上下文自动压缩</string>
+    <string name="settings_context_desc">长对话把旧轮次滚成摘要再发给模型。上次请求的输入 token 数到线，下一轮自动压缩（也可在对话页手动点「压缩」）。阈值越小越省 token，摘要越频繁；越大保留原文越多，请求越贵。</string>
+    <string name="settings_context_threshold">自动压缩阈值（输入 token）</string>
+    <string name="settings_context_unit">万</string>
+    <string name="settings_loop_title">循环输出保护</string>
+    <string name="settings_loop_desc">模型卡在重复片段上打转时（同一句话反复输出），自动中断本轮生成，不再白白烧 token。检测只看尾部连续四轮等长重复，正常回答不会误伤。</string>
+    <string name="settings_loop_enabled">检测到循环时自动中断</string>
+    <string name="chat_loop_stopped">检测到重复输出，已自动中断本轮生成</string>
+    <string name="chat_loop_stopped_suffix">（检测到重复输出，已自动中断）</string>
     <string name="settings_group_learning">学习</string>
     <string name="settings_group_learning_tools">学习工具</string>
     <string name="settings_group_review_reminder">复习提醒</string>

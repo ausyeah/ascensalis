@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import com.mistakebook.MainActivity
 import com.mistakebook.MistakeBookApp
 import com.mistakebook.R
+import com.mistakebook.data.chat.ChatLoopDetector
 import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.domain.ChatRole
 import com.mistakebook.domain.MessageStatus
@@ -71,6 +72,15 @@ import kotlinx.serialization.json.JsonPrimitive
  * 和番茄钟同理（见 `PomodoroService`）：静默、常驻、带一个「停止」动作，
  * 让用户随时能掐掉这次生成。
  */
+/**
+ * 循环输出被 [com.mistakebook.data.chat.ChatLoopDetector] 确认时抛出，
+ * 用来跳出 tool loop（v0.0.135）。
+ *
+ * 单独一个类型而不是复用取消/失败：三种情况收尾语义完全不同——取消保留内容
+ * 且 rethrow、失败落 FAILED、循环中断落 DONE + 补说明。用类型区分最不容易写错。
+ */
+private class LoopDetectedException : Exception("loop detected")
+
 class ChatGenerationService : Service() {
 
     /** 服务自己的作用域：与界面生命周期无关，界面死了它照样跑。 */
@@ -209,6 +219,8 @@ class ChatGenerationService : Service() {
         val settings = container.settingsStore.settings.first()
         val searchEnabled = settings.chatSearchEnabled
         val effort = settings.reasoningEffort
+        // 循环输出保护（v0.0.135）：模型卡在重复片段上打转时自动中断。
+        val loopGuardEnabled = settings.loopGuardEnabled
 
         // 媒体工具按配置给。
         //
@@ -260,6 +272,9 @@ class ChatGenerationService : Service() {
         var promptTokens = 0
         var completionTokens = 0
         var wasTruncated = false
+        // 回答与思考各一个检测器：打转可能发生在正文，也可能发生在思考里。
+        val answerLoopDetector = ChatLoopDetector()
+        val thinkingLoopDetector = ChatLoopDetector()
 
         fun joinThinkingAndAnswer(answer: String, thought: String): String = when {
             thought.isBlank() -> answer
@@ -363,6 +378,10 @@ class ChatGenerationService : Service() {
                                     rounds.onThinking(event.text)
                                     publishPreview()
                                     if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
+                                    // 思考里打转同样掐掉（v0.0.135）
+                                    if (loopGuardEnabled && thinkingLoopDetector.observe(rounds.thinking)) {
+                                        throw LoopDetectedException()
+                                    }
                                 }
                             }
 
@@ -371,6 +390,11 @@ class ChatGenerationService : Service() {
                                 rounds.onDelta(event.text)
                                 publishPreview()
                                 if (System.currentTimeMillis() - lastWriteAt >= WRITE_THROTTLE_MS) flush()
+                                // 循环输出中断（v0.0.135）：尾部连续四轮等长
+                                // 重复即确认打转，抛出专用异常跳出 tool loop。
+                                if (loopGuardEnabled && answerLoopDetector.observe(rounds.answer)) {
+                                    throw LoopDetectedException()
+                                }
                             }
 
                             is ChatStreamEvent.ToolCalls -> pendingCalls = event.calls
@@ -662,6 +686,13 @@ class ChatGenerationService : Service() {
             // 用户按了停止 / 服务被销毁：不是失败，保留已收到的内容。
             status = MessageStatus.CANCELED
             throw cancelled
+        } catch (loop: LoopDetectedException) {
+            // 循环输出被确认：中断本轮，但**保留已生成的内容**（前面正常
+            // 的部分是有用的），尾部补一句说明让用户知道为什么停。按 DONE
+            // 收尾——这不是失败，是一次主动止损；补的说明文字进正文，
+            // 不需要额外的界面管道。
+            status = MessageStatus.DONE
+            rounds.onDelta("\n\n" + getString(R.string.chat_loop_stopped_suffix))
         } catch (t: Throwable) {
             // 工具循环里任何没被事件化的意外（DB 写失败、组装消息炸掉等）
             // 都要落成 FAILED。按 DONE 静默收尾的话，用户看到的是

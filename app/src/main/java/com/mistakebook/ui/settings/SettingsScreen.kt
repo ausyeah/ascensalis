@@ -206,6 +206,10 @@ fun SettingsScreen(
                     SearchProviderSection(state = state, viewModel = viewModel)
                 }
 
+                CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_context), nested = true) {
+                    ContextLoopSection(state = state, viewModel = viewModel)
+                }
+
                 CollapsibleSettingsGroup(title = stringResource(R.string.settings_group_memory), nested = true) {
                     // 记忆是「让模型认识这个用户」的地方，跟模型配置同属 AI 一侧；
                     // 放进通用组的话，用户会以为它和数据备份是一类东西。

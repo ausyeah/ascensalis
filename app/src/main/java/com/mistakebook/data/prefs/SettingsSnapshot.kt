@@ -208,6 +208,25 @@ data class SettingsSnapshot(
     /** Tavily API Key（选 Tavily 时必填；DeepSeek 出口无需此项）。 */
     val tavilyApiKey: String = "",
 
+    // ===== 对话上下文维护（v0.0.135） =====
+
+    /**
+     * 上下文自动压缩阈值（输入 token 数）。上次请求的输入 token 到线，
+     * 下一轮发出前自动把旧轮次滚成摘要——不等用户手动点「压缩」。
+     *
+     * 默认 500_000 与旧硬编码一致；调小更早压缩（省 token 但摘要更频繁），
+     * 调大保留更多原文（更忠实但请求更贵更慢）。
+     */
+    val autoCompressTokens: Int = DEFAULT_AUTO_COMPRESS_TOKENS,
+
+    /**
+     * 循环输出保护开关。模型卡在重复片段上打转时（「根据题意可得」
+     * ×N），检测器确认后直接中断本轮生成，省 token 也省用户的时间。
+     * 默认开：误报率极低（尾部四轮等长重复），关掉的人多半是想看
+     * 模型「表演」的人。
+     */
+    val loopGuardEnabled: Boolean = true,
+
     // ===== 番茄钟（T2 到点闭环） =====
 
     /** 番茄到点自动落库。默认开：到点后用户十有八九忘了点结束，自动记最准。 */
@@ -318,6 +337,12 @@ data class SettingsSnapshot(
 
     companion object {
         const val MINERU_MODEL_VLM = "vlm"
+
+        /** 自动压缩阈值的默认值（= v0.0.134 及以前的硬编码）。 */
+        const val DEFAULT_AUTO_COMPRESS_TOKENS = 500_000
+
+        /** 阈值档位：与设置页 chips 一一对应。 */
+        val AUTO_COMPRESS_TOKEN_OPTIONS = listOf(100_000, 300_000, 500_000, 800_000)
         const val OCR_LANG_ZH = "ch"
     }
 }
@@ -349,6 +374,17 @@ internal const val DEFAULT_DAILY_NEW_LIMIT = 20
  * 钳成「一天 1 个新词」等于把老用户的学习节奏直接掐死，那比显示错
  * 更严重。高于上限则收到上限，保留「能背多少背多少」的意图。
  */
+/**
+ * 把 DataStore 里读到的自动压缩阈值收敛进合法档位（v0.0.135）。
+ *
+ * 与 [normalizeDailyNewLimit] 同一思路：脏值（null / 越界 / 历史遗留）
+ * 一律回落默认档，**不钳到边界**——钳到 100k 等于把老用户的会话
+ * 突然开始频繁压缩，那比显示错更糟。
+ */
+internal fun normalizeAutoCompressTokens(stored: Int?): Int =
+    if (stored != null && stored in SettingsSnapshot.AUTO_COMPRESS_TOKEN_OPTIONS) stored
+    else SettingsSnapshot.DEFAULT_AUTO_COMPRESS_TOKENS
+
 internal fun normalizeDailyNewLimit(stored: Int?): Int = when {
     stored == null -> DEFAULT_DAILY_NEW_LIMIT
     stored < MIN_DAILY_NEW_LIMIT -> DEFAULT_DAILY_NEW_LIMIT
