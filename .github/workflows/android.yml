@@ -48,7 +48,7 @@ jobs:
       - name: Run unit tests
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon testDebugUnitTest
+          ./gradlew --no-daemon -I .github/gradle-mirror.init.gradle.kts testDebugUnitTest
 
       # 发布密钥：仓库维护者在 GitHub Secrets 里配置了 RELEASE_KEYSTORE_B64 等
       # 4 个变量时，这里还原出 keystore.properties，release 构建即正式签名，
@@ -107,10 +107,10 @@ jobs:
           chmod +x gradlew
           if [ "${SIGNING:-off}" = "on" ]; then
             # release 构建类型本身不注入任何 Key（BuildConfig 是空串），无需 -PprefillKeys
-            ./gradlew --no-daemon assembleRelease
+            ./gradlew --no-daemon -I .github/gradle-mirror.init.gradle.kts assembleRelease
             ls -lh app/build/outputs/apk/release/
           else
-            ./gradlew --no-daemon assembleDebug -PprefillKeys=false
+            ./gradlew --no-daemon -I .github/gradle-mirror.init.gradle.kts assembleDebug -PprefillKeys=false
             ls -lh app/build/outputs/apk/debug/
           fi
 
