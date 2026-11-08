@@ -58,7 +58,7 @@ class ChatTopBarIconStyleTest {
             sidebarWidths.first(),
             newChatWidths.first()
         )
-        assertEquals("口径固定为 2（48 视口 → 24dp 下 1dp 线）", "2", sidebarWidths.first())
+        assertEquals("口径固定为 5（48 视口 → 24dp 下 ≈2.5dp 粗线，参考图质感）", "5", sidebarWidths.first())
     }
 
     @Test

@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  新对话图标（v0.0.131 重画，用户：「右上角的这个图标太瘦了，风格和其他
-  的按钮完全不一致」）。
+  新对话图标（v0.0.135 按参考图重画，二次修正）。
 
-  上一版是「破框斜铅笔」：方框右下留口让铅笔破框而出——框不完整、
-  铅笔细斜，与左侧饱满的侧栏图标（ic_chat_sidebar）并排时明显单薄。
+  用户给的参考图右侧是一枚**开口气泡**：粗圆头线画的近圆环，
+  右下方留一个缺口、缺口下端收出一条小尾巴（ChatGPT 对话钮造型）。
 
-  这版与 ic_chat_sidebar 完全同口径：
-  - 外框用同一条圆角方框路径（27×32，描边 2.0，48 视口）；
-  - 铅笔改为**框内居中的实心铅笔**（Material edit 字形，缩放 1.25 居中），
-    粗壮饱满，不再破框——「方框里写新的一条」语义不变；
-  - 线帽圆、转角圆，全局圆润口径一致。
+  几何（48 视口，圆心 24,24，半径 13）：
+  - 主弧从缺口上端（约 20°，点 36.2,28.4）逆时针绕 310° 到缺口下端
+    （约 70°，点 28.4,36.2）——large-arc=1、sweep=0；
+  - 尾巴从弧的下端往右下收一小段（到 33,42），圆角连接；
+  - 描边 5.0（24dp 下 ≈2.5dp）与左侧菜单钮同口径，圆头线帽。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
@@ -18,23 +17,21 @@
     android:viewportWidth="48"
     android:viewportHeight="48">
 
-    <!-- 圆角外框：与 ic_chat_sidebar 同一条路径 -->
+    <!-- 主弧：绕一大圈，右下方留缺口 -->
     <path
-        android:pathData="M14,8 L34,8 A7,7 0 0 1 41,15 L41,33 A7,7 0 0 1 34,40 L14,40 A7,7 0 0 1 7,33 L7,15 A7,7 0 0 1 14,8 Z"
+        android:pathData="M36.2,28.4 A13,13 0 1 0 28.4,36.2"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2"
+        android:strokeWidth="5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000" />
 
-    <!-- 框内居中的实心铅笔（Material edit 字形 × 1.25，中心对齐 24,24） -->
-    <group
-        android:scaleX="1.25"
-        android:scaleY="1.25"
-        android:translateX="9"
-        android:translateY="9">
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z" />
-    </group>
+    <!-- 尾巴：缺口下端往右下收出 -->
+    <path
+        android:pathData="M28.4,36.2 L33,42.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
 </vector>
