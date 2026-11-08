@@ -8,18 +8,23 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -62,7 +67,7 @@ fun ExamCountdownCard(container: AppContainer) {
     val state by viewModel.uiState.collectAsState()
     var showPlan by remember { mutableStateOf(false) }
     var showDateEditor by remember { mutableStateOf(false) }
-    var showEventEditor by remember { mutableStateOf(false) }
+    var showEventManager by remember { mutableStateOf(false) }
 
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -154,23 +159,14 @@ fun ExamCountdownCard(container: AppContainer) {
                 )
             }
         }
-        Text(
-            text = stringResource(R.string.custom_event_add),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .clickable { showEventEditor = true }
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        )
     }
 
-    if (showEventEditor) {
-        CustomEventEditorDialog(
-            onSave = { name, date ->
-                viewModel.addCustomEvent(name, date)
-                showEventEditor = false
-            },
-            onDismiss = { showEventEditor = false }
+    if (showEventManager) {
+        CustomEventManagerDialog(
+            events = state.customEvents,
+            onAdd = { name, date -> viewModel.addCustomEvent(name, date) },
+            onRemove = { viewModel.removeCustomEvent(it) },
+            onDismiss = { showEventManager = false }
         )
     }
 
@@ -187,6 +183,11 @@ fun ExamCountdownCard(container: AppContainer) {
             current = state.examDate,
             onSave = { viewModel.saveExamDate(it); showDateEditor = false },
             onClear = { viewModel.saveExamDate(null); showDateEditor = false },
+            onOpenEvents = {
+                // 二级页面：关掉日期对话框，进事件管理（v0.0.135）
+                showDateEditor = false
+                showEventManager = true
+            },
             onDismiss = { showDateEditor = false }
         )
     }
@@ -257,6 +258,7 @@ private fun ExamDateEditorDialog(
     current: LocalDate?,
     onSave: (LocalDate) -> Unit,
     onClear: () -> Unit,
+    onOpenEvents: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val today = remember { LocalDate.now() }
@@ -274,7 +276,10 @@ private fun ExamDateEditorDialog(
         title = { Text(stringResource(R.string.exam_date_title)) },
         text = {
             Column {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     FilterChip(
                         selected = false,
                         onClick = { onSave(ExamPlanner.nextGaokao(today)) },
@@ -284,6 +289,21 @@ private fun ExamDateEditorDialog(
                         selected = false,
                         onClick = { onSave(ExamPlanner.nextKaoyan(today)) },
                         label = { Text(stringResource(R.string.exam_date_kaoyan)) }
+                    )
+                    // v0.0.135（用户：「添加自定义事件放在考研高考这两个右边，
+                    // 点进去的二级页面里自己输入」）：入口从首页卡片挪到这里，
+                    // 与两个预设考期同一行。
+                    FilterChip(
+                        selected = false,
+                        onClick = onOpenEvents,
+                        label = { Text(stringResource(R.string.custom_event_manager)) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     )
                 }
                 Spacer(Modifier.height(12.dp))
@@ -449,14 +469,24 @@ class ExamCountdownViewModel(private val container: AppContainer) : ViewModel() 
 }
 
 /**
- * 自定义事件编辑对话框（v0.0.134，issue #56）：名称 + 年/月/日，
- * 日期必须晚于今天（与考试日期编辑器同一约束与文案风格）。
+ * 自定义事件管理（二级页面，v0.0.135）。
+ *
+ * 用户：「添加自定义事件放在考研高考这两个的右边，可以自己输入，是在点进去
+ * 的二级页面」。所以它不再是卡片上的一行入口，而是从「考试日期」对话框
+ * 进入的独立一页：上半是已有事件（名称 / 日期 / 还有几天 / 删除），
+ * 下半是名称 + 年/月/日 + 添加。
+ *
+ * 用全宽 Dialog 而不是 NavHost 路由：它只服务于这张卡片，为它加一条路由
+ * 与回调链不划算；全宽 Dialog 的交互层级与二级页面一致（返回键关闭）。
  */
 @Composable
-private fun CustomEventEditorDialog(
-    onSave: (name: String, date: LocalDate) -> Unit,
+private fun CustomEventManagerDialog(
+    events: List<CustomEvent>,
+    onAdd: (name: String, date: LocalDate) -> Unit,
+    onRemove: (CustomEvent) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val today = remember { LocalDate.now() }
     var name by remember { mutableStateOf("") }
     var year by remember { mutableStateOf("") }
     var month by remember { mutableStateOf("") }
@@ -467,13 +497,83 @@ private fun CustomEventEditorDialog(
     }.getOrNull()
 
     val date = parseOrNull()
-    val valid = name.isNotBlank() && date != null && date.isAfter(LocalDate.now())
+    val valid = name.isNotBlank() && date != null && date.isAfter(today)
 
-    AlertDialog(
+    androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.custom_event_add)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .heightIn(max = 560.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.custom_event_manager),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(Modifier.height(12.dp))
+                if (events.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.custom_event_none),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        events.forEach { event ->
+                            val days = event.dateEpochDay - today.toEpochDay()
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(event.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = LocalDate.ofEpochDay(event.dateEpochDay).toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Text(
+                                    text = stringResource(
+                                        if (days == 0L) R.string.custom_event_today
+                                        else R.string.custom_event_days_left, days
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.custom_event_remove),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.clickable { onRemove(event) }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.custom_event_date_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -481,11 +581,7 @@ private fun CustomEventEditorDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Text(
-                    text = stringResource(R.string.custom_event_date_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = year,
@@ -509,17 +605,31 @@ private fun CustomEventEditorDialog(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_close))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        enabled = valid,
+                        onClick = {
+                            onAdd(name.trim(), date!!)
+                            name = ""
+                            year = ""
+                            month = ""
+                            day = ""
+                        }
+                    ) {
+                        Text(stringResource(R.string.custom_event_add_action))
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(enabled = valid, onClick = { onSave(name, date!!) }) {
-                Text(stringResource(R.string.action_confirm))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         }
-    )
+    }
 }
 
 /**

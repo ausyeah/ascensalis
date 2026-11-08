@@ -11,7 +11,10 @@
     <string name="swipe_delete_hint">删除</string>
     <string name="swipe_delete_confirm">确认删除</string>
     <string name="swipe_archive_confirm">确认归档</string>
-    <string name="custom_event_add">添加自定义事件</string>
+    <string name="custom_event_manager">自定义事件</string>
+    <string name="custom_event_none">还没有自定义事件</string>
+    <string name="custom_event_add_action">添加</string>
+    <string name="custom_event_remove">删除</string>
     <string name="custom_event_name_hint">事件名称（如：月考）</string>
     <string name="custom_event_date_hint">日期（必须晚于今天）：年 / 月 / 日</string>
     <string name="custom_event_days_left">还有 %1$d 天</string>

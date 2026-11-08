@@ -252,8 +252,6 @@ fun HomeScreen(
     val swipeCoordinator = remember { SwipeRevealCoordinator() }
     val scope = rememberCoroutineScope()
     var showAddSheet by remember { mutableStateOf(false) }
-    // 右滑题图全屏预览（v0.0.134）：卡片内空间有限，吸附到预览态后弹全屏。
-    var previewQuestion by remember { mutableStateOf<Question?>(null) }
     val sheetState = rememberModalBottomSheetState()
     val context = LocalContext.current
     var importing by remember { mutableStateOf(false) }
@@ -566,9 +564,6 @@ fun HomeScreen(
                             modifier = Modifier.animateItem(),
                             coordinator = swipeCoordinator,
                             myId = question.id,
-                            onPreviewChange = { open ->
-                                previewQuestion = if (open) question else null
-                            },
                             question = question,
                             subjectName = subjectName,
                             dueToday = state.dueCount > 0 && isDue(question, todayEpochDay),
@@ -599,18 +594,6 @@ fun HomeScreen(
                 }
             }
         }
-    }
-
-    // 右滑题图全屏预览：只留卡片一角，图尽量大、Fit 不裁切，点任意处关闭。
-    previewQuestion?.let { previewed ->
-        QuestionImagePreviewDialog(
-            question = previewed,
-            onDismiss = {
-                previewQuestion = null
-                // 清登记 → 该卡监听到「不是自己」自动收回（复用互斥收回路径）
-                swipeCoordinator.revealedId = null
-            }
-        )
     }
 
     if (showAddSheet) {
@@ -850,9 +833,7 @@ private fun SwipeableQuestionCard(
     onReorderEnd: () -> Unit,
     onClick: () -> Unit,
     onPin: () -> Unit,
-    onDelete: () -> Unit,
-    /** 右滑吸附到预览态时上报 true（打开全屏大图），收回时上报 false。 */
-    onPreviewChange: (Boolean) -> Unit = {}
+    onDelete: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -862,9 +843,14 @@ private fun SwipeableQuestionCard(
     // 右滑露出题目图片的行程（v0.0.134 用户：「不够大，尽可能只留一点点
     // 滑块在外面」）：行程 = 整卡宽 - 24dp 残留边。列表横向 padding 12dp×2，
     // 所以卡宽 = screenWidth - 24dp；再留 24dp 卡身在外面，手指有落点。
-    val screenWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    val config = androidx.compose.ui.platform.LocalConfiguration.current
+    val screenWidthDp = config.screenWidthDp.dp
     val imageRevealWidth = (screenWidthDp - 48.dp).coerceAtLeast(220.dp)
     val imageRevealPx = with(density) { imageRevealWidth.toPx() }
+    // 预览态卡片高度（v0.0.135）：卡片内能用的高度就是列表行高，Fit 后图
+    // 必然小。右滑吸附到预览态时把卡片长高到屏高的 55%——图在露出的整块
+    // 区域里完整显示，用完收回，列表布局由 animateContentSize 平滑过渡。
+    val previewCardHeight = (config.screenHeightDp.dp * 0.55f).coerceAtLeast(320.dp)
     var previewing by remember { mutableStateOf(false) }
     // 「是否已划开」是**离散状态**，只在松手时翻转。
     //
@@ -876,7 +862,6 @@ private fun SwipeableQuestionCard(
     fun close() {
         revealed = false
         previewing = false
-        onPreviewChange(false)
         coordinator.revealedId = null
         scope.launch { offsetX.animateTo(0f) }
     }
@@ -896,13 +881,17 @@ private fun SwipeableQuestionCard(
             revealed = false
             previewing = false
             confirmingArchive = false
-            onPreviewChange(false)
             offsetX.animateTo(0f)
         }
     }
 
     Box(
         modifier = modifier
+            // 预览态长高（v0.0.135）：右滑看图时卡片撑到 previewCardHeight，
+            // 图才有足够空间。高度切换放在 animateItem 之外的一层——
+            // （实测：不叠加 animateContentSize，否则与 animateItem 两层
+            //  SubcomposeLayout 抢手势，右滑会被内层点击判定吃掉。）
+            .then(if (previewing) Modifier.height(previewCardHeight) else Modifier)
             .clip(MaterialTheme.shapes.medium)
             // 底层背景由各操作块自己铺（置顶 primaryContainer、删除 errorContainer），
             // 外层保持透明——两块颜色不同，铺在同一层就分不开了。
@@ -1110,12 +1099,11 @@ private fun SwipeableQuestionCard(
                                 // 阈值取半程而不是四分之一：滑一半以上才算明确意图，
                                 // 杜绝「一次滑动连跳两级直接到归档/删除」的误触。
                                 val openedLeft = curOffset < -revealWidthPx * 0.5f
-                                // 右滑阈值用固定 120dp：行程接近整屏后按半程算
-                                // 要滑过大半屏才吸附，太累（v0.0.134）。
-                                val openedRight = curOffset > with(density) { 120.dp.toPx() }
+                                // 右滑阈值 80dp（v0.0.135 实测下调）：行程接近整屏后
+                                // 按半程算要滑过大半屏太累；80dp 轻推即吸附。
+                                val openedRight = curOffset > with(density) { 80.dp.toPx() }
                                 revealed = openedLeft
                                 previewing = openedRight
-                                onPreviewChange(openedRight)
                                 coordinator.revealedId = if (openedLeft || openedRight) myId else null
                                 val target = when {
                                     openedLeft -> -revealWidthPx
@@ -1305,62 +1293,3 @@ internal fun shouldClaimCardSwipe(accX: Float, accY: Float): Boolean {
     return abs(accX) > abs(accY)
 }
 
-/**
- * 右滑题图全屏预览（v0.0.134 用户：「右滑的原图展示程度不够，不够大，
- * 尽可能只留一点点滑块在外面」）。
- *
- * 卡片内的高度就是列表行高（一百来 dp），Fit 后图必然很小；真正要
- * 「尽可能大」只能跳出卡片。做法：右滑吸附到预览态时弹这个全屏层，
- * `ContentScale.Fit` 完整显示不裁切（黑底），点任意处关闭——关闭时
- * 清协调器登记，那张卡会沿互斥收回路径自动滑回原位。
- *
- * 用 Dialog 而不是覆盖层：不受 Scaffold / Snackbar / FAB 的层级影响，
- * 也不需要把 HomeScreen 改成 Box 套 Box。
- */
-@Composable
-private fun QuestionImagePreviewDialog(
-    question: Question,
-    onDismiss: () -> Unit
-) {
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(
-            usePlatformDefaultWidth = false
-        )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                // 半透明底（v0.0.134）：底下的卡片与列表隐约可见——
-                // 用户要的是「只留一点点原来的滑块在外面」，不是一块纯黑。
-                .background(Color.Black.copy(alpha = 0.94f))
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                    onClick = onDismiss
-                )
-        ) {
-            if (com.mistakebook.util.CoverFallback.isLikelyImage(question.printImagePath)) {
-                AsyncImage(
-                    model = question.printImagePath,
-                    contentDescription = question.stem,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp)
-                )
-            } else {
-                // 纯文本路线的题没有位图：整页显示题干，同样点任意处关闭
-                Text(
-                    text = question.stem,
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp)
-                        .verticalScroll(rememberScrollState())
-                )
-            }
-        }
-    }
-}
