@@ -156,8 +156,10 @@ class FunctionPlotterTest {
 
     @Test
     fun `表达式写错就明确说是哪条错了`() {
-        val message = failed(FunctionPlotter.Request(listOf(FunctionPlotter.Curve("x+y"))))
-        assertTrue("要指名道姓说出错的表达式，实际：$message", message.contains("x+y"))
+        // 注意不能用 "x+y"：v0.0.147 起裸的含 y 表达式会被当成隐函数 x+y=0，
+        // 那是能画的。这里用一个确实有语法错的（括号没配对）。
+        val message = failed(FunctionPlotter.Request(listOf(FunctionPlotter.Curve("sin(x"))))
+        assertTrue("要指名道姓说出错的表达式，实际：$message", message.contains("sin(x"))
     }
 
     @Test
@@ -218,5 +220,62 @@ class FunctionPlotterTest {
             )
         ).svg
         assertTrue(svg.contains("f(x)=x^2 的图像"))
+    }
+
+    // ---- v0.0.147：极坐标与隐函数 ----
+
+    @Test
+    fun `极坐标心形线能画出来`() {
+        // r=1+cos(θ)，θ∈[0,2π]。心形在笛卡尔坐标里的横坐标是
+        // x = (1+cosθ)·cosθ = cosθ + cos²θ，最小值 -0.25（cosθ=-0.5 处），
+        // 最大值 2（θ=0 处）。x 范围在这里是 θ 范围（极坐标的既定口径），
+        // 窗口要按曲线自己的极值定，否则心形会被挤在 [-10,10] 窗口的右边一小块。
+        val plotted = ok(
+            FunctionPlotter.Request(
+                curves = listOf(FunctionPlotter.Curve("r=1+cos(θ)")),
+                xMin = 0.0,
+                xMax = 2 * Math.PI
+            )
+        )
+        val paths = Regex("<path d=\"([^\"]*)\"").findAll(plotted.svg)
+            .map { it.groupValues[1] }.toList()
+        assertEquals("一条曲线只能出一个 path", 1, paths.size)
+        val path = paths.first()
+        assertFalse("不能出现 NaN 坐标", path.contains("NaN"))
+        assertFalse("不能出现 inf 坐标", path.contains("Infinity"))
+        assertTrue(
+            "θ 采样 720 步，折线点不该只有几个，实际 ${Regex("L").findAll(path).count()} 个",
+            Regex("L").findAll(path).count() > 100
+        )
+        assertTrue("窗口要包住心形左端 -0.25，实际 ${plotted.xMin}", plotted.xMin <= -0.25)
+        assertTrue("窗口要包住心形右端 2，实际 ${plotted.xMax}", plotted.xMax >= 2.0)
+    }
+
+    @Test
+    fun `隐函数圆能画出多段拼成的折线`() {
+        // x^2+y^2=1 解不出 y 的显式表达式，走 Marching Squares 求等值线：
+        // 整张图上会有几百个小段，必须被串成**少量**折线，且只出一个 path。
+        val plotted = ok(
+            FunctionPlotter.Request(
+                curves = listOf(FunctionPlotter.Curve("x^2+y^2=1")),
+                xMin = -2.0,
+                xMax = 2.0
+            )
+        )
+        val paths = Regex("<path d=\"([^\"]*)\"").findAll(plotted.svg)
+            .map { it.groupValues[1] }.toList()
+        assertEquals("隐函数也只出一条 path（小段要串起来，不能一段一个 path）", 1, paths.size)
+        val path = paths.first()
+        assertTrue("要有 M 起点", path.contains("M "))
+        assertFalse("不能出现 NaN 坐标", path.contains("NaN"))
+        assertFalse("不能出现 inf 坐标", path.contains("Infinity"))
+        val points = Regex("L").findAll(path).count()
+        assertTrue("圆的折线点太少（$points），可能只画出零星几段", points >= 30)
+    }
+
+    @Test
+    fun `写错的表达式报错里带原文`() {
+        val message = failed(FunctionPlotter.Request(listOf(FunctionPlotter.Curve("x^"))))
+        assertTrue("报错要带原表达式与原因，实际：$message", message.contains("x^"))
     }
 }

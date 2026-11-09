@@ -92,10 +92,12 @@ class ExpressionEvaluatorTest {
 
     @Test
     fun `语法错误要说清是哪里错了`() {
-        val unknown = runCatching { eval("x+y") }.exceptionOrNull()
+        // v0.0.147 起 y / θ 是合法变量（隐函数与极坐标要用），
+        // 这里换一个确实不认识的名称来钉「未知名称要报出来」。
+        val unknown = runCatching { eval("x+q") }.exceptionOrNull()
         assertTrue(
             "不认识的名称要指出来（模型据此改写表达式），实际：$unknown",
-            unknown?.message?.contains("y") == true
+            unknown?.message?.contains("q") == true
         )
 
         val unclosed = runCatching { eval("sin(x") }.exceptionOrNull()

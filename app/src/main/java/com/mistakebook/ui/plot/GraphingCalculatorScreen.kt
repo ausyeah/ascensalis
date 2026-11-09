@@ -67,9 +67,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mistakebook.R
 import com.mistakebook.di.AppContainer
-import com.mistakebook.math.ExpressionEvaluator
+import com.mistakebook.math.CurveSampler
 import com.mistakebook.math.FunctionPlotter
 import com.mistakebook.math.FunctionSampler
+import com.mistakebook.math.PlotCurve
 import com.mistakebook.ui.chat.ChatViewModel
 import com.mistakebook.ui.common.containerViewModel
 import com.mistakebook.ui.theme.LocalDarkTheme
@@ -183,19 +184,26 @@ fun GraphingCalculatorScreen(
 
     fun saveToChat() {
         val current = viewport ?: return
-        val usable = rows.filter { it.evaluator != null }
+        val usable = rows.filter { it.curve != null }
         if (usable.isEmpty()) {
             scope.launch { snackbarHost.showSnackbar(needExpressionText) }
             return
         }
-        // 把当前视口的四条边界一起交给绘图器：存下来的就是用户看到的那一段
-        // （x 是他拖到的位置，y 是他缩到的倍率），不再自动定 y。
+        // 只有极坐标时，画布上的「有效范围」其实是 θ（见 polarThetaMax），
+        // 所以存图也把 [0, max(2π, xSpan)] 当 x 范围传下去——这样会话里那张
+        // 图和用户刚才在画布上看到的是同一条曲线、同一段 θ；y 交给绘图器
+        // 自动定（极坐标的窗口本来就是按曲线极值自动铺的）。
+        val polarOnly = usable.all { it.curve is PlotCurve.Polar }
+        // 混合曲线时仍把当前视口的四条边界一起交给绘图器：存下来的就是用户
+        // 看到的那一段（x 是他拖到的位置，y 是他缩到的倍率）。此时极坐标的
+        // θ 范围也取视口 x 范围——这是「x 范围对极坐标就是 θ 范围」的既定
+        // 口径，只是和画布上的 [0, max(2π, xSpan)] 不完全相同。
         val request = FunctionPlotter.Request(
             curves = usable.map { FunctionPlotter.Curve(it.text.trim()) },
-            xMin = current.xMin,
-            xMax = current.xMax,
-            yMin = current.yMin,
-            yMax = current.yMax
+            xMin = if (polarOnly) 0.0 else current.xMin,
+            xMax = if (polarOnly) polarThetaMax(current) else current.xMax,
+            yMin = if (polarOnly) null else current.yMin,
+            yMax = if (polarOnly) null else current.yMax
         )
         when (val plotted = FunctionPlotter.plot(request)) {
             is FunctionPlotter.Result.Ok ->
@@ -226,7 +234,7 @@ fun GraphingCalculatorScreen(
                 actions = {
                     TextButton(
                         onClick = { saveToChat() },
-                        enabled = rows.any { it.evaluator != null }
+                        enabled = rows.any { it.curve != null }
                     ) {
                         Text(stringResource(R.string.plotter_save))
                     }
@@ -475,16 +483,21 @@ private fun PlotCanvasBox(
             }
 
             // ---- 曲线：与 SVG 共用采样与断线判据，只是画在 Compose 画布上 ----
+            // 显函数、极坐标、隐函数都走 CurveSampler，三条路只有采样方式不同，
+            // 「断在哪、去重到多少像素」完全一致。
+            val thetaMax = polarThetaMax(vp)
             rows.forEachIndexed { index, row ->
-                val evaluator = row.evaluator ?: return@forEachIndexed
-                val segments = FunctionSampler.segments(
-                    values = FunctionSampler.sample(evaluator, vp.xMin, vp.xMax),
+                val curve = row.curve ?: return@forEachIndexed
+                val segments = CurveSampler.segments(
+                    curve = curve,
                     xMin = vp.xMin,
                     xMax = vp.xMax,
                     yMin = vp.yMin,
                     yMax = vp.yMax,
                     mapX = { x -> vp.xToPx(x, plotW) },
-                    mapY = { y -> vp.yToPx(y, plotH) }
+                    mapY = { y -> vp.yToPx(y, plotH) },
+                    thetaMin = 0.0,
+                    thetaMax = thetaMax
                 )
                 if (segments.isEmpty()) return@forEachIndexed
                 val path = Path()
@@ -576,12 +589,14 @@ private fun CurveRowEditor(
 /**
  * 一行的编辑状态。
  *
- * [evaluator] 与 [error] 互斥：解析不通过时**不画这条**，并把原因摆在输入框
+ * [curve] 与 [error] 互斥：解析不通过时**不画这条**，并把原因摆在输入框
  * 下面——用户改完立刻就能看到曲线回来，中间不需要点任何按钮。
+ * 存的是 [PlotCurve] 而不是求值器：极坐标要按 θ 采样、隐函数要按网格求
+ * 等值线，只有知道「是哪一种曲线」才能选对采样方式。
  */
 private data class CurveRow(
     val text: String,
-    val evaluator: ExpressionEvaluator?,
+    val curve: PlotCurve?,
     val error: String?
 )
 
@@ -590,8 +605,22 @@ private fun curveRowOf(text: String): CurveRow {
     val trimmed = text.trim()
     if (trimmed.isEmpty()) return CurveRow(text, null, null)
     return try {
-        CurveRow(text, ExpressionEvaluator.parse(trimmed), null)
+        CurveRow(text, PlotCurve.parse(trimmed), null)
     } catch (error: IllegalArgumentException) {
         CurveRow(text, null, error.message)
     }
 }
+
+/**
+ * 画布上极坐标的 θ 上界：`max(2π, 视口 x 跨度)`。
+ *
+ * 取舍：没有单独的 θ 输入框，而 θ 范围又必须有个说法。取 2π 保证玫瑰线、
+ * 心形线在一个周期内闭合；视口拉宽（用户明显想「看多圈」）时跟着变宽，
+ * 于是 `r=cos(θ/3)` 这种要 6π 才闭合的曲线把图画缩小就能看全——比再加
+ * 一个控件更省事，也不用解释「θ 范围」这个学生还没建立的概念。
+ *
+ * 代价：`CurveSampler` 的极坐标采样固定 720 步，θ 范围越宽每圈越粗；
+ * 周期曲线会重复画几遍（视觉上看不出来，只是多算一点）。
+ */
+private fun polarThetaMax(viewport: PlotViewport): Double =
+    maxOf(2.0 * Math.PI, viewport.xSpan)

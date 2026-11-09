@@ -640,7 +640,8 @@
     <string name="chat_tool_plot">函数画图</string>
     <string name="plot_dialog_title">函数图像</string>
     <string name="plot_dialog_expressions">函数表达式</string>
-    <string name="plot_dialog_curve_hint">例如 x^2+2x、sin(x)、1/x</string>
+    <!-- 三种写法都举一个例子：显函数（y= 可省）、隐函数方程、极坐标 -->
+    <string name="plot_dialog_curve_hint">例如 x^2+2x、y=sin(x)、x^2+y^2=1、r=1+cos(θ)</string>
     <string name="plot_dialog_add_curve">再加一条</string>
     <string name="plot_dialog_remove_curve">删掉这条</string>
     <string name="plot_dialog_x_range">x 的范围</string>

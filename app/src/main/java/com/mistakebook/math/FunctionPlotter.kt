@@ -32,6 +32,12 @@ import kotlin.math.abs
  * 采样、断线、刻度与 y 窗口这些**与画布共用**的算法都在 [FunctionSampler]
  * 里（v0.0.144 抽出去的）：函数计算器页会实时画同一组表达式，画布上的线
  * 与这里的 SVG 必须是同一套断线口径，否则同一条函数会出现两张不一样的图。
+ *
+ * ## 三种曲线（v0.0.147）
+ *
+ * 用户不再只能写 `y=f(x)`：极坐标 `r=1+cos(θ)` 与隐式方程
+ * `x^2+y^2=1` 都能画。归类交给 [PlotCurve.parse]，三种曲线的采样统一走
+ * [CurveSampler.segments]，这样 SVG 与计算器画布继续共用同一套折线。
  */
 object FunctionPlotter {
 
@@ -41,6 +47,24 @@ object FunctionPlotter {
     /** 画布尺寸（px）。宽度按手机聊天区缩放显示，纵横比接近 16:10。 */
     private const val WIDTH = 720
     private const val HEIGHT = 440
+
+    /** 没给 x 范围时的默认窗口（与计算器复位视口、工具描述同一个口径）。 */
+    private const val DEFAULT_X_MIN = -10.0
+    private const val DEFAULT_X_MAX = 10.0
+
+    private const val TWO_PI = 2.0 * Math.PI
+
+    /**
+     * 隐函数自动定 y 窗口时用的画布纵横比：绘图区约 638×338（720×440 减去
+     * 标题与刻度边距），338 / 638 ≈ 0.53。
+     *
+     * 为什么是**取舍**：显函数有一条 y 取值序列可以看分布，隐函数没有——
+     * `x^2+y^2=1` 只给出「哪些点满足方程」，给不出「y 大致多大」。所以
+     * 按 x 轴的跨度乘这个比例铺一个以 0 为中心、上下对称的窗口。代价是
+     * 曲线在窗口里偏小时得自己给 y 范围；好处是不会像 ±10 那样把单位圆
+     * 压成一条细线，也不会因为某个极点把窗口拉到无穷。
+     */
+    private const val IMPLICIT_ASPECT = 338.0 / 638.0
 
     private const val MARGIN_LEFT = 62
     private const val MARGIN_RIGHT = 20
@@ -62,7 +86,12 @@ object FunctionPlotter {
     /** 一条曲线：表达式 +（可选的）图例名。 */
     data class Curve(val expression: String, val label: String = "")
 
-    /** 一次绘图请求。xMin/xMax/yMin/yMax 为 null 表示自动。 */
+    /**
+     * 一次绘图请求。xMin/xMax/yMin/yMax 为 null 表示自动。
+     *
+     * 画极坐标时 xMin/xMax 表示 **θ 的上下界**（默认 0..2π）：没有单独的 θ
+     * 字段，「调范围」对极坐标来说就是「θ 画多长」。
+     */
     data class Request(
         val curves: List<Curve>,
         val xMin: Double? = null,
@@ -89,61 +118,151 @@ object FunctionPlotter {
         val curves = request.curves.take(MAX_CURVES)
         if (curves.isEmpty()) return Result.Failed("没有给出要画的函数表达式")
 
-        // 解析全部表达式：一条写错就整张图不画，并把它指名道姓地说出来
+        // 解析并归类全部表达式：一条写错就整张图不画，并把它指名道姓地说出来
         // （模型据此改正重试，用户也能一眼看出是哪个式子有问题）。
-        val compiled = curves.map { curve ->
+        // PlotCurve.parse 的报错已经带了人话原因，这里只补上是**哪一条**原文。
+        val parsed = curves.map { curve ->
             try {
-                curve to ExpressionEvaluator.parse(curve.expression)
+                PlotCurve.parse(curve.expression)
             } catch (error: IllegalArgumentException) {
-                return Result.Failed("表达式「${curve.expression}」看不懂：${error.message}")
+                return Result.Failed("表达式「${curve.expression}」画不了：${error.message}")
             }
         }
 
-        val xMin = request.xMin ?: -10.0
-        val xMax = request.xMax ?: 10.0
+        val xMin = request.xMin ?: DEFAULT_X_MIN
+        val xMax = request.xMax ?: DEFAULT_X_MAX
         if (xMax <= xMin) {
             return Result.Failed("x 的范围不对：x_min（$xMin）必须小于 x_max（$xMax）")
         }
 
-        // 采样：一条曲线一份序列，NaN/Inf 原样保留（断线判定要用）。
-        val sampled: List<List<Double>> = compiled.map { (_, evaluator) ->
-            FunctionSampler.sample(evaluator, xMin, xMax)
+        // 极坐标的 θ 范围：**用户给的 x 范围就是 θ 范围**。学生没有单独的
+        // θ 输入框，而「θ 从哪到哪」正是他调范围时想说的那句话；默认
+        // [0, 2π] 能画完玫瑰线、心形线这类一个周期内闭合的曲线。
+        val thetaMin = request.xMin ?: 0.0
+        val thetaMax = request.xMax ?: TWO_PI
+        val polarOnly = parsed.isNotEmpty() && parsed.all { it is PlotCurve.Polar }
+
+        // x 窗口：只有极坐标时，x 范围已经被拿去当 θ 了，再拿它当窗口会把
+        // `r=1+cos(θ)` 挤到窗口右边一小块（心形只落在 x∈[-1,2]）。所以此时
+        // 按曲线自己的极值定窗口；混合曲线时仍用用户给的 x 范围（此时它
+        // 既当窗口、又当 θ 范围，是有意的双重身份，见类注释）。
+        val (winXMin, winXMax) = if (polarOnly) {
+            polarXWindow(parsed.filterIsInstance<PlotCurve.Polar>(), thetaMin, thetaMax)
+                ?: (xMin to xMax)
+        } else {
+            xMin to xMax
         }
 
-        val finiteAll = sampled.flatten().filter { it.isFinite() }
-        if (finiteAll.isEmpty()) {
+        val allImplicit = parsed.all { it is PlotCurve.Implicit }
+        val yRange = if (allImplicit) {
+            implicitYWindow(winXMin, winXMax, request.yMin, request.yMax)
+                ?: return Result.Failed(
+                    "y 的范围不对：y_min（${request.yMin}）必须小于 y_max（${request.yMax}）"
+                )
+        } else {
+            // 显式/极坐标：把 y 取值序列交给与画布共用的分位数逻辑
+            // （极点函数会改用 5%~95% 分位，避免窗口被 1/x 拉到无穷）。
+            val finite = parsed
+                .flatMap { CurveSampler.yValues(it, winXMin, winXMax, thetaMax) }
+                .filter { it.isFinite() }
+            if (finite.isEmpty()) {
+                val where = if (polarOnly) "θ ∈ [$thetaMin, $thetaMax]" else
+                    "x ∈ [$winXMin, $winXMax]"
+                return Result.Failed("在 $where 上这些表达式都没有取值，换个区间再画")
+            }
+            FunctionSampler.resolveYRange(finite, request.yMin, request.yMax)
+                ?: return Result.Failed(
+                    "y 的范围不对：y_min（${request.yMin}）必须小于 y_max（${request.yMax}）"
+                )
+        }
+
+        // 隐函数整张窗口里一个交点都没有（例如 x^2+y^2+1=0）时，画出来是一张
+        // 只有坐标轴的空图——不如直说「没有解」，用户才知道要改范围或改式子。
+        val implicitEmpty = allImplicit && parsed.none { curve ->
+            CurveSampler.hasContent(curve, winXMin, winXMax, yRange.first, yRange.second)
+        }
+        if (implicitEmpty) {
             return Result.Failed(
-                "在 x ∈ [$xMin, $xMax] 上这些表达式都没有取值，换个区间再画"
+                "「${curves.first().expression}」在 x ∈ [$winXMin, $winXMax]、" +
+                    "y ∈ [${yRange.first}, ${yRange.second}] 上找不到解；" +
+                    "隐函数靠网格求等值线，可试试把范围放大或换一种写法"
             )
         }
 
-        val yRange = FunctionSampler.resolveYRange(
-            finite = finiteAll,
-            requestedMin = request.yMin,
-            requestedMax = request.yMax
-        ) ?: return Result.Failed(
-            "y 的范围不对：y_min（${request.yMin}）必须小于 y_max（${request.yMax}）"
-        )
-
         val svg = render(
-            curves = compiled.map { it.first },
-            sampled = sampled,
-            xMin = xMin,
-            xMax = xMax,
+            curves = curves,
+            parsed = parsed,
+            xMin = winXMin,
+            xMax = winXMax,
             yMin = yRange.first,
             yMax = yRange.second,
+            thetaMin = thetaMin,
+            thetaMax = thetaMax,
             title = request.title?.trim()?.takeIf { it.isNotEmpty() }
         )
-        return Result.Ok(svg, xMin, xMax, yRange.first, yRange.second)
+        return Result.Ok(svg, winXMin, winXMax, yRange.first, yRange.second)
+    }
+
+    /**
+     * 只有极坐标时的 x 窗口：取整条曲线在笛卡尔坐标里的横向极值，再留 10% 边。
+     *
+     * 用 [CurveSampler.segments] 配恒等映射来量，而不是在这里重写一遍
+     * `r·cosθ`——曲线的采样口径（多少步、负 r 怎么处理）只有一份。
+     */
+    private fun polarXWindow(
+        polar: List<PlotCurve.Polar>,
+        thetaMin: Double,
+        thetaMax: Double
+    ): Pair<Double, Double>? {
+        val xs = polar.flatMap { curve ->
+            CurveSampler.segments(
+                curve = curve,
+                xMin = thetaMin,
+                xMax = thetaMax,
+                yMin = -1.0,
+                yMax = 1.0,
+                mapX = { it },
+                mapY = { it },
+                thetaMin = thetaMin,
+                thetaMax = thetaMax
+            ).flatten().map { it.x }
+        }.filter { it.isFinite() }
+        if (xs.isEmpty()) return null
+        var lo = xs.min()
+        var hi = xs.max()
+        if (hi - lo < 1e-9) {
+            // 退化成一个点（r=0）：给一个宽 2 的窗口，否则没法画坐标轴
+            lo -= 1.0
+            hi += 1.0
+        }
+        val pad = (hi - lo) * 0.1
+        return (lo - pad) to (hi + pad)
+    }
+
+    /** 隐函数的 y 窗口：按 x 跨度 × 画布纵横比，以 0 为中心上下对称。 */
+    private fun implicitYWindow(
+        xMin: Double,
+        xMax: Double,
+        requestedMin: Double?,
+        requestedMax: Double?
+    ): Pair<Double, Double>? {
+        val half = (xMax - xMin) / 2.0 * IMPLICIT_ASPECT
+        var lo = -half
+        var hi = half
+        requestedMin?.let { lo = it }
+        requestedMax?.let { hi = it }
+        return if (hi > lo) lo to hi else null
     }
 
     private fun render(
         curves: List<Curve>,
-        sampled: List<List<Double>>,
+        parsed: List<PlotCurve>,
         xMin: Double,
         xMax: Double,
         yMin: Double,
         yMax: Double,
+        thetaMin: Double,
+        thetaMax: Double,
         title: String?
     ): String {
         val marginTop = if (title != null) MARGIN_TOP_TITLED else MARGIN_TOP
@@ -228,8 +347,25 @@ object FunctionPlotter {
             .append("\">y</text>\n")
 
         // ---- 曲线 ----
-        sampled.forEachIndexed { index, values ->
-            val path = curvePath(values, xMin, xMax, yMin, yMax, ::sx, ::sy)
+        // 三种曲线共用 CurveSampler：显函数逐 x 采样、极坐标逐 θ 采样、
+        // 隐函数在窗口上求等值线，结果都是「像素折线」，这里只负责拼 SVG。
+        // 每条曲线**只出一个 <path>**，多段折线拼成多个 M…L… 子路径：
+        // 隐函数的上千个小段若各占一个 <path>，SVG 体积会翻几十倍，聊天记录
+        // 和导出文件都会被撑爆（渲染器本来就允许一条路径里出现多个 M）。
+        parsed.forEachIndexed { index, curve ->
+            val segments = CurveSampler.segments(
+                curve = curve,
+                xMin = xMin,
+                xMax = xMax,
+                yMin = yMin,
+                yMax = yMax,
+                mapX = ::sx,
+                mapY = ::sy,
+                thetaMin = thetaMin,
+                thetaMax = thetaMax
+            )
+            if (segments.isEmpty()) return@forEachIndexed
+            val path = segmentsPath(segments)
             if (path.isNotEmpty()) {
                 sb.append("<path d=\"").append(path)
                     .append("\" fill=\"none\" stroke=\"").append(COLORS[index % COLORS.size])
@@ -266,35 +402,19 @@ object FunctionPlotter {
     }
 
     /**
-     * 采样点 → SVG 路径。
+     * 像素折线 → SVG 路径。
      *
-     * 断线与像素级去重的判据都在 [FunctionSampler.segments]（函数计算器页的
-     * 画布用的是同一份，两边的图必须断在同一个地方）；这里只负责把折线段
-     * 拼成 SVG 的 `d`。段与段之间**不连**：一整条路径里出现两个 `M`，
-     * 渲染器就不会把它们连起来。
+     * 折线与断线的判据都在 [CurveSampler]（函数计算器页的画布用的是同一份，
+     * 两边的图必须断在同一个地方）；这里只负责把折线段拼成 SVG 的 `d`。
+     * 段与段之间**不连**：一整条路径里出现多个 `M`，渲染器就不会把它们连起来。
      */
-    private fun curvePath(
-        values: List<Double>,
-        xMin: Double,
-        xMax: Double,
-        yMin: Double,
-        yMax: Double,
-        sx: (Double) -> Double,
-        sy: (Double) -> Double
-    ): String = FunctionSampler.segments(
-        values = values,
-        xMin = xMin,
-        xMax = xMax,
-        yMin = yMin,
-        yMax = yMax,
-        mapX = sx,
-        mapY = sy
-    ).joinToString(" ") { segment ->
-        segment.withIndex().joinToString(" ") { (index, point) ->
-            // 段首用 M（另起一笔，两段之间就不会被连起来），段内用 L
-            (if (index == 0) "M " else "L ") + num(point.x) + " " + num(point.y)
+    private fun segmentsPath(segments: List<List<FunctionSampler.Pt>>): String =
+        segments.joinToString(" ") { segment ->
+            segment.withIndex().joinToString(" ") { (index, point) ->
+                // 段首用 M（另起一笔，两段之间就不会被连起来），段内用 L
+                (if (index == 0) "M " else "L ") + num(point.x) + " " + num(point.y)
+            }
         }
-    }
 
     /** 坐标保留一位小数：省一半体积，视觉上分不出来。 */
     private fun num(value: Double): String = String.format(Locale.US, "%.1f", value)
