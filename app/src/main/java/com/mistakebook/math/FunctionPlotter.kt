@@ -2,10 +2,6 @@ package com.mistakebook.math
 
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.ceil
-import kotlin.math.floor
-import kotlin.math.log10
-import kotlin.math.pow
 
 /**
  * 数学函数图像绘制（issue #54：「画图生图里面最好有一个专用的数学函数画图
@@ -32,6 +28,10 @@ import kotlin.math.pow
  * `ln(x)` 在 x<0 没有定义、`1/x` 在 0 处是无穷、`tan(x)` 有极点——这些点上
  * 采样值是非有限值或跨窗口的跳变。**必须断线**：连起来就会出现一条假的
  * 竖直渐近线，学生会把它当成函数的一部分。
+ *
+ * 采样、断线、刻度与 y 窗口这些**与画布共用**的算法都在 [FunctionSampler]
+ * 里（v0.0.144 抽出去的）：函数计算器页会实时画同一组表达式，画布上的线
+ * 与这里的 SVG 必须是同一套断线口径，否则同一条函数会出现两张不一样的图。
  */
 object FunctionPlotter {
 
@@ -48,22 +48,6 @@ object FunctionPlotter {
     /** 无标题时的上边距；有标题时给标题留一行。 */
     private const val MARGIN_TOP = 28
     private const val MARGIN_TOP_TITLED = 58
-
-    /** 采样点数：太密 SVG 巨大，太疏曲线发折。480 在 720px 宽下足够顺滑。 */
-    private const val SAMPLES = 480
-
-    /** 相邻采样跳变超过「窗口高度 × 这个倍数」就判定为极点，断开路径。 */
-    private const val POLE_JUMP_FACTOR = 6.0
-
-    /**
-     * 自动 y 窗口时，极值跨度超过「中间 90% 样本跨度」的多少倍就改用分位数。
-     *
-     * 4 倍这条线是实测调出来的：`1/x` 在 x∈[-2,2] 上的极值跨度是中间样本的
-     * 6 倍左右，用 8 倍会漏判 → 窗口被拉到 ±120 → 极点两侧的跳变反而"不显眼"，
-     * 于是左右两支被一条假竖线连起来（单测 `极点处断线而不是连一条假的竖线`
-     * 就是抓这个）。抛物线（跨度 ≈ 2 倍）不受影响，仍走完整范围。
-     */
-    private const val OUTLIER_FACTOR = 4.0
 
     /** 曲线配色：与应用的学科色系同族，四条以内足够区分。 */
     private val COLORS = listOf("#1B4ED8", "#C62828", "#2E7D32", "#6A1B9A")
@@ -123,10 +107,7 @@ object FunctionPlotter {
 
         // 采样：一条曲线一份序列，NaN/Inf 原样保留（断线判定要用）。
         val sampled: List<List<Double>> = compiled.map { (_, evaluator) ->
-            (0 until SAMPLES).map { i ->
-                val x = xMin + (xMax - xMin) * i / (SAMPLES - 1.0)
-                evaluator.eval(x)
-            }
+            FunctionSampler.sample(evaluator, xMin, xMax)
         }
 
         val finiteAll = sampled.flatten().filter { it.isFinite() }
@@ -136,7 +117,7 @@ object FunctionPlotter {
             )
         }
 
-        val yRange = resolveYRange(
+        val yRange = FunctionSampler.resolveYRange(
             finite = finiteAll,
             requestedMin = request.yMin,
             requestedMax = request.yMax
@@ -154,44 +135,6 @@ object FunctionPlotter {
             title = request.title?.trim()?.takeIf { it.isNotEmpty() }
         )
         return Result.Ok(svg, xMin, xMax, yRange.first, yRange.second)
-    }
-
-    /**
-     * y 轴窗口：用户给了就用用户的；否则自动。
-     *
-     * 自动取值分两种情况（这是「函数图像好不好看」的关键）：
-     * - **正常函数**（抛物线、指数、正弦）：取全部采样点的最小/最大值，
-     *   曲线完整落在框内，不被截掉；
-     * - **有极点的函数**（`1/x`、`tan`）：极值可以到 1e16，直接取 min/max
-     *   会把整张图压成一条水平线。判定标准是「极值跨度远大于中间 90%
-     *   样本的跨度」，此时改用 5%~95% 分位，让双曲线/正切在框内看起来正常。
-     */
-    private fun resolveYRange(
-        finite: List<Double>,
-        requestedMin: Double?,
-        requestedMax: Double?
-    ): Pair<Double, Double>? {
-        if (requestedMin != null && requestedMax != null) {
-            return if (requestedMax > requestedMin) requestedMin to requestedMax else null
-        }
-        val sorted = finite.sorted()
-        val full = sorted.first() to sorted.last()
-        val coreLo = sorted[(sorted.size * 0.05).toInt().coerceIn(0, sorted.size - 1)]
-        val coreHi = sorted[(sorted.size * 0.95).toInt().coerceIn(0, sorted.size - 1)]
-        val useCore = (full.second - full.first) > OUTLIER_FACTOR * (coreHi - coreLo) &&
-            coreHi > coreLo
-
-        var lo = if (useCore) coreLo else full.first
-        var hi = if (useCore) coreHi else full.second
-        requestedMin?.let { lo = it }
-        requestedMax?.let { hi = it }
-        if (hi <= lo) {
-            // 常数函数（y=3）：给一个以它为中心的窗口，否则「高度 0」没法画
-            val center = lo
-            return center - 1.0 to center + 1.0
-        }
-        val pad = (hi - lo) * 0.1
-        return lo - pad to hi + pad
     }
 
     private fun render(
@@ -227,10 +170,10 @@ object FunctionPlotter {
             .append("\"/>\n")
 
         // ---- 刻度与网格 ----
-        val xStep = niceStep(xMax - xMin, target = 8)
-        val yStep = niceStep(yMax - yMin, target = 6)
-        val xTicks = ticks(xMin, xMax, xStep)
-        val yTicks = ticks(yMin, yMax, yStep)
+        val xStep = FunctionSampler.niceStep(xMax - xMin, target = 8)
+        val yStep = FunctionSampler.niceStep(yMax - yMin, target = 6)
+        val xTicks = FunctionSampler.ticks(xMin, xMax, xStep)
+        val yTicks = FunctionSampler.ticks(yMin, yMax, yStep)
 
         xTicks.forEach { x ->
             val px = sx(x)
@@ -260,14 +203,14 @@ object FunctionPlotter {
             if (abs(x) < 1e-9 && xMin <= 0.0 && xMax >= 0.0) return@forEach
             sb.append("<text x=\"").append(num(sx(x))).append("\" y=\"").append(num(axisY + 18))
                 .append("\" font-size=\"13\" fill=\"").append(LABEL)
-                .append("\" text-anchor=\"middle\">").append(esc(number(x)))
+                .append("\" text-anchor=\"middle\">").append(esc(FunctionSampler.formatTick(x)))
                 .append("</text>\n")
         }
         yTicks.forEach { y ->
             if (abs(y) < 1e-9 && yMin <= 0.0 && yMax >= 0.0) return@forEach
             sb.append("<text x=\"").append(num(axisX - 8)).append("\" y=\"").append(num(sy(y) + 4))
                 .append("\" font-size=\"13\" fill=\"").append(LABEL)
-                .append("\" text-anchor=\"end\">").append(esc(number(y)))
+                .append("\" text-anchor=\"end\">").append(esc(FunctionSampler.formatTick(y)))
                 .append("</text>\n")
         }
         // 原点一个 0 就够，别写两遍
@@ -294,7 +237,6 @@ object FunctionPlotter {
                     .append(" stroke-linejoin=\"round\"/>\n")
             }
         }
-
         // ---- 图例：多于一条曲线、或有自定义名字时才需要 ----
         val named = curves.filter { it.label.isNotBlank() }
         if (curves.size > 1 || named.isNotEmpty()) {
@@ -326,12 +268,10 @@ object FunctionPlotter {
     /**
      * 采样点 → SVG 路径。
      *
-     * 断线三种情况，缺一不可：
-     * 1. 非有限值（`ln(-1)`、`1/0`）——这一点没有定义；
-     * 2. 相邻两点跳变超过窗口高度的 [POLE_JUMP_FACTOR] 倍——`tan(x)` 跨极点，
-     *    连起来就是一条假竖直渐近线；
-     * 3. 超出窗口的点先**夹到边框**（曲线看起来顶到框沿），此时若紧接着
-     *    跳到另一侧，同样按 2 断开。
+     * 断线与像素级去重的判据都在 [FunctionSampler.segments]（函数计算器页的
+     * 画布用的是同一份，两边的图必须断在同一个地方）；这里只负责把折线段
+     * 拼成 SVG 的 `d`。段与段之间**不连**：一整条路径里出现两个 `M`，
+     * 渲染器就不会把它们连起来。
      */
     private fun curvePath(
         values: List<Double>,
@@ -341,80 +281,19 @@ object FunctionPlotter {
         yMax: Double,
         sx: (Double) -> Double,
         sy: (Double) -> Double
-    ): String {
-        val sb = StringBuilder(values.size * 8)
-        val span = yMax - yMin
-        var started = false
-        var lastDrawnY = Double.NaN
-        var prevValue = Double.NaN
-
-        values.forEachIndexed { index, value ->
-            val x = xMin + (xMax - xMin) * index / (values.size - 1.0)
-            val finite = value.isFinite()
-            val jump = finite && prevValue.isFinite() &&
-                (
-                    abs(value - prevValue) > span * POLE_JUMP_FACTOR ||
-                        // 两侧都远在窗口之外、符号还相反：中间必然跨过一个极点
-                        // （`1/x` 在 0 两侧、`tan(x)` 在 π/2 两侧都是这种形态）。
-                        // 只看跳变幅度不够——跳变会被夹到框内，看起来"不远"。
-                        (value * prevValue < 0.0 &&
-                            abs(value) > span && abs(prevValue) > span)
-                    )
-            if (!finite || jump) {
-                started = false
-                prevValue = value
-                return@forEachIndexed
-            }
-            prevValue = value
-            val clamped = value.coerceIn(yMin, yMax)
-            val px = sx(x)
-            val py = sy(clamped)
-            // 亚像素级重复点丢掉：路径能小一半，视觉上无差别
-            if (started && abs(py - lastDrawnY) < 0.4 && index != values.lastIndex) return@forEachIndexed
-            sb.append(if (started) " L" else " M")
-                .append(num(px)).append(' ').append(num(py))
-            started = true
-            lastDrawnY = py
+    ): String = FunctionSampler.segments(
+        values = values,
+        xMin = xMin,
+        xMax = xMax,
+        yMin = yMin,
+        yMax = yMax,
+        mapX = sx,
+        mapY = sy
+    ).joinToString(" ") { segment ->
+        segment.withIndex().joinToString(" ") { (index, point) ->
+            // 段首用 M（另起一笔，两段之间就不会被连起来），段内用 L
+            (if (index == 0) "M " else "L ") + num(point.x) + " " + num(point.y)
         }
-        return sb.toString().trim()
-    }
-
-    /** 落在 [min, max] 内的刻度值（含端点附近的整步长点）。 */
-    private fun ticks(min: Double, max: Double, step: Double): List<Double> {
-        if (step <= 0 || !step.isFinite()) return emptyList()
-        val first = ceil(min / step - 1e-9) * step
-        val out = ArrayList<Double>()
-        var v = first
-        var guard = 0
-        while (v <= max + step * 1e-6 && guard < 64) {
-            out += v
-            v += step
-            guard++
-        }
-        return out
-    }
-
-    /** 1 / 2 / 2.5 / 5 × 10^k 里挑一个让刻度数接近 target 的步长。 */
-    private fun niceStep(span: Double, target: Int): Double {
-        if (!span.isFinite() || span <= 0) return 1.0
-        val raw = span / target
-        val magnitude = 10.0.pow(floor(log10(raw)))
-        val normalized = raw / magnitude
-        val multiplier = when {
-            normalized <= 1.0 -> 1.0
-            normalized <= 2.0 -> 2.0
-            normalized <= 2.5 -> 2.5
-            normalized <= 5.0 -> 5.0
-            else -> 10.0
-        }
-        return multiplier * magnitude
-    }
-
-    /** 刻度数字：去掉浮点尾巴（0.30000000000000004 → 0.3），大数走科学计数。 */
-    private fun number(value: Double): String = when {
-        value == 0.0 -> "0"
-        abs(value) >= 1e5 || abs(value) < 1e-4 -> String.format(Locale.US, "%.3g", value)
-        else -> String.format(Locale.US, "%.6f", value).trimEnd('0').trimEnd('.')
     }
 
     /** 坐标保留一位小数：省一半体积，视觉上分不出来。 */

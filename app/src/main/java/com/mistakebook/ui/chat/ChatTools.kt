@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Icon
@@ -49,7 +50,12 @@ internal enum class ChatTool(
     /** 拍题 / 翻译 / 作文批改都从一张照片开始：进对话页后自动拉起相机，拍完裁切自动发送。 */
     val needsCamera: Boolean,
     val needsLlm: Boolean,
-    val needsOcr: Boolean
+    val needsOcr: Boolean,
+    /**
+     * 是否是「手动入口」：点它打开自己的输入框，而不是预填一句提示词。
+     * 目前只有函数画图（v0.0.144）是这种。
+     */
+    val manual: Boolean = false
 ) {
     PHOTO(
         labelRes = R.string.chat_tool_photo,
@@ -94,6 +100,24 @@ internal enum class ChatTool(
         needsCamera = false,
         needsLlm = true,
         needsOcr = false
+    ),
+
+    /**
+     * 函数画图（v0.0.144）：六个入口里**唯一不是预填提示词**的一个。
+     *
+     * 其余五个都是「把用户送到那条对话里，并替他把第一句话写好」；函数图像
+     * 却是**本机算出来的**：填表达式 → 直接出图，不经过模型、不需要任何 Key。
+     * 所以它的 [instruction] 是空的，[needsLlm] 也是 false——没配模型时它照样
+     * 能用（这正是手动入口存在的意义：模型限流或没配 Key 时，图照样画得出来）。
+     */
+    PLOT(
+        labelRes = R.string.chat_tool_plot,
+        icon = Icons.Default.ShowChart,
+        instruction = "",
+        needsCamera = false,
+        needsLlm = false,
+        needsOcr = false,
+        manual = true
     ),
 }
 

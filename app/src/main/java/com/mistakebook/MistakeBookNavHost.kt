@@ -33,6 +33,7 @@ import com.mistakebook.ui.home.HomeScreen
 import com.mistakebook.ui.portal.MainPortalScreen
 import com.mistakebook.ui.importpdf.PdfImportScreen
 import com.mistakebook.ui.notebook.NotebookScreen
+import com.mistakebook.ui.plot.GraphingCalculatorScreen
 import com.mistakebook.ui.print.PrintScreen
 import com.mistakebook.ui.progress.ProgressScreen
 import com.mistakebook.ui.settings.SettingsScreen
@@ -68,6 +69,20 @@ object Routes {
     const val ARCHIVED_QUESTIONS = "archivedQuestions"
     const val ARCHIVED_SESSIONS = "archivedSessions"
     const val ARCHIVED_TASKS = "archivedTasks"
+
+    /**
+     * 函数计算器（图形计算器，v0.0.144，issue #54 的手动入口）。
+     *
+     * 独立成一页而不是弹窗：拖动/缩放/双击复位这些手势要一整块画布才做得开。
+     * 进来时要带一条会话 id——「存到对话」得知道图往哪儿写（抽屉入口会先
+     * 把自由会话建出来再跳）。
+     */
+    const val PLOTTER = "plotter"
+
+    /** 函数计算器页的路由模式（带参数占位符）：`popUpTo` 要按完整 pattern 匹配。 */
+    const val PLOTTER_PATTERN = "$PLOTTER/{sessionId}"
+
+    fun plotter(sessionId: Long): String = "$PLOTTER/$sessionId"
 
     /**
      * 聊天页路由。
@@ -743,12 +758,40 @@ fun MistakeBookNavHost(
                 },
                 // 抽屉底部「已归档对话」（v0.0.127，issue #41）：直达归档页，
                 // 不用再从设置里绕三层。
-                onOpenArchivedSessions = { navController.navigate(Routes.ARCHIVED_SESSIONS) }
+                onOpenArchivedSessions = { navController.navigate(Routes.ARCHIVED_SESSIONS) },
+                // 抽屉里的「函数画图」（v0.0.144）：对话页会先把自由会话建好再
+                // 带着 id 跳过去——计算器页的「存到对话」得有会话可写。
+                onOpenPlotter = { sessionId -> navController.navigate(Routes.plotter(sessionId)) }
             )
         }
 
         composable(Routes.PRINT) {
             PrintScreen(container = container, onBack = { navController.popBackStack() })
+        }
+
+        /**
+         * 函数计算器（v0.0.144，issue #54 的手动入口）。
+         *
+         * 「存到对话」把当前视口的图写成会话里的一问一答：**先落库、再跳到那条
+         * 会话**看结果——图在别处生成、人却回到另一条对话，用户会以为没存上。
+         * 计算器这一层从返回栈里去掉：从那条会话返回，回到的是用户原来待着的
+         * 对话页，而不是又一张算图页。
+         */
+        composable(
+            route = Routes.PLOTTER_PATTERN,
+            arguments = listOf(navArgument("sessionId") { type = NavType.LongType })
+        ) { entry ->
+            val sessionId = entry.arguments?.getLong("sessionId") ?: Routes.CHAT_FREE
+            GraphingCalculatorScreen(
+                container = container,
+                sessionId = sessionId,
+                onBack = { navController.popBackStack() },
+                onSaved = {
+                    navController.navigate(Routes.chat(null, sessionId)) {
+                        popUpTo(entry.destination.id) { inclusive = true }
+                    }
+                }
+            )
         }
 
         composable(Routes.PDF_IMPORT) {

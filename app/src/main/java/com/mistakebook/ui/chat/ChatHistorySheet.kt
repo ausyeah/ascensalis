@@ -101,6 +101,11 @@ internal fun ChatHistorySheet(
     snackbarHostState: androidx.compose.material3.SnackbarHostState,
     onOpenSession: (sessionId: Long, questionId: Long?) -> Unit,
     /**
+     * 「函数画图」这个手动入口（v0.0.144）：它不预填提示词，也不建会话——
+     * 由对话页弹出输入框，用户填完表达式再决定写进哪个会话。
+     */
+    onOpenPlotPicker: () -> Unit = {},
+    /**
      * 跳到「已归档会话」（v0.0.127，issue #41）。
      *
      * 用户：「建议加一个归档对话的按钮方便直接跳转查看已归档对话」——
@@ -253,15 +258,21 @@ internal fun ChatHistorySheet(
                         // 先合抽屉再干活：不关的话新会话已经在底下加载，
                         // 抽屉还盖在上面，用户会以为点了没反应。
                         scope.launch { drawerState.close() }
+                        if (tool.manual) {
+                            // 手动入口（函数画图）：本机算图，不预填提示词，
+                            // 也不建会话——等用户填完表达式再决定。
+                            onOpenPlotPicker()
+                        } else {
                         // 指令与「要不要先拍照」经容器交接（与相机拍照同一套惯例）；
                         // 需要拍照的入口由对话页自动拉起相机，拍完自动发送。
-                        viewModel.startFreeSession { sessionId ->
-                            container.pendingTool = PendingTool(
-                                sessionId = sessionId,
-                                tool = tool,
-                                instruction = tool.instruction
-                            )
-                            onOpenSession(sessionId, null)
+                            viewModel.startFreeSession { sessionId ->
+                                container.pendingTool = PendingTool(
+                                    sessionId = sessionId,
+                                    tool = tool,
+                                    instruction = tool.instruction
+                                )
+                                onOpenSession(sessionId, null)
+                            }
                         }
                     }
                 )

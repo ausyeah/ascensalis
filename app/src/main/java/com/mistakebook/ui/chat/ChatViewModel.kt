@@ -1635,6 +1635,36 @@ class ChatViewModel(
         viewModelScope.launch { _events.send(ChatEvent.Copied) }
     }
 
+    /**
+     * 手动函数画图（v0.0.144，issue #54 的手动入口）：本机算好的图，按
+     * 「一问一答」两条消息写进会话。
+     *
+     * 写用户那一句是有原因的：会话标题取自第一条用户消息（空会话会在列表里
+     * 显示成「未命名对话」），而且以后翻会话时得看得出当时画的是什么。
+     *
+     * [onInserted] 在**两条都落库之后**才回调，是给函数计算器页做「存完回会话」
+     * 的导航用的：那里一导航这一页就被销毁，viewModelScope 跟着取消——
+     * 先跳走的话这两条消息可能一条都没写完。
+     */
+    fun insertPlotExchange(
+        sessionId: Long,
+        request: com.mistakebook.math.FunctionPlotter.Request,
+        plotted: com.mistakebook.math.FunctionPlotter.Result.Ok,
+        onInserted: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.insertUserMessage(
+                sessionId,
+                com.mistakebook.data.chat.PlotMessages.userText(request)
+            )
+            repository.insertAssistantMessage(
+                sessionId,
+                com.mistakebook.data.chat.PlotMessages.assistantContent(request, plotted)
+            )
+            onInserted()
+        }
+    }
+
     fun deleteMessage(id: Long) {
         viewModelScope.launch { repository.deleteMessage(id) }
     }

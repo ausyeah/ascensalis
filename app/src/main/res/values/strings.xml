@@ -636,6 +636,32 @@
     <string name="chat_tool_essay">作文批改</string>
     <string name="chat_tool_grade">题目批改</string>
     <string name="chat_tool_diagram">绘图生图</string>
+    <!-- 函数画图（v0.0.144）：抽屉里的手动入口 + 绘图输入框 -->
+    <string name="chat_tool_plot">函数画图</string>
+    <string name="plot_dialog_title">函数图像</string>
+    <string name="plot_dialog_expressions">函数表达式</string>
+    <string name="plot_dialog_curve_hint">例如 x^2+2x、sin(x)、1/x</string>
+    <string name="plot_dialog_add_curve">再加一条</string>
+    <string name="plot_dialog_remove_curve">删掉这条</string>
+    <string name="plot_dialog_x_range">x 的范围</string>
+    <string name="plot_dialog_y_range">y 的范围（留空自动）</string>
+    <string name="plot_dialog_title_field">标题（可留空）</string>
+    <string name="plot_dialog_min">最小</string>
+    <string name="plot_dialog_max">最大</string>
+    <string name="plot_dialog_draw">绘制</string>
+    <string name="plot_dialog_error">画不了：%1$s</string>
+    <string name="plot_dialog_need_expression">至少写一条表达式</string>
+    <!-- 函数计算器页（v0.0.144）：全屏固定画布 + 函数列表。
+         表达式输入、加/删一条、空表达式提示这些与上面的输入框是同一句话，
+         直接复用 plot_dialog_* 那一组，不再来一份。 -->
+    <string name="plotter_functions">函数</string>
+    <string name="plotter_max_curves">最多画 4 条，再多图就看不清了</string>
+    <string name="plotter_expression_error">这个式子画不了：%1$s</string>
+    <string name="plotter_range">x ∈ [%1$s, %2$s]</string>
+    <string name="plotter_reset">复位视图</string>
+    <string name="plotter_gesture_hint">拖动平移 · 双指缩放 · 双击复位</string>
+    <string name="plotter_save">存到对话</string>
+    <string name="plotter_canvas_desc">函数图像画布</string>
     <string name="home_snap_ask">拍题讲解</string>
     <string name="swipe_pin_action">置顶</string>
     <string name="swipe_unpin_action">取消置顶</string>

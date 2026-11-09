@@ -20,15 +20,18 @@ import com.mistakebook.R
 class ChatToolsTest {
 
     @Test
-    fun `五个入口一个不多一个不少`() {
+    fun `六个入口一个不多一个不少`() {
         // v0.0.121（issue #36）：批改从输入栏开关升级成对话历史独立入口
-        assertEquals(5, ChatTool.entries.size)
+        // v0.0.144（issue #54）：加「函数画图」——内置固定画布的计算器，
+        // 与「绘图生图」并列在同一个抽屉菜单里。
+        assertEquals(6, ChatTool.entries.size)
         listOf(
             R.string.chat_tool_photo,
             R.string.chat_tool_translate,
             R.string.chat_tool_essay,
             R.string.chat_tool_grade,
-            R.string.chat_tool_diagram
+            R.string.chat_tool_diagram,
+            R.string.chat_tool_plot
         ).forEach { res ->
             assertTrue(
                 "入口文案必须在清单里（res=$res）",
@@ -42,13 +45,19 @@ class ChatToolsTest {
     }
 
     @Test
-    fun `每个入口都有隐藏指令且不为空`() {
-        ChatTool.entries.forEach { tool ->
+    fun `每个预填入口都有隐藏指令且不为空`() {
+        // 手动入口（函数画图）例外：它不预填提示词，是打开自己的画布页面，
+        // 所以没有指令是**对的**，不是「功能没接上」。
+        ChatTool.entries.filter { !it.manual }.forEach { tool ->
             assertTrue(
                 "${tool.name} 的隐藏指令不能为空——空指令等于功能没接上",
                 tool.instruction.isNotBlank()
             )
         }
+        assertTrue(
+            "函数画图必须是手动入口（本机算图，不预填提示词）",
+            ChatTool.PLOT.manual
+        )
     }
 
     @Test
@@ -57,7 +66,8 @@ class ChatToolsTest {
         // 写上「请把下面的内容…」以外的 UI 措辞，也轮不到这里管——
         // 这里钉的是更实际的回归：指令被误改成以用户口吻开头，
         // 发出去就成了用户「说过」的话。
-        ChatTool.entries.forEach { tool ->
+        // 手动入口（函数画图）没有指令——它不是预填提示词，是打开画布页面
+        ChatTool.entries.filter { !it.manual }.forEach { tool ->
             assertFalse(
                 "${tool.name} 的指令必须以模式声明开头（【…模式】），不能像用户说的话",
                 !tool.instruction.trimStart().startsWith("【")
@@ -110,10 +120,16 @@ class ChatToolsTest {
     }
 
     @Test
-    fun `没配模型时所有入口都提示需配模型`() {
-        ChatTool.entries.forEach { tool ->
+    fun `没配模型时预填入口都提示需配模型`() {
+        // 函数画图是本机算图，不需要模型：没配 Key 也照样能画（这正是
+        // 手动入口存在的意义——模型限流或没配 Key 时图照样出得来）。
+        ChatTool.entries.filter { !it.manual }.forEach { tool ->
             assertEquals(ChatToolBlock.NEEDS_LLM, tool.blockReason(llmConfigured = false, ocrConfigured = true))
         }
+        assertEquals(
+            ChatToolBlock.READY,
+            ChatTool.PLOT.blockReason(llmConfigured = false, ocrConfigured = false)
+        )
     }
 
     @Test

@@ -198,7 +198,13 @@ fun ChatScreen(
     /** 右上角：开一条临时对话，退出即删（v0.0.96）。 */
     onNewTemporaryConversation: () -> Unit = {},
     /** 抽屉底部「已归档对话」（v0.0.127，issue #41）。 */
-    onOpenArchivedSessions: () -> Unit = {}
+    onOpenArchivedSessions: () -> Unit = {},
+    /**
+     * 抽屉里的「函数画图」（v0.0.144）：打开全屏函数计算器。
+     *
+     * 传的是**会话 id**：计算器页的「存到对话」得知道图往哪儿写。
+     */
+    onOpenPlotter: (Long) -> Unit = {}
 ) {
     val viewModel = containerViewModel(
         container = container,
@@ -227,6 +233,14 @@ fun ChatScreen(
     // 用 collectAsState 而不是 collectAsStateWithLifecycle：
     // 后者在 lifecycle-runtime-compose 里，本项目没引这个依赖（零新增依赖）。
     val state by viewModel.state.collectAsState()
+
+    // 抽屉里的手动入口（函数画图）要**先有一条会话**再跳过去：计算器页存图
+    // 得有会话可写。会话列表的 ViewModel 与抽屉自己用的是同一个实例
+    // （同 owner、同默认 key），startFreeSession 的口径也一致
+    // ——复用已存在的空自由会话，连点几下不会多出一堆空对话。
+    val listViewModel = containerViewModel(container) { c ->
+        ChatListViewModel(c.chatRepository, c.database.questionDao())
+    }
 
     // AI 流式输出期间保持屏幕常亮（用户反馈：会话正在输出时因「长时间无操作」被息屏）。
     // 一次回答经常几十秒，用户全程在读、不需要碰屏幕，系统却按无操作掐屏，阅读被打断。
@@ -510,6 +524,13 @@ fun ChatScreen(
                     drawerState = drawerState,
                     snackbarHostState = snackbarHost,
                     onOpenSession = onOpenSession,
+                    // 「函数画图」是本机算图：它不预填提示词，也不该等模型，
+                    // 所以不走 pendingTool 那条路——只把会话建出来，交给计算器页。
+                    onOpenPlotPicker = {
+                        listViewModel.startFreeSession { newSessionId ->
+                            onOpenPlotter(newSessionId)
+                        }
+                    },
                     onOpenArchivedSessions = onOpenArchivedSessions
                 )
             }
