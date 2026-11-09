@@ -59,6 +59,21 @@ class ToolRoundState {
         thinkingRound.setLength(0)
     }
 
+    /**
+     * 直接往**跨轮累积**的正文里注入一段内容（工具产出的成品，如函数图像 SVG）。
+     *
+     * 为什么不走 [onDelta]：`onDelta` 会同时写进**本轮**缓冲，而本轮缓冲会作为
+     * assistant 回声回传给模型——一张 20KB 的 SVG 每轮回传一次，既烧 token
+     * 又毫无意义（模型不需要重读自己刚生成的坐标）。
+     *
+     * 为什么不插进工具结果里让模型转述：转述必然要模型把几万字符原样吐出，
+     * 截断一处整张图就废了。图是**渲染产物**，就该由客户端直接放进回答。
+     */
+    fun injectAnswer(text: String) {
+        if (text.isEmpty()) return
+        answerAll.append(text)
+    }
+
     /** 跨轮累积的正文（最终答案的一部分）。 */
     val answer: String get() = answerAll.toString()
 

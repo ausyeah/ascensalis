@@ -359,6 +359,11 @@ class ChatGenerationService : Service() {
                         // 反问用户（v0.0.128，issue #46）：需要澄清时抛选项卡片，
                         // 用户在界面上点选，结果回到工具结果里；超时自动跳过。
                         add(com.mistakebook.data.chat.AskUserTools.tool())
+                        // 函数图像（v0.0.143，issue #54）：模型给表达式，采样与
+                        // 刻度由本站精确计算，避免「手写 SVG 曲线靠猜」与
+                        // 「生图模型画出对不上刻度的插画」。纯计算、无副作用，
+                        // 也不需要任何 Key，始终提供。
+                        addAll(com.mistakebook.data.chat.PlotTools.all())
                     }.takeIf { it.isNotEmpty() }
                 )
                 // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）。
@@ -483,6 +488,7 @@ class ChatGenerationService : Service() {
                         call.name == MediaTools.GENERATE_IMAGE -> "正在生成图片…"
                         call.name == com.mistakebook.data.chat.MemoryTools.SAVE -> "正在记下这条…"
                         call.name == com.mistakebook.data.chat.AskUserTools.ASK_USER -> "等你选一下…"
+                        com.mistakebook.data.chat.PlotTools.handles(call.name) -> "正在画函数图像…"
                         else -> "正在调用工具…"
                     }
                     ChatGenerationBus.publish(
@@ -614,6 +620,34 @@ class ChatGenerationService : Service() {
                             }
                         }
 
+                        com.mistakebook.data.chat.PlotTools.PLOT_FUNCTION -> {
+                            val request = com.mistakebook.data.chat.PlotTools.parse(call.arguments)
+                            if (request == null) {
+                                "绘图失败：参数里缺 expressions（要画的函数表达式数组），" +
+                                    "请把表达式放进 expressions 再调一次。"
+                            } else {
+                                when (val plotted = com.mistakebook.math.FunctionPlotter.plot(request)) {
+                                    is com.mistakebook.math.FunctionPlotter.Result.Ok -> {
+                                        // 图**确定性**插进回答正文（见 ToolRoundState.injectAnswer）：
+                                        // 让模型转述这份 SVG 既烧 token 又必然被截断。
+                                        rounds.injectAnswer(
+                                            "\n\n" +
+                                                com.mistakebook.data.chat.PlotTools
+                                                    .fence(plotted.svg) +
+                                                "\n\n"
+                                        )
+                                        "已绘制函数图像并插进回答正文：" +
+                                            com.mistakebook.data.chat.PlotTools.summary(request.curves, plotted) +
+                                            "。图像是按表达式精确采样算出来的，请直接依据它讲解，" +
+                                            "**不要再手写 SVG 重画**，也不要用生图工具。"
+                                    }
+
+                                    is com.mistakebook.math.FunctionPlotter.Result.Failed ->
+                                        "绘图失败：${plotted.message}（修正表达式或范围后再调一次）"
+                                }
+                            }
+                        }
+
                         com.mistakebook.data.chat.AskUserTools.ASK_USER -> {
                             com.mistakebook.data.chat.AskUserTools.execute(
                                 arguments = call.arguments,
@@ -625,10 +659,15 @@ class ChatGenerationService : Service() {
                         else -> "未识别的工具「${call.name}」，请改用你确定存在的工具。"
                     }
                     // 工具跑完了：内容照旧带上，撤掉 stage。空 content 的快照一律不再发。
+                    //
+                    // **必须重新取**（不能复用工具执行前那份 `currentText`）：界面是
+                    // 整体替换语义，工具里往回答注入过内容的话（函数图像 SVG），
+                    // 拿旧内容发一次会把刚画好的图从屏幕上抹掉——图在库里、
+                    // 用户在屏幕上却看不见。
                     ChatGenerationBus.publish(
                         ChatGenerationBus.Snapshot(
                             assistantId = assistantId,
-                            content = currentText,
+                            content = joinThinkingAndAnswer(rounds.answer, rounds.thinking),
                             sessionId = sessionId
                         )
                     )
