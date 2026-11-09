@@ -23,12 +23,13 @@
 
 | 工具 | 干什么用 |
 |---|---|
-| **错题本** | 拍张照、选好题目，App 自动认出文字和公式，大模型顺手帮你整理成标准题型；攒着随时翻，勾选几下就能排版成 A4 打印重做 |
-| **AI 对话** | 题目看不懂？直接问。多渠道多 Key 大模型、能发图片和文档、支持联网搜索与生图，回答边想边流出；也可以开临时会话随手问 |
+| **错题本** | 拍张照、选好题目，App 自动认出文字和公式，大模型顺手帮你整理成标准题型；攒着随时翻，**左滑**置顶/归档、**右滑**直接看原题图（点一下全屏放大），勾选几下就能排版成 A4 打印重做 |
+| **AI 对话** | 题目看不懂？直接问。多渠道多 Key 大模型、能发图片和文档、支持联网搜索与生图，回答边想边流出；长对话自动压缩上下文、回答打转自动掐断，也可以开临时会话随手问 |
 | **记忆** | 让它长期记住你的背景、目标和偏好：一句话交给模型改写成分节文档，每轮对话自动带上 |
 | **资料库** | 把教材、讲义、试卷（md / txt / pdf / docx）存进 App，对话时 @ 它让 AI 参考；建好向量索引后**语义检索**——用中文问，英文资料也能命中 |
 | **背单词** | 四种考法随机出题（认词、选义、拼写、辨析），答错的自动收进复习队列，跟着记忆曲线安排下次见面 |
 | **番茄钟** | 专注计时 + 白噪音，按学科记录每次专注；今天学多久、这周什么走势、哪科投入最多，图表一看就知道；归档任务可随时找回 |
+| **复习与周报** | 按遗忘曲线排复习档期，今日该复习哪几道一目了然；AI 还能按薄弱知识点生成复习排期、知识体系思维导图与每周学习周报 |
 | **成就墙** | 100 枚徽章覆盖刷题、专注、背单词、对话、资料库与使用习惯，学习里程碑一眼可见 |
 
 **不联网也能用**：错题本支持纯手动录入，背单词、番茄钟完全本地。联网能力（题目识别、AI 讲解、生图）需要填自己的 API Key——Key 只存在本机加密空间里，不上传、不进日志。
@@ -37,20 +38,40 @@
 
 ## 截图
 
-> 均为 Android 模拟器实拍，示例内容为虚构数据。
+> 均为 Android 模拟器实拍（v0.0.142 版本），示例内容为虚构数据。
 
 ### 错题本：拍照识别 → 题库 → 打印
 
 <table>
 <tr>
-<td align="center"><img src="docs/screenshots/home.jpg" width="320" alt="主页"><br><sub><b>主页</b> · 考试倒计时 / 搜索 / 拍题入口</sub></td>
-<td align="center"><img src="docs/screenshots/home-questions.jpg" width="320" alt="题库列表"><br><sub><b>题库</b> · 筛选 / 搜索 / 左滑置顶与归档</sub></td>
-<td align="center"><img src="docs/screenshots/crop-demo.jpg" width="320" alt="框选题目与裁切"><br><sub><b>裁切</b> · 拖框选题目、框外压暗、图像增强</sub></td>
+<td align="center"><img src="docs/screenshots/home-overview.jpg" width="320" alt="错题本主页"><br><sub><b>主页</b> · 考试倒计时 / 搜索 / 待复习入口</sub></td>
+<td align="center"><img src="docs/screenshots/filter.jpg" width="320" alt="筛选"><br><sub><b>筛选</b> · 按学科 / 掌握度 / 错题本切片</sub></td>
+<td align="center"><img src="docs/screenshots/add-sheet.jpg" width="320" alt="添加入口"><br><sub><b>添加</b> · 拍题 / 相册 / PDF / 手动录入</sub></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/screenshots/edit-result-1.jpg" width="320" alt="识别结果编辑"><br><sub><b>核对</b> · 识别结果逐条编辑</sub></td>
-<td align="center"><img src="docs/screenshots/question-detail.jpg" width="320" alt="题目详情"><br><sub><b>详情</b> · 原题图 / 题干 / 答案 / 解析</sub></td>
-<td align="center"><img src="docs/screenshots/print-options.jpg" width="320" alt="打印选项"><br><sub><b>打印</b> · 字号字体 / 答案 / 留白重做</sub></td>
+<td align="center"><img src="docs/screenshots/crop.jpg" width="320" alt="框选裁切"><br><sub><b>裁切</b> · 拖四角框选题目，三档增强</sub></td>
+<td align="center"><img src="docs/screenshots/question-edit.jpg" width="320" alt="核对识别结果"><br><sub><b>核对</b> · 识别结果逐条可改，公式实时预览</sub></td>
+<td align="center"><img src="docs/screenshots/detail.jpg" width="320" alt="题目详情"><br><sub><b>详情</b> · 原题图 / 题干 / 答案，公式排版渲染</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshots/swipe-actions.jpg" width="320" alt="左滑操作"><br><sub><b>左滑</b> · 置顶与归档，归档两步确认</sub></td>
+<td align="center"><img src="docs/screenshots/image-preview.jpg" width="320" alt="右滑看题图"><br><sub><b>右滑</b> · 就地摊开原题图，右侧留拉手</sub></td>
+<td align="center"><img src="docs/screenshots/image-fullscreen.jpg" width="320" alt="全屏看图"><br><sub><b>看题图</b> · 点图全屏，双指缩放，点一下退出</sub></td>
+</tr>
+</table>
+
+### 复习、打印与统计
+
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/review.jpg" width="320" alt="今日复习"><br><sub><b>复习</b> · 会 / 模糊 / 不会 三档自评，自动排下次</sub></td>
+<td align="center"><img src="docs/screenshots/exam-plan.jpg" width="320" alt="复习排期"><br><sub><b>排期</b> · 按考试日期倒推复习档期</sub></td>
+<td align="center"><img src="docs/screenshots/print.jpg" width="320" alt="打印排版"><br><sub><b>打印</b> · 字号字体 / 答案解析 / 留白重做</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshots/stats.jpg" width="320" alt="错题统计"><br><sub><b>统计</b> · 错因 / 难度 / 学科分布与薄弱知识点</sub></td>
+<td align="center"><img src="docs/screenshots/mindmap.jpg" width="320" alt="思维导图"><br><sub><b>导图</b> · 按学科生成知识体系思维导图</sub></td>
+<td align="center"><img src="docs/screenshots/weekly-report.jpg" width="320" alt="学习周报"><br><sub><b>周报</b> · AI 按本周数据出诊断与下周建议</sub></td>
 </tr>
 </table>
 
@@ -58,19 +79,14 @@
 
 <table>
 <tr>
-<td align="center"><img src="docs/screenshots/chat-conversation.jpg" width="320" alt="AI 对话界面"><br><sub><b>对话</b> · 流式回复，公式逐条渲染</sub></td>
-<td align="center"><img src="docs/screenshots/temp-chat.jpg" width="320" alt="临时对话"><br><sub><b>临时对话</b> · 退出即归档，可再找回</sub></td>
-<td align="center"><img src="docs/screenshots/chat-history.jpg" width="320" alt="历史对话抽屉"><br><sub><b>历史</b> · 抽屉式列表，左滑置顶 / 重命名 / 归档（无缝圆角拼贴）</sub></td>
+<td align="center"><img src="docs/screenshots/chat-session.jpg" width="320" alt="对话与公式"><br><sub><b>对话</b> · 流式回答，公式逐条排版</sub></td>
+<td align="center"><img src="docs/screenshots/chat-context.jpg" width="320" alt="题目上下文"><br><sub><b>上下文</b> · 带着题目、学科、错因提问</sub></td>
+<td align="center"><img src="docs/screenshots/chat-drawer.jpg" width="320" alt="历史对话抽屉"><br><sub><b>历史</b> · 抽屉式列表，左滑置顶 / 重命名 / 归档</sub></td>
 </tr>
-</table>
-
-### 资料库与记忆：给 AI 挂上你的资料和背景
-
-<table>
 <tr>
-<td align="center"><img src="docs/screenshots/library.png" width="320" alt="资料库"><br><sub><b>资料库</b> · 教材讲义入库，向量化后语义检索</sub></td>
-<td align="center"><img src="docs/screenshots/library-search.jpg" width="320" alt="语义检索"><br><sub><b>语义检索</b> · 向量 + 关键词融合排序</sub></td>
-<td align="center"><img src="docs/screenshots/memory.jpg" width="320" alt="记忆库"><br><sub><b>记忆库</b> · 整篇分节文档，每轮对话自动带上</sub></td>
+<td align="center"><img src="docs/screenshots/temp-session.jpg" width="320" alt="临时对话"><br><sub><b>临时对话</b> · 退出即归档，可再找回</sub></td>
+<td align="center"><img src="docs/screenshots/memory-doc.jpg" width="320" alt="记忆库"><br><sub><b>记忆库</b> · 整篇分节文档，每轮对话自动带上</sub></td>
+<td align="center"><img src="docs/screenshots/library-index.jpg" width="320" alt="资料库"><br><sub><b>资料库</b> · 教材讲义入库，向量化后语义检索</sub></td>
 </tr>
 </table>
 
@@ -78,8 +94,9 @@
 
 <table>
 <tr>
-<td align="center"><img src="docs/screenshots/wordbook-study.png" width="320" alt="背单词刷题"><br><sub><b>刷题</b> · 四选一 / 卡片 / 释义 / 拼写轮着来</sub></td>
-<td align="center"><img src="docs/screenshots/wordbook-stats.png" width="320" alt="背单词统计"><br><sub><b>统计</b> · 词库进度 / 连续打卡 / 月度热力图</sub></td>
+<td align="center"><img src="docs/screenshots/word-study.jpg" width="320" alt="背单词刷题"><br><sub><b>刷题</b> · 四选一 / 卡片 / 释义 / 拼写轮着来</sub></td>
+<td align="center"><img src="docs/screenshots/word-search.jpg" width="320" alt="词库检索"><br><sub><b>词库</b> · 4356 考研词，中英文与释义都能搜</sub></td>
+<td align="center"><img src="docs/screenshots/word-stats.jpg" width="320" alt="背单词统计"><br><sub><b>统计</b> · 词库进度 / 连续打卡 / 月度热力图</sub></td>
 </tr>
 </table>
 
@@ -87,19 +104,24 @@
 
 <table>
 <tr>
-<td align="center"><img src="docs/screenshots/pomodoro-timer.png" width="320" alt="番茄钟计时"><br><sub><b>计时</b> · 按学科任务记每次专注</sub></td>
-<td align="center"><img src="docs/screenshots/pomodoro-stats.png" width="320" alt="番茄钟统计"><br><sub><b>统计</b> · 今日 / 近 7 天 / 近 30 天趋势</sub></td>
-<td align="center"><img src="docs/screenshots/badge-wall.png" width="320" alt="成就墙"><br><sub><b>成就墙</b> · 100 枚徽章，11 个类别</sub></td>
+<td align="center"><img src="docs/screenshots/pomodoro-timer.jpg" width="320" alt="番茄钟计时"><br><sub><b>计时</b> · 按学科记每次专注，可自定义时长</sub></td>
+<td align="center"><img src="docs/screenshots/pomodoro-stats.jpg" width="320" alt="番茄钟统计"><br><sub><b>统计</b> · 今日 / 近 7 天 / 近 30 天趋势</sub></td>
+<td align="center"><img src="docs/screenshots/badge-wall.jpg" width="320" alt="成就墙"><br><sub><b>成就墙</b> · 100 枚徽章，11 个类别</sub></td>
 </tr>
 </table>
 
-### 设置：全部自己掌控
+### 设置：Key、上下文与数据都在自己手里
 
 <table>
 <tr>
-<td align="center"><img src="docs/screenshots/settings-options.jpg" width="320" alt="设置"><br><sub><b>设置</b> · AI 与识别 / 学习 / 数据 / 通用 四组折叠</sub></td>
-<td align="center"><img src="docs/screenshots/archived-sessions.jpg" width="320" alt="已归档会话"><br><sub><b>已归档</b> · 归档会话 / 题目 / 任务都可恢复</sub></td>
-<td align="center"><img src="docs/screenshots/upload-1.jpg" width="320" alt="批量导入"><br><sub><b>批量导入</b> · 相册多选 / PDF 逐页提取</sub></td>
+<td align="center"><img src="docs/screenshots/settings.jpg" width="320" alt="设置总览"><br><sub><b>设置</b> · AI 与识别 / 学习 / 数据 / 通用 四组折叠</sub></td>
+<td align="center"><img src="docs/screenshots/ai-ocr.jpg" width="320" alt="OCR 配置"><br><sub><b>识别</b> · MinerU 或任意 OpenAI 兼容视觉模型</sub></td>
+<td align="center"><img src="docs/screenshots/ai-llm.jpg" width="320" alt="大模型配置"><br><sub><b>大模型</b> · 多套配置 / 多把 Key，思考强度可选</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshots/ai-context.jpg" width="320" alt="上下文与防循环"><br><sub><b>上下文</b> · 自动压缩阈值 + 循环输出保护</sub></td>
+<td align="center"><img src="docs/screenshots/archived-items.jpg" width="320" alt="已归档"><br><sub><b>归档</b> · 会话 / 题目 / 任务都能点开查看与恢复</sub></td>
+<td align="center"><img src="docs/screenshots/about.jpg" width="320" alt="关于与更新"><br><sub><b>关于</b> · 版本与更新检查，不预置任何 Key</sub></td>
 </tr>
 </table>
 
@@ -142,7 +164,7 @@ app/src/main/java/com/mistakebook/
 
 ```bash
 ./gradlew assembleDebug        # 构建 Debug 包
-./gradlew testDebugUnitTest    # 跑单元测试（1600+ 用例）
+./gradlew testDebugUnitTest    # 跑单元测试（1700+ 用例）
 ./gradlew assembleRelease      # 构建正式签名包（需 local.properties 配好签名信息）
 ```
 
