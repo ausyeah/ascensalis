@@ -436,6 +436,28 @@ class ChatRepository(
         return id
     }
 
+    /**
+     * 插入一条**已完成**的助手消息。
+     *
+     * 用于手动函数画图（v0.0.144）：那条图是**本机算出来的**，没有模型参与，
+     * 所以不能走「流式助手消息」那条路（那条路假定内容由模型边收边写）。
+     */
+    suspend fun insertAssistantMessage(sessionId: Long, content: String): Long {
+        val now = System.currentTimeMillis()
+        val id = chatDao.insertMessage(
+            ChatMessage(
+                sessionId = sessionId,
+                role = ChatRole.ASSISTANT,
+                content = content,
+                status = MessageStatus.DONE,
+                createdAt = now,
+                updatedAt = now
+            )
+        )
+        chatDao.refreshSessionStats(sessionId, now)
+        return id
+    }
+
     suspend fun updateAssistantContent(id: Long, content: String) {
         chatDao.appendContent(id, content, MessageStatus.STREAMING, System.currentTimeMillis())
     }

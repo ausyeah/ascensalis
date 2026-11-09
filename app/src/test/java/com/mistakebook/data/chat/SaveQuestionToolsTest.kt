@@ -2,6 +2,7 @@ package com.mistakebook.data.chat
 
 import com.mistakebook.domain.ErrorReason
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -123,5 +124,52 @@ class SaveQuestionToolsTest {
             tool.function.description.contains("加入错题本") ||
                 tool.function.description.contains("存成错题")
         )
+    }
+
+    // ---- 标题归一（用户实测「AI 添加的题目标题似乎有问题」）----
+
+    @Test
+    fun `模型给的短标题原样用`() {
+        assertEquals(
+            "二次函数最值",
+            SaveQuestionTools.deriveQuestionTitle("二次函数最值", "题干很长很长")
+        )
+    }
+
+    @Test
+    fun `标题里的公式标记要去掉（标题是纯文本）`() {
+        val title = SaveQuestionTools.deriveQuestionTitle(
+            "求 \$f(x)=x^2\$ 的最小值",
+            "求 \$f(x)=x^2\$ 的最小值"
+        )
+        assertFalse("标题里不能留美元符号", title.contains("$"))
+        assertFalse("标题里不能留花括号", title.contains("{"))
+        assertTrue("剩下的部分要能读", title.contains("求"))
+    }
+
+    @Test
+    fun `模型没给标题就从题干取第一句，绝不塞整段题干`() {
+        val stem = "已知函数 \$f(x)=x^{3}-3x\$，\$x\\in[-3,3]\$。求其单调区间、极值、零点。"
+        val title = SaveQuestionTools.deriveQuestionTitle(null, stem)
+        assertTrue("标题要短：$title", title.length <= 19)
+        assertFalse("不能是整段题干", title.contains("。求其单调区间"))
+    }
+
+    @Test
+    fun `公式命令被抹平（分式与根号留下可读形态）`() {
+        assertEquals("a/b", SaveQuestionTools.plainText("\\frac{a}{b}"))
+        assertEquals("√x", SaveQuestionTools.plainText("\\sqrt{x}"))
+        // \left / \right 是**命令**，被抹掉；它们包着的括号是内容，留下
+        assertEquals("(f(x))", SaveQuestionTools.plainText("\\left(f(x)\\right)"))
+        assertEquals("x^2+1", SaveQuestionTools.plainText("x^{2}+1"))
+    }
+
+    @Test
+    fun `入库时的标题已经是归一后的`() {
+        val draft = SaveQuestionTools.parse(
+            """{"stem":"已知函数 ${'$'}f(x)=x^{3}-3x${'$'}。求极值。","title":"${'$'}f(x)=x^3-3x${'$'} 的极值"}"""
+        )
+        assertFalse(draft!!.title.contains("$"))
+        assertTrue(draft.title.length <= 19)
     }
 }

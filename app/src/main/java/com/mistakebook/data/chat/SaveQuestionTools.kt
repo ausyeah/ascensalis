@@ -48,7 +48,8 @@ object SaveQuestionTools {
                 "（题干、答案、解析、学科、知识点、错因、难度都能带上）。" +
                 "用户说「把这题加入错题本 / 存成错题 / 记到错题本里 / 这道题我要复习」时调用。" +
                 "调用前请先把题干与答案整理干净（公式用 LaTeX 写法，如 \$x^2+2x\$），" +
-                "不要照抄整段对话；不确定的字段留空即可，不要编造。",
+                "不要照抄整段对话；title 一定要给一个**不含公式的短标题**（≤14 字）；" +
+                "不确定的字段留空即可，不要编造。",
             parameters = buildJsonObject {
                 put("type", "object")
                 put(
@@ -133,7 +134,12 @@ object SaveQuestionTools {
                             "title",
                             buildJsonObject {
                                 put("type", "string")
-                                put("description", "列表里显示的短标题（可选），如「切比雪夫不等式估计上界」")
+                                put(
+                                    "description",
+                                    "列表里显示的短标题（**必填**，最多 14 个字）。" +
+                                        "标题是纯文本、**不要写公式**（写了会显示成 \$f(x)=…\$ 这样的源码）；" +
+                                        "写成「三次函数单调性与极值」这样的短句即可。"
+                                )
                             }
                         )
                         put(
@@ -149,6 +155,55 @@ object SaveQuestionTools {
             }
         )
     )
+
+    /** 标题最多这么多字：卡片上一行放不下更多，太长会被截成省略号。 */
+    private const val MAX_TITLE_CHARS = 18
+
+    /**
+     * 题目标题归一（纯函数，单测见 SaveQuestionToolsTest）。
+     *
+     * ## 为什么标题必须单独处理
+     *
+     * 题干是 LaTeX 写的（`已知函数 $f(x)=x^{3}-3x$…`），**标题是纯文本**——
+     * 列表里那张卡直接把它当字符串画出来。于是模型不写标题时，标题就退回
+     * 整段题干，用户在列表里看到的是一串 `$f(x)=x^{3}-3x$` 源码（用户实测：
+     * 「AI 添加的题目标题似乎有问题」）。所以：
+     *
+     * 1. 优先用模型给的标题，但**去掉公式标记**（`$`、`\frac`、`^{}`），
+     *    留下人能读的短句；
+     * 2. 模型没给（或给的是公式）就从题干里取第一句，截到 18 字；
+     * 3. 兜底也是短标题——**绝不**把整段题干塞进标题。
+     */
+    internal fun deriveQuestionTitle(provided: String?, stem: String): String {
+        val fromModel = plainText(provided.orEmpty())
+        if (fromModel.isNotBlank()) return truncate(fromModel)
+        val plainStem = plainText(stem)
+        val firstClause = plainStem
+            .split(Regex("[。；;？?！!\\n]"))
+            .firstOrNull()
+            ?.trim()
+            .orEmpty()
+        return truncate(firstClause.ifBlank { plainStem })
+    }
+
+    private fun truncate(text: String): String =
+        if (text.length <= MAX_TITLE_CHARS) text else text.take(MAX_TITLE_CHARS) + "…"
+
+    /**
+     * 把 LaTeX 味道去掉，留下能直接显示的字。
+     *
+     * 处理顺序有讲究：`\frac{a}{b}` 要**先**替成 `a/b`，否则后面的
+     * 「去掉反斜杠命令」会把它吃成 `frac{a}{b}`；`\sqrt{x}` 同理。
+     */
+    internal fun plainText(raw: String): String {
+        var text = raw
+        // 正则里要匹配「一个反斜杠」，所以模式串里是 \\frac（源码里要写四根）。
+        text = text.replace(Regex("\\\\frac\\{([^{}]*)\\}\\{([^{}]*)\\}"), "\$1/\$2")
+        text = text.replace(Regex("\\\\sqrt\\{([^{}]*)\\}"), "√\$1")
+        text = text.replace(Regex("\\\\[a-zA-Z]+"), "")
+        text = text.replace("\$", "").replace("{", "").replace("}", "")
+        return text.replace(Regex("\\s+"), " ").trim()
+    }
 
     /**
      * 参数 → 入库草稿。
@@ -170,7 +225,10 @@ object SaveQuestionTools {
             options = parseOptions(root["options"]),
             answer = (root["answer"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
             analysis = (root["analysis"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
-            title = (root["title"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty(),
+            title = deriveQuestionTitle(
+                (root["title"] as? JsonPrimitive)?.contentOrNull,
+                stem
+            ),
             knowledgePoints = stringList(root["knowledge_points"], limit = 6),
             errorReason = errorReason((root["error_reason"] as? JsonPrimitive)?.contentOrNull),
             difficulty = ((root["difficulty"] as? JsonPrimitive)?.contentOrNull
