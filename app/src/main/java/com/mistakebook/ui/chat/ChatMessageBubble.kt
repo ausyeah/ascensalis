@@ -13,6 +13,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.view.WindowManager
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -184,9 +185,17 @@ internal fun MessageBubble(
     onDelete: (Long) -> Unit,
     /** T13：把助手回复存入题目备注。null = 当前会话不展示该入口（自由会话）。 */
     onSaveToNote: ((Long) -> Unit)? = null,
-    onToggleThinking: () -> Unit = {},
-    /** 思考块展开/收起后按钮的位移（px），交给列表补偿滚动。 */
-    onThinkingAnchor: (Float) -> Unit = {}
+    /**
+     * 折叠键离原位还差多少像素（**残差**，不是预测的位移）：列表按这个量滚回去。
+     *
+     * 交残差不交预测值——列表自己的增长锚定可能已经补过这段，残差就≈0 了。
+     */
+    onThinkingAnchor: (Float) -> Unit = {},
+    /**
+     * 折叠窗口开关（v0.0.144）：思考块展开/收起期间让增长锚定让路，
+     * 由折叠块自己按残差补（两个补偿者会叠成 2Δ）。
+     */
+    onThinkingToggleWindow: (Boolean) -> Unit = {}
 ) {
     val isUser = message.role == ChatRole.USER
     val isInjected = message.injected
@@ -350,7 +359,7 @@ internal fun MessageBubble(
                         mathRenderer = mathRenderer,
                         // 思考块与正文同属一条消息：共用消息 id 隔离防抖
                         debounceKey = message.id,
-                        onToggle = { onToggleThinking() },
+                        onThinkingToggleWindow = onThinkingToggleWindow,
                         onAnchorShift = onThinkingAnchor
                     )
                     if (answer.isNotBlank()) Spacer(Modifier.height(8.dp))
@@ -709,15 +718,27 @@ internal fun ThinkingBlock(
     streaming: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer,
     debounceKey: Any? = null,
-    /** 生成进行中（思考+作答全程）：折叠/展开点击一律无效。 */
+    /**
+     * 折叠状态已翻、布局还没跑的这一刻（新状态已经生效）。
+     *
+     * v0.0.126 起生成全程都能折叠（issue #39）：折叠是阅读偏好，没有理由禁止。
+     */
     onToggle: (Boolean) -> Unit = {},
     /**
-     * 展开/收起把按钮顶边推移了多少像素（正数 = 被顶上去）。
+     * 展开/收起后，按钮离原位还差多少像素（**残差**，正数 = 按钮还在原位上方）。
      *
      * 列表是反向布局：气泡变高时整体往上长，按钮会从手指底下跑掉。
-     * 交给列表按这个量补偿滚动，按钮才会留在原地、内容只往下长。
+     * 交给列表按残差补偿滚动，按钮才会留在原地、内容只往下长。
+     * 补偿归属只认量出来的残差（锚定先补，它没补掉的这里接），不做位置预测。
      */
-    onAnchorShift: (Float) -> Unit = {}
+    onAnchorShift: (Float) -> Unit = {},
+    /**
+     * 折叠窗口开关（v0.0.144）：点击那一刻打开、补偿收尾后关闭。
+     *
+     * 窗口内列表的增长锚定让路——那段时间的位移由这里补。两个补偿者同时
+     * 动手就是 2Δ（真机实测中部那条消息展开后按钮被补到视口外）。
+     */
+    onThinkingToggleWindow: (Boolean) -> Unit = {}
 ) {
     // 初始展开态直接取 streaming：历史消息（streaming=false）首次组合就是
     // 收起态，不会先把整段思考渲染一遍再折叠——那笔开销在滚动到每条
@@ -740,16 +761,45 @@ internal fun ThinkingBlock(
     // 按钮（在块顶部）就被顶离手指所在的位置——用户连点两下折叠/展开，
     // 第二下永远点空。量出位移、让列表补一次同样的滚动量，按钮才会定在原处，
     // 而新内容向**下**长出来（这正是用户说的「永远向下展开」）。
-    var buttonTopY by remember { mutableStateOf(0f) }
-    var anchorTopY by remember { mutableStateOf<Float?>(null) }
+    //
+    // 折叠/展开的补偿（v0.0.144 重写：**确定性**，不再靠帧时序碰运气）。
+    //
+    // ## 量什么
+    //
+    // 量**这个块自己的高度增量**，不是按钮在窗口里的坐标。区别很关键：
+    // 按钮坐标同时受「布局重排」和「列表滚动」两个因素影响，按它反推补偿量
+    // 会形成反馈环（真机实测：中部那条消息展开时补了两轮、越补越偏，收起时
+    // 一次都没补上）。块高度是纯布局量，与滚动无关——增高 Δ 就把列表滚 Δ，
+    // 按钮一定回到原处。
+    //
+    // ## 谁补
+    //
+    // 只有这里补。点击那一刻打开「折叠窗口」，窗口内列表的增长锚定（path ④）
+    // 让路——两个补偿者同时动手就是 2Δ（真机实测按钮被补到输入栏后面）。
+    var blockHeight by remember { mutableStateOf(0) }
+    var heightAtToggle by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(expanded) {
-        val anchor = anchorTopY ?: return@LaunchedEffect
-        anchorTopY = null
-        // 等两帧：一帧完成新布局，一帧让 onGloballyPositioned 把新坐标写回来
-        withFrameNanos { }
-        withFrameNanos { }
-        val shift = anchor - buttonTopY
-        if (kotlin.math.abs(shift) >= 1f) onAnchorShift(shift)
+        val before = heightAtToggle ?: return@LaunchedEffect
+        heightAtToggle = null
+        try {
+            // 逐轮追增量：正文里的公式位图/图片会在随后几帧继续改高度，
+            // 只量一次会补出偏小的量。每轮只补「这一轮新增加的」部分。
+            var reportedTotal = 0
+            repeat(THINKING_ANCHOR_MAX_ROUNDS) {
+                withFrameNanos { }
+                withFrameNanos { }
+                val delta = blockHeight - before - reportedTotal
+                if (kotlin.math.abs(delta) < THINKING_ANCHOR_TOLERANCE_PX.toInt()) {
+                    return@repeat
+                }
+                reportedTotal += delta
+                onAnchorShift(delta.toFloat())
+            }
+        } finally {
+            // 关窗前再让出一小段：滚动落地、列表可能还要重新钳制一次滚动范围。
+            kotlinx.coroutines.delay(250)
+            onThinkingToggleWindow(false)
+        }
     }
 
     // 尾巴上未闭合的公式先藏起来：半截公式一旦进 RichText 就会先显示
@@ -761,6 +811,7 @@ internal fun ThinkingBlock(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .onSizeChanged { blockHeight = it.height }
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
             // 整块不再可点（v0.0.96）：折叠收在一颗固定按钮里。
@@ -801,7 +852,6 @@ internal fun ThinkingBlock(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .onGloballyPositioned { buttonTopY = it.boundsInWindow().top }
                     // v0.0.126（issue #39）：流式期间**也能**点。
                     // 旧实现把可用性绑在「是否流式」上（流式即禁用），
                     // 整段生成过程都点不动——「思考的时候不能收起思考」就是它。
@@ -809,8 +859,10 @@ internal fun ThinkingBlock(
                     .clickable(
                         role = Role.Button,
                         onClick = {
-                            // 先记住「点下去那一刻按钮在哪」，布局变了才有得比
-                            anchorTopY = buttonTopY
+                            // 先记住「点下去那一刻块有多高」，布局变了才有得比
+                            heightAtToggle = blockHeight
+                            // 开窗：这一段布局变化归折叠块管，锚定让路
+                            onThinkingToggleWindow(true)
                             val next = !expanded
                             expanded = next
                             userToggled = true

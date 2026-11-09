@@ -46,9 +46,11 @@ class ThinkingToggleTest {
     fun `折叠展开后按钮留在手指底下`() {
         // 列表是反向布局：气泡变高时整体向上长，按钮会被顶离原位，
         // 用户连点第二下就点空了。所以要量位移、让列表反着滚回来。
-        assertTrue("必须量按钮的窗口坐标", block.contains("boundsInWindow().top"))
-        assertTrue("点下去那一刻要记锚点", block.contains("anchorTopY = buttonTopY"))
-        assertTrue("布局落地后按位移让列表补偿", block.contains("onAnchorShift(shift)"))
+        // v0.0.144：量的是块自身的高度增量（纯布局量），不是按钮的窗口坐标
+        // ——后者混进了列表滚动，按它补偿会形成反馈环。
+        assertTrue("必须量块自身高度", block.contains("onSizeChanged { blockHeight = it.height }"))
+        assertTrue("点下去那一刻要记块高度", block.contains("heightAtToggle = blockHeight"))
+        assertTrue("布局落地后按增量让列表补偿", block.contains("onAnchorShift(delta.toFloat())"))
         assertTrue(
             "列表要真的按位移滚回去",
             readSource("src/main/java/com/mistakebook/ui/chat/ChatMessageList.kt")

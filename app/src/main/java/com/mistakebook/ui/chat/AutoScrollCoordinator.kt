@@ -42,6 +42,26 @@ class AutoScrollCoordinator {
     var programmaticScroll by mutableStateOf(false)
         internal set
 
+    /**
+     * 思考块正在折叠/展开：这段窗口里增长锚定（path ④）**让路**。
+     *
+     * 为什么要让路：折叠块自己会按实测残差把按钮滚回原位，锚定再补一次就是
+     * 2Δ——真机实测中部那条消息展开后按钮被补到输入栏后面（视口外）。
+     * 让路窗口由折叠块在点击那一刻打开、补偿收尾后关闭；窗口内锚定只重取
+     * 基线、不补偿，保证**只有一个补偿者**。
+     */
+    var thinkingToggleWindow by mutableStateOf(false)
+        internal set
+
+    /** 打开/关闭折叠窗口（由折叠块调用，成对使用）。 */
+    fun beginThinkingToggle() {
+        thinkingToggleWindow = true
+    }
+
+    fun endThinkingToggle() {
+        thinkingToggleWindow = false
+    }
+
     /** 用户手指接触屏幕（或已滚离底部）：交出滚动权。 */
     fun pause() {
         following = false
@@ -335,14 +355,22 @@ fun rememberAutoScrollEffect(
     //    用户正在读的段落被强行往上拽。用户反馈「没触底也在自动
     //    往下滚」的正是这个（v0.0.54）。
     //
-    //    ## 为什么用「最顶部可见 item 的 offset」当锚点
+    //    ## 为什么用「最顶部可见 item」当锚点（并把滚动量一起量进来）
     //
     //    按仓库实测语义（见 [newestGapOf] 注释）：
     //        offset = 该 item 的布局起点 - 滚动量
-    //    - 内容长高 Δ（最新一条长高 / 插入新消息）→ 历史 item 布局起点 +Δ
-    //          → offset **增加** Δ；
-    //    - 用户向前滚（手指上滑，看历史）→ 滚动量 +d → offset **减少** d。
-    //    两者符号相反，所以「offset 变正」几乎只能是内容增长造成的。
+    //    两个分量都会动，只看 offset 就会把「内容长高」和「有人滚了一下」
+    //    混成一个数：
+    //    - 内容长高 Δ（最新一条长高 / 插入新消息）→ 布局起点 +Δ → offset +Δ；
+    //    - 任何滚动（用户手势、或折叠块那条链的程序化补偿）→ 滚动量变、offset
+    //      反向变等量。
+    //    于是「offset 变正」并不可靠：思考块收起时折叠块自己往上补的那一下，
+    //    在 offset 上看起来**和长高一模一样**——锚定要么把它当成增长再补一次
+    //    （2Δ，按钮反而从手指底下掉出去），要么把折叠块的补偿原样抵消。
+    //    所以判据改成**布局坐标**的增量：
+    //        (offset 增量) + (滚动量增量)
+    //    这才是「内容真长出来多少」——纯滚动的两个分量严格等量抵消，恒为 0，
+    //    锚定就不插手（谁滚的就归谁，见 ChatMessageList 里那道归属闸）。
     //    再叠一层 `isScrollInProgress == false`（列表静止）兜底：
     //    用户手势 / 惯性滑动期间一律不插手，绝不跟手指打架。
     //
@@ -352,7 +380,7 @@ fun rememberAutoScrollEffect(
     //    最顶部可见 item 是用户正在读的那条，它在不在视口里都能反映
     //    上方内容的变化，两种情况一套逻辑全覆盖。
     //
-    //    补偿量 = offset 增量，方向是 `scrollBy(+Δ)`：把长出来的部分
+    //    补偿量 = 布局坐标增量，方向是 `scrollBy(+Δ)`：把长出来的部分
     //    吃进滚动量里，锚点屏幕位置纹丝不动。
     //
     //    ## 为什么「刚静止的首帧只重取基线」
@@ -371,8 +399,8 @@ fun rememberAutoScrollEffect(
     //    顺序、基线何时更新、补偿量怎么算，都在那个纯函数里，
     //    由 ScrollAnchorLogicTest 钉住。改这里之前先看那个测试。
     LaunchedEffect(state, coordinator) {
-        // anchorKey / anchorOffset / wasScrolling 的当前值。effect 重启时重置
-        // （原实现就是三个局部 var，同一个 LaunchedEffect 的生命周期）。
+        // anchorKey / anchorOffset / anchorScroll / wasScrolling 的当前值。
+        // effect 重启时重置（原实现就是几个局部 var，同一个 LaunchedEffect 的生命周期）。
         var baseline = ScrollAnchorBaseline()
         snapshotFlow {
             // 视口为空时 topMost 为 null：key 传 null 让纯函数走「无从锚定」
@@ -382,6 +410,9 @@ fun rememberAutoScrollEffect(
             AnchorFrame(
                 key = topMost?.key,
                 offset = topMost?.offset ?: 0,
+                // 滚动量必须与 offset 同帧取：两者相加才是布局坐标，
+                // 分开取会把「某一帧的滚动」记到别帧的增长上。
+                scroll = state.firstVisibleItemScrollOffset,
                 scrolling = state.isScrollInProgress,
                 awayFromBottom = !isFlushAtBottom(info)
             )
@@ -389,10 +420,12 @@ fun rememberAutoScrollEffect(
             val outcome = scrollAnchorDecision(
                 frameKey = frame.key,
                 frameOffset = frame.offset,
+                frameScroll = frame.scroll,
                 scrolling = frame.scrolling,
                 dragged = draggedNow,
                 // v0.0.134：按住不动（非拖动）也要传进去——流式内容变长时
                 // 锚定补偿得顶上，否则用户正在读的段落被顶走（「定不住」）。
+                thinkingToggleWindow = coordinator.thinkingToggleWindow,
                 pointerDown = coordinator.pointerDown,
                 programmaticScroll = coordinator.programmaticScroll,
                 following = coordinator.following,
@@ -400,8 +433,8 @@ fun rememberAutoScrollEffect(
                 baseline = baseline
             )
             baseline = outcome.baseline
-            // 只有「内容把锚点往上推」才补偿；offset 变小是用户在往上翻，
-            // 那正是他要的方向（判据在纯函数里）。
+            // 只有「内容真长出东西来」才补偿；其余位移（用户翻页 /
+            // 折叠块那条链的程序化补偿）都归各自的主人（判据在纯函数里）。
             if (outcome.compensatePx > 0) {
                 state.scrollBy(outcome.compensatePx.toFloat())
             }
@@ -412,16 +445,24 @@ fun rememberAutoScrollEffect(
 }
 
 /**
- * path ④ 每帧的观察结果（原来是个 `Triple`，v0.0.56 加了 [awayFromBottom]）。
+ * path ④ 每帧的观察结果（原来是个 `Triple`，v0.0.56 加了 [awayFromBottom]，
+ * 量「布局坐标」后又加了 [scroll]）。
  *
- * 之所以从 Triple 换成数据类：第四个字段是「是否确实离开了底部」，
- * 用 Triple 就得写成 `Triple(Triple(a, b, c), d)` 或者把布尔塞进偏移里，
- * 两者都比命名字段难读。而 snapshotFlow 的去重依赖 `equals`，
- * 数据类自动生成，行为与 Triple 一致。
+ * 之所以从 Triple 换成数据类：多加一个字段就得写成 `Triple(Triple(a, b), c)`
+ * 或者把布尔塞进偏移里，两者都比命名字段难读。而 snapshotFlow 的去重依赖
+ * `equals`，数据类自动生成，行为与 Triple 一致。
  */
 private data class AnchorFrame(
     val key: Any?,
     val offset: Int,
+    /**
+     * 同一帧的滚动量（`firstVisibleItemScrollOffset`）。
+     *
+     * 必须和 [offset] 同帧取：`offset + scroll` 才是锚点的**布局坐标**，
+     * 而布局坐标的增量才是「内容长出来多少」。分开取会把别帧的滚动
+     * 算进这一帧的增长里。
+     */
+    val scroll: Int,
     val scrolling: Boolean,
     /** 最底部可见 item 是否**不**贴底（见 [scrollAnchorDecision] 的对应参数）。 */
     val awayFromBottom: Boolean
@@ -430,18 +471,29 @@ private data class AnchorFrame(
 /**
  * 滚动锚定判定的**基线**：上一帧留下的锚点状态。
  *
- * 与 effect 里原来的三个局部变量一一对应：
+ * 与 effect 里原来的几个局部变量一一对应：
  * - [anchorKey] ← `anchorKey`（锚点 item 的 key；`null` = 还没取过基线）；
  * - [anchorOffset] ← `anchorOffset`（取基线那一帧该 item 的 offset）；
+ * - [anchorScroll] ← `anchorScroll`（同一帧的滚动量）；
  * - [wasScrolling] ← `wasScrolling`（上一帧是否还在滚动）。
  *
- * 之所以做成不可变数据类而不是让 effect 继续持有三个 `var`：
+ * 之所以做成不可变数据类而不是让 effect 继续持有几个 `var`：
  * 判定函数要能在没有 Compose 的情况下被单测驱动——每帧「喂当前状态、
  * 拿回新状态」就能把整条时序跑完。
  */
 internal data class ScrollAnchorBaseline(
     val anchorKey: Any? = null,
     val anchorOffset: Int = 0,
+    /**
+     * 取基线那一帧的滚动量。
+     *
+     * 判「内容长高」用的是布局坐标 `offset + scroll`：两帧相减时，
+     * 纯滚动（用户翻页、或折叠块那一下程序化补偿）的两个分量等量抵消、
+     * 结果为 0——锚定因此不会把它误读成增长。默认 0 让
+     * 「只喂 offset」的老用例保持原义（滚动量全程不变时，
+     * 布局坐标增量 ≡ offset 增量）。
+     */
+    val anchorScroll: Int = 0,
     val wasScrolling: Boolean = false
 )
 
@@ -450,9 +502,8 @@ internal data class ScrollAnchorBaseline(
  *
  * @param baseline 要写回 effect 的新基线（已按本帧结论更新）；
  * @param compensatePx 本帧应补偿的像素数，`<= 0` 表示不补偿。
- *   这个值就是原来 `drift = offset - anchorOffset` 里为正的那一支，
- *   Compose 侧直接 `scrollBy(compensatePx.toFloat())`——补偿的**时机与量**
- *   因此与重构前逐帧一致。
+ *   这个值就是布局坐标增量 `(offset 增量) + (滚动量增量)` 里为正的那一支，
+ *   Compose 侧直接 `scrollBy(compensatePx.toFloat())`。
  */
 internal data class ScrollAnchorOutcome(
     val baseline: ScrollAnchorBaseline,
@@ -472,6 +523,7 @@ internal data class ScrollAnchorOutcome(
  * | 参数 | 来源 |
  * |---|---|
  * | [frameKey] / [frameOffset] | 最顶部可见 item 的 `key` / `offset` |
+ * | [frameScroll] | 同一帧的 `state.firstVisibleItemScrollOffset` |
  * | [scrolling] | `state.isScrollInProgress` |
  * | [dragged] | `collectIsDraggedAsState()`（经 rememberUpdatedState 取实时值） |
  * | [programmaticScroll] | `coordinator.programmaticScroll` |
@@ -494,8 +546,20 @@ internal data class ScrollAnchorOutcome(
  * 4. **贴底**（[following] 或 `!awayFromBottom`）→ 内容上推就是「跟随」本身，
  *    不干扰；但仍重取基线，这样退出跟随态后的第一帧就有新鲜基线可比；
  * 5. **锚点 key 变了** → 重取基线，不当成增长（滑着换了一条 / 列表结构变了）；
- * 6. **同 key** → `drift = offset - anchorOffset`；`drift <= 0` 不补偿
- *    （offset 变小是用户在往上翻，那正是他要的方向），`drift > 0` 才补偿。
+ * 6. **同 key** → `growth = (offset 增量) + (滚动量增量)`（= 布局坐标增量）；
+ *    `growth <= 0` 不补偿（收缩、或有人往下滚了），`growth > 0` 才补偿。
+ *
+ * ## 为什么判据是「布局坐标」而不是 offset（思考折叠让路）
+ *
+ * `offset = 布局起点 - 滚动量`，两个分量都会动。只看 offset 时，折叠块那条链
+ * 收起思考时往上补的那一下（程序化 `scrollBy`）与**内容长高**在数值上完全一样：
+ * 锚定会当成增长再补一次（2Δ，折叠键反而从手指底下掉出去），或者把折叠块的
+ * 补偿原样抵消。把滚动量一起量进来之后：
+ * - 内容真长高 → 只有布局起点动 → `growth = Δ` → 补，锚点屏幕位置不动；
+ * - 纯滚动（用户翻页 / 折叠块的程序化补偿）→ 两分量等量抵消 → `growth = 0`
+ *   → 锚定彻底不插手，谁滚的就归谁补（亮灯规则在 ChatMessageList 里）。
+ * 这也顺带解决了原来「`programmaticScroll` 帧不重取基线 → 解冻帧一次性补出
+ * 一整段」的模糊点：回底动画是纯滚动，布局坐标不动，解冻帧算出来就是 0。
  *
  * ## 分支 4 为什么把「贴底」和「跟随态」并列（v0.0.56）
  *
@@ -516,22 +580,37 @@ internal data class ScrollAnchorOutcome(
  *   这段增长不会立刻补，而是累积到松手后的第一个静止帧一次性补足。
  *   现有实现即是如此；因为那之前必然先经过分支 2 重取基线，实际上补的是
  *   「松手落点 → 当前」的增量，不是整段按住期，行为上是自洽的。
- * - **补偿本身会改 offset**：`scrollBy(+drift)` 之后锚点 offset 应回到
- *   [ScrollAnchorBaseline.anchorOffset]，下一帧 `drift == 0` 自然不补
- *   （由 `LazyListState` 兑现，函数不负责验证）。若某平台版本 scrollBy
- *   有阻尼/取整，这里会留下 1px 级的残差，下一帧继续补——自愈，不会漂移。
+ * - **补偿本身会改 offset**：`scrollBy(+growth)` 的同时滚动量也 +growth，
+ *   两个分量等量抵消，下一帧 `growth == 0` 自然不补（由 `LazyListState`
+ *   兑现，函数不负责验证）。若某平台版本 scrollBy 有阻尼/取整，两者的
+ *   差额会留下 1px 级的残差，下一帧继续补——自愈，不会漂移。
  */
 internal fun scrollAnchorDecision(
     frameKey: Any?,
     frameOffset: Int,
     scrolling: Boolean,
     dragged: Boolean,
+    /**
+     * 思考块折叠/展开窗口（v0.0.144）：窗口内锚定**一律让路**。
+     *
+     * 那段位移由折叠块自己按实测残差补——两个补偿者同时补会叠成 2Δ
+     * （真机实测按钮被补到视口外）。放在最前面判断：这个窗口的语义就是
+     * 「这次布局变化不归锚定管」。
+     */
+    thinkingToggleWindow: Boolean = false,
     /** 手指按在屏幕上（不含位移，v0.0.134）：与拖动同等对待。 */
     pointerDown: Boolean,
     programmaticScroll: Boolean,
     following: Boolean,
     awayFromBottom: Boolean,
-    baseline: ScrollAnchorBaseline
+    baseline: ScrollAnchorBaseline,
+    /**
+     * 同一帧的滚动量（`firstVisibleItemScrollOffset`）。
+     *
+     * 默认 0：不传就等于「滚动量全程不变」，此时布局坐标增量 ≡ offset 增量
+     * ——只喂 offset 的老用例（ScrollAnchorLogicTest）语义不变。
+     */
+    frameScroll: Int = 0
 ): ScrollAnchorOutcome {
     // 视口里一条都没有（极端短列表 / 正在重建）：无从锚定。
     // 这里必须排在 `scrolling` 之前：原来 `info == null` 是在一切判断之前
@@ -547,7 +626,12 @@ internal fun scrollAnchorDecision(
     // 刚停下来的第一帧：这是用户手势的落点，不是内容增长。
     if (baseline.wasScrolling) {
         return ScrollAnchorOutcome(
-            baseline.copy(wasScrolling = false, anchorKey = frameKey, anchorOffset = frameOffset),
+            baseline.copy(
+                wasScrolling = false,
+                anchorKey = frameKey,
+                anchorOffset = frameOffset,
+                anchorScroll = frameScroll
+            ),
             compensatePx = 0
         )
     }
@@ -563,28 +647,66 @@ internal fun scrollAnchorDecision(
     // 返回（无补偿）。按住 = 明确的「暂停」意图：绕过跟随/贴底分支，
     // 一律走锚定补偿把视口钉住；基线同步前移，漂移不积累；松手后由
     // 位置驱动恢复跟随。注意必须排在 following 分支之前。
+    if (thinkingToggleWindow) {
+        // 折叠块自己负责：锚定只把基线同步到当前帧，不补偿。
+        return ScrollAnchorOutcome(
+            baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset, anchorScroll = frameScroll),
+            compensatePx = 0
+        )
+    }
     if (pointerDown) {
         if (frameKey != baseline.anchorKey) {
-            return ScrollAnchorOutcome(baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset), compensatePx = 0)
+            return ScrollAnchorOutcome(
+                baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset, anchorScroll = frameScroll),
+                compensatePx = 0
+            )
         }
-        val drift = frameOffset - baseline.anchorOffset
-        return ScrollAnchorOutcome(baseline.copy(anchorOffset = frameOffset), compensatePx = drift)
+        val growth = layoutGrowth(frameOffset, frameScroll, baseline)
+        return ScrollAnchorOutcome(
+            baseline.copy(anchorOffset = frameOffset, anchorScroll = frameScroll),
+            compensatePx = growth
+        )
     }
     // 跟随态下内容上推就是「跟随」本身，不能干扰。
     // 贴底时同理（哪怕跟随态被误置为 false）——理由见函数注释里
     // 「分支 4 为什么把贴底和跟随态并列」。
     if (following || !awayFromBottom) {
-        return ScrollAnchorOutcome(baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset), compensatePx = 0)
+        return ScrollAnchorOutcome(
+            baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset, anchorScroll = frameScroll),
+            compensatePx = 0
+        )
     }
     if (frameKey != baseline.anchorKey) {
         // 锚点换了（滑着换了一条 / 列表结构变了）：重新取基线。
-        return ScrollAnchorOutcome(baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset), compensatePx = 0)
+        return ScrollAnchorOutcome(
+            baseline.copy(anchorKey = frameKey, anchorOffset = frameOffset, anchorScroll = frameScroll),
+            compensatePx = 0
+        )
     }
-    val drift = frameOffset - baseline.anchorOffset
-    // 只有「内容把锚点往上推」才补偿；offset 变小是用户在往上翻，
-    // 那正是他要的方向。
-    return ScrollAnchorOutcome(baseline.copy(anchorOffset = frameOffset), compensatePx = drift)
+    val growth = layoutGrowth(frameOffset, frameScroll, baseline)
+    // 只有「内容真长出东西来」才补偿；收缩、以及有人往下滚了都不补
+    // （那正是用户/折叠块要的方向）。
+    return ScrollAnchorOutcome(
+        baseline.copy(anchorOffset = frameOffset, anchorScroll = frameScroll),
+        compensatePx = growth
+    )
 }
+
+/**
+ * 锚点这一帧的**布局坐标增量**：`(offset 增量) + (滚动量增量)`（纯函数，可单测）。
+ *
+ * ## 为什么不是直接比 offset
+ *
+ * 本仓实测语义是 `offset = 布局起点 - 滚动量`（见 [newestGapOf]），所以
+ * offset 的增量混进了两种完全不同的东西：
+ * - 内容长高 Δ → 布局起点 +Δ → offset +Δ；
+ * - 任何滚动 d（用户翻页、或折叠块收起时那次程序化补偿）→ 滚动量 +d、
+ *   offset 反向 -d。
+ * 两者在 offset 上长得一模一样。把滚动量加回来就只剩下布局起点：
+ * 纯滚动两项严格抵消、恒为 0——**程序化补偿永远不会被当成内容长高**。
+ */
+internal fun layoutGrowth(frameOffset: Int, frameScroll: Int, baseline: ScrollAnchorBaseline): Int =
+    (frameOffset - baseline.anchorOffset) + (frameScroll - baseline.anchorScroll)
 
 /**
  * 最新一条消息（index 0）底边与「内容区底边」的间隙（px）。纯函数，可单测。

@@ -649,6 +649,10 @@ fun ChatScreen(
                             cm.setPrimaryClip(ClipData.newPlainText("copied", text))
                             viewModel.notifyCopied()
                         },
+                        onThinkingToggleWindow = { active ->
+                            if (active) coordinator.beginThinkingToggle()
+                            else coordinator.endThinkingToggle()
+                        },
                         onRetry = { id -> viewModel.retry(id) },
                         onContinue = { id -> viewModel.continueGeneration(id) },
                         onDelete = { id ->

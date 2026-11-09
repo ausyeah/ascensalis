@@ -180,13 +180,26 @@ internal fun MessageList(
     onDelete: (Long) -> Unit,
     /** T13：批改结果「存入题目备注」入口；自由会话传 null 不展示。 */
     onSaveToNote: ((Long) -> Unit)? = null,
+    /**
+     * 折叠窗口开关（v0.0.144）：思考块展开/收起期间，增长锚定（path ④）让路，
+     * 由折叠块自己按残差补 —— 两个补偿者同时动手就是 2Δ。
+     */
+    onThinkingToggleWindow: (Boolean) -> Unit = {},
     /** 手指按下（不等 slop）：自动滚动立刻交出滚动权（issue #39）。 */
     onTouchDown: () -> Unit = {},
     /** 手指全部抬起：把控制权交还位置判定（issue #39）。 */
     onTouchUp: () -> Unit = {}
 ) {
     // 思考块展开/收起后按钮被反向列表顶走的补偿：
-    // 列表按位移反着滚同样的量，按钮就留在手指底下，内容只往下长。
+    // 列表按残差反着滚同样的量，按钮就留在手指底下，内容只往下长。
+    //
+    // 归属只认**量出来的残差**，不做位置预测：增长锚定（path ④）会不会补这一次
+    // 变化取决于它自己的分支（跟随/贴底、锚点有没有换条、手势标志……），
+    // 靠「贴底？」「被折叠的是不是最上面那条？」去猜，真机上就被打过脸——
+    // 思考块在视口中部、下面还有别的消息时锚定其实没补（锚点换条后它只重取
+    // 基线），按预测让路的结果是没人补、按钮被顶上去 293px。
+    // 现在的规则：折叠块每轮重新量「按钮离原位还差多少」，锚定补过残差就≈0
+    // （这里不补，不会出现第二个补偿者），没补残差还在就由这里原样滚回去。
     val anchorScope = rememberCoroutineScope()
     // pointerInput 里跨事件记「当前是否有手指按着」：只在按下/抬起两个
     // 边沿各回调一次，不随每次 ENTER/MOVE 重复通知。
@@ -275,8 +288,24 @@ internal fun MessageList(
                 onContinue = onContinue,
                 onDelete = onDelete,
                 onSaveToNote = onSaveToNote,
-                onThinkingAnchor = { shiftPx ->
-                    anchorScope.launch { listState.scrollBy(shiftPx) }
+                onThinkingToggleWindow = onThinkingToggleWindow,
+                onThinkingAnchor = { residualPx ->
+                    // 锚定先补，它没补掉的残差由我们接手。
+                    //
+                    // 「列表正忙」只认**用户的手指**（touchActive），不认
+                    // `isScrollInProgress`：程序化滚动（增长锚定 path ④ 自己那次）
+                    // 恰恰就是我们要抵消的那一份——把它当「忙」挡掉，结果是
+                    // 锚定补完没人收尾，按钮被顶离手指（真机实测中部那条消息
+                    // 展开后表头跑出视口）。用户真在拖动时仍然不抢：那是手势。
+                    val shiftPx = thinkingAnchorCompensation(
+                        residualPx = residualPx,
+                        listBusy = touchActive
+                    )
+                    if (shiftPx != 0f) {
+                        anchorScope.launch {
+                            listState.scrollBy(shiftPx)
+                        }
+                    }
                 }
             )
         }
@@ -286,6 +315,66 @@ internal fun MessageList(
             }
         }
     }
+}
+
+
+/** 折叠键位移在 1px 以内当作渲染误差：再补只会来回抖。 */
+internal const val THINKING_ANCHOR_TOLERANCE_PX = 1f
+
+/**
+ * 折叠/展开后最多追几轮残差。
+ *
+ * 首轮补布局位移，之后几轮追公式位图/流式尾帧带来的后续增高。轮数必须封顶——
+ * 每轮都是一次 `scrollBy`，停不下来就会跟用户抢滚动。
+ */
+internal const val THINKING_ANCHOR_MAX_ROUNDS = 4
+
+/**
+ * 这一轮该滚多少像素（纯函数，可单测）：**锚定先补，它没补掉的那部分由折叠块接手**。
+ *
+ * ## 为什么判据是「残差」而不是位置启发式
+ *
+ * 同一次布局变化可能有两个补偿者：列表自己的增长锚定（[rememberAutoScrollEffect]
+ * path ④）与本函数的调用方；两个都动手就是 2Δ。但锚定**会不会**补这一段，取决于
+ * 它自己的分支（是否跟随/贴底、锚点 key 有没有换条、手势标志……）——想靠
+ * 「贴底？」「被折叠的是不是视口最上面那条？」去*预测*它在真机上就被打脸过：
+ * 思考块在视口中部、下面还有别的消息时，锚定其实**没补**（增长把锚点那条推走后
+ * 它换了 key、只重取基线），折叠块却按启发式让路 ⇒ 没人补 ⇒ 按钮被顶上去 293px。
+ *
+ * 所以这里只认**量出来的残差**（折叠块每轮重新测「按钮离原位还差多少」）：
+ * - 锚定补过 → 残差 ≈ 0 → 返回 0（不会出现第二个补偿者）；
+ * - 锚定没补 → 残差还在 → 原样滚回去（这就是「它不接手就我们接手」）。
+ *
+ * ## 方向
+ *
+ * 本仓实测（见 [newestGapOf] 注释）：反向布局下 `scrollBy(+d)` 把内容**往下**推
+ * d 像素。气泡长高时内容整体往上长，块顶部的折叠键被顶**上**去（窗口 Y 变小），
+ * 所以「点下去那一刻记下的 Y − 现在量到的 Y」正是要补的滚动量：正值 = 按钮被
+ * 顶上去 = 内容往下滚同样的量。按钮因此留在原处，新内容从它下方长出来。
+ *
+ * ## 两种「这一轮不补」
+ *
+ * - [listBusy]：用户正拖着列表 / 惯性还在跑，这一轮不插手（下一轮重新量残差，
+ *   自愈；判据在列表里，见 `MessageList` 的 `isScrollInProgress || touchActive`）；
+ * - 残差已落在 [THINKING_ANCHOR_TOLERANCE_PX] 以内：那是渲染误差。
+ *
+ * 返回 0 = 这一轮不补。
+ *
+ * ## 已知边界：列表自己滚不动的时候
+ *
+ * 反向列表的滚动量有下界（贴底 = 0）：展开要内容往下滚（量变大，上面还有内容就能
+ * 补上），收起要内容往上滚（量变小，贴底时到顶了）。所以贴底那一下**收起**补不
+ * 回来——这不是符号写错，是反向列表的几何事实，没有补偿者能绕过。
+ */
+internal fun thinkingAnchorCompensation(
+    /** 目标 Y − 现在量到的 Y（正数 = 按钮被顶上去，内容要往下滚同样的量）。 */
+    residualPx: Float,
+    /** 列表正被用户占着 / 惯性在跑：这一轮不插手。 */
+    listBusy: Boolean
+): Float = when {
+    listBusy -> 0f
+    kotlin.math.abs(residualPx) < THINKING_ANCHOR_TOLERANCE_PX -> 0f
+    else -> residualPx
 }
 
 
