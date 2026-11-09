@@ -364,6 +364,9 @@ class ChatGenerationService : Service() {
                         // 「生图模型画出对不上刻度的插画」。纯计算、无副作用，
                         // 也不需要任何 Key，始终提供。
                         addAll(com.mistakebook.data.chat.PlotTools.all())
+                        // 对话存成错题（v0.0.143，issue #55）：模型可把讲清楚的
+                        // 一道题直接写进错题本，取代「靠用户手动存备注」。
+                        addAll(com.mistakebook.data.chat.SaveQuestionTools.all())
                     }.takeIf { it.isNotEmpty() }
                 )
                 // 本轮模型请求的工具调用（finish_reason=tool_calls 时非空）。
@@ -489,6 +492,7 @@ class ChatGenerationService : Service() {
                         call.name == com.mistakebook.data.chat.MemoryTools.SAVE -> "正在记下这条…"
                         call.name == com.mistakebook.data.chat.AskUserTools.ASK_USER -> "等你选一下…"
                         com.mistakebook.data.chat.PlotTools.handles(call.name) -> "正在画函数图像…"
+                        com.mistakebook.data.chat.SaveQuestionTools.handles(call.name) -> "正在存进错题本…"
                         else -> "正在调用工具…"
                     }
                     ChatGenerationBus.publish(
@@ -644,6 +648,24 @@ class ChatGenerationService : Service() {
 
                                     is com.mistakebook.math.FunctionPlotter.Result.Failed ->
                                         "绘图失败：${plotted.message}（修正表达式或范围后再调一次）"
+                                }
+                            }
+                        }
+
+                        com.mistakebook.data.chat.SaveQuestionTools.SAVE_QUESTION -> {
+                            val draft = com.mistakebook.data.chat.SaveQuestionTools.parse(call.arguments)
+                            if (draft == null) {
+                                "存错题失败：缺少题干（stem），请把题目描述整理好再调一次。"
+                            } else {
+                                val saved = runCatching {
+                                    container.questionRepository.save(draft, System.currentTimeMillis())
+                                }.getOrNull()
+                                if (saved != null) {
+                                    "已存进错题本（${draft.subjectName.ifBlank { "未分类" }}）：" +
+                                        "「${draft.stem.take(30)}」。回复里简短确认一句即可，" +
+                                        "不必重复整道题。"
+                                } else {
+                                    "存错题失败：写入本机数据库时出错，请告诉用户稍后重试。"
                                 }
                             }
                         }

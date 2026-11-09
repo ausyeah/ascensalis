@@ -29,12 +29,18 @@ class ChatToolWiringTest {
             "plot_function 必须始终提供（纯计算、不需要任何 Key）",
             service.contains("addAll(com.mistakebook.data.chat.PlotTools.all())")
         )
+        assertTrue(
+            "save_question 必须始终提供",
+            service.contains("addAll(com.mistakebook.data.chat.SaveQuestionTools.all())")
+        )
     }
 
     @Test
     fun `两个工具都有分发分支与 stage 文案`() {
         assertTrue(service.contains("PlotTools.PLOT_FUNCTION -> {"))
+        assertTrue(service.contains("SaveQuestionTools.SAVE_QUESTION -> {"))
         assertTrue(service.contains("正在画函数图像…"))
+        assertTrue(service.contains("正在存进错题本…"))
     }
 
     @Test
@@ -76,6 +82,10 @@ class ChatToolWiringTest {
         assertTrue(
             "提示词必须写明函数图像调用 plot_function",
             prompts.contains("plot_function 工具")
+        )
+        assertTrue(
+            "提示词必须写明存错题调用 save_question",
+            prompts.contains("save_question 工具")
         )
         assertTrue(
             "并且要明确禁止手写 SVG 画函数曲线（那是会画错的旧路径）",
