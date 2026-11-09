@@ -375,7 +375,12 @@ class LlmClient(
         val request = ChatRequest(
             model = profile.model,
             messages = listOf(ChatMessage(role = "user", content = JsonPrimitive("ping"))),
-            max_tokens = 1,
+            // 探活**不能**只给 1 个 token（v0.0.144 实测踩坑）：
+            // reasoning 型模型（deepseek-v4 / glm-5 / kimi-k2 / minimax-m3…）
+            // 会把这点预算全花在思考上，正文一个字都吐不出来——接口明明通着，
+            // 却被报成「无响应」，用户会以为自己的 Key 坏了（同一个 Key 手动
+            // 发请求完全正常）。给足预算，思考完自然会写出答案。
+            max_tokens = PROBE_MAX_TOKENS,
             responseFormat = null,
             stream = false
         )
@@ -401,9 +406,13 @@ class LlmClient(
             return fail(HttpFactory.httpError(response.code(), response.errorBody()?.string().orEmpty()))
         }
         val body = response.body() ?: return fail(ApiErrorKind.BAD_RESPONSE)
-        val content = body.choices.firstOrNull()?.message?.content.orEmpty()
         if (body.choices.isEmpty()) return fail(ApiErrorKind.BAD_RESPONSE, "模型未返回内容")
-        return ApiResult.Success(content.ifBlank { "ok" })
+        val message = body.choices.first().message
+        val verdict = probeVerdict(
+            content = message?.content.orEmpty(),
+            reasoning = message?.reasoningContent.orEmpty()
+        ) ?: return fail(ApiErrorKind.BAD_RESPONSE, "模型未返回内容")
+        return ApiResult.Success(verdict)
     }
 
     /** 旧版测试连接（保留给 MinerU 侧使用）。 */
@@ -441,6 +450,16 @@ class LlmClient(
          * 与 SVG 附图时，JSON 很容易超过这个量。撞服务端硬上限时有降档重试兜底。
          */
         const val DEFAULT_MAX_TOKENS = 65536
+
+    /**
+     * 探活（测试大模型）给的 token 预算。
+     *
+     * 不能是 1：reasoning 型模型先把预算花在思考上，1 个 token 只够想一个
+     * 字，正文必然为空——接口是通的，却会被报成「无响应」。512 足够模型
+     * 思考完并写出答案（实测 deepseek-v4.1-flash 对「ping」用 7 个
+     * reasoning token）。
+     */
+    const val PROBE_MAX_TOKENS = 512
 
         /** [plainText] 的默认上限：一段场景 prompt / 一个标题，512 足够。 */
         const val DEFAULT_PLAIN_MAX_TOKENS = 512
@@ -483,3 +502,19 @@ internal const val MIN_MAX_TOKENS = 2048
 internal fun maxTokensDowngradeMessage(originalMaxTokens: Int): String =
     "当前模型的输出上限较低（约 $originalMaxTokens tokens），已自动降档仍失败，" +
         "请换用输出上限更高的模型或减少一次整理的题目数"
+
+/**
+ * 探活结果判定（纯函数，单测见 LlmProbeVerdictTest）。
+ *
+ * 返回**可展示的结论**，返回 null 表示「这次探活什么都没拿到」。
+ *
+ * 关键一条：**只有思考过程、没有正文，也算接口通了**。
+ * reasoning 模型被压到很小的输出预算时就是这个形态——HTTP 200、连接正常、
+ * 模型也在干活，只是这轮没来得及写正文。把它报成「无响应」是最误导的
+ * 结论：用户会去换 Key、换模型、换网络，而问题根本不在那里。
+ */
+internal fun probeVerdict(content: String, reasoning: String): String? = when {
+    content.isNotBlank() -> content
+    reasoning.isNotBlank() -> "（模型这轮只返回了思考过程，接口是通的）"
+    else -> null
+}
