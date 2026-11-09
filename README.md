@@ -100,6 +100,8 @@
 - 流式输出、随时停止、**流式中「打断并发送」**（边生成边插话纠正）
 - 附件：拍照 / 相册 / 浏览文件（图片、docx、xlsx、csv、pdf、md、txt）/ **@资料库**；单文件上限 20MB，docx、表格、PDF 会自动提字
 - 内置工具：联网搜索、识图、生图、图片 OCR、计算器、资料库（列目录 / 按需读 / 检索）、写入记忆、**反问用户**（给选项 + 倒计时 + 推荐项）
+- **专用函数画图**：模型给出表达式与范围，App 自己精确采样画出坐标系图像（坐标轴、刻度、单调性、极值、交点都是真的，渐近线处自动断线）——不是让 AI 看着"像那么回事"地手画，也不用生图模型画插画
+- **对话一键存成错题**：说一句「把这题加入错题本」，模型就把这一问一答整理成题干 / 答案 / 解析 / 学科 / 知识点 / 错因 / 难度，直接写进你的错题本（不再依赖手动存备注）
 - 富文本渲染：公式（LaTeX / MathML）、SVG 示意图、图片，HTML 先清洗再显示
 - 思考过程可折叠 / 展开 / 复制
 - **长对话自动压缩上下文**：到阈值（默认 50 万 token，可调）自动把前面的对话压成摘要，保留最近 6 条；也可手动点「压缩」
@@ -208,6 +210,7 @@
 <td align="center"><img src="docs/screenshots/chat-drawer.jpg" width="320" alt="历史对话抽屉"><br><sub><b>历史</b> · 抽屉式列表，左滑置顶 / 重命名 / 归档</sub></td>
 </tr>
 <tr>
+<td align="center"><img src="docs/screenshots/plot-function.jpg" width="320" alt="函数图像"><br><sub><b>函数图像</b> · 工具精确采样绘制，刻度与极值是真的</sub></td>
 <td align="center"><img src="docs/screenshots/temp-session.jpg" width="320" alt="临时对话"><br><sub><b>临时对话</b> · 退出即归档，可再找回</sub></td>
 <td align="center"><img src="docs/screenshots/memory-doc.jpg" width="320" alt="记忆库"><br><sub><b>记忆库</b> · 整篇分节文档，每轮对话自动带上</sub></td>
 <td align="center"><img src="docs/screenshots/library-index.jpg" width="320" alt="资料库"><br><sub><b>资料库</b> · 教材讲义入库，向量化后语义检索</sub></td>
