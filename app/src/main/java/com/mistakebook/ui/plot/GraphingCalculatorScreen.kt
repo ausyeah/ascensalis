@@ -278,12 +278,24 @@ fun GraphingCalculatorScreen(
                             canvasSize.width.toFloat(),
                             canvasSize.height.toFloat()
                         )
-                    Text(
-                        text = stringResource(
+                    // 只有极坐标曲线时，视口的 x 范围其实就是 θ 范围：
+                    // 标签还写 "x ∈ …" 会让人以为极坐标也要设 x（v0.0.146）。
+                    val polarOnly = rows.isNotEmpty() && rows.all { it.curve is PlotCurve.Polar }
+                    val rangeText = if (polarOnly) {
+                        stringResource(
+                            R.string.plotter_theta_range,
+                            "0",
+                            FunctionSampler.formatTick(polarThetaMax(shown))
+                        )
+                    } else {
+                        stringResource(
                             R.string.plotter_range,
                             FunctionSampler.formatTick(shown.xMin),
                             FunctionSampler.formatTick(shown.xMax)
-                        ),
+                        )
+                    }
+                    Text(
+                        text = rangeText,
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)

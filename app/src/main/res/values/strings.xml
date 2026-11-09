@@ -641,7 +641,7 @@
     <string name="plot_dialog_title">函数图像</string>
     <string name="plot_dialog_expressions">函数表达式</string>
     <!-- 三种写法都举一个例子：显函数（y= 可省）、隐函数方程、极坐标 -->
-    <string name="plot_dialog_curve_hint">例如 x^2+2x、y=sin(x)、x^2+y^2=1、r=1+cos(θ)</string>
+    <string name="plot_dialog_curve_hint">例如 x^2+2x</string>
     <string name="plot_dialog_add_curve">再加一条</string>
     <string name="plot_dialog_remove_curve">删掉这条</string>
     <string name="plot_dialog_x_range">x 的范围</string>
@@ -659,6 +659,8 @@
     <string name="plotter_max_curves">最多画 4 条，再多图就看不清了</string>
     <string name="plotter_expression_error">这个式子画不了：%1$s</string>
     <string name="plotter_range">x ∈ [%1$s, %2$s]</string>
+    <!-- 只有极坐标曲线时，视口的 x 范围其实是 θ 的范围（v0.0.146） -->
+    <string name="plotter_theta_range">θ ∈ [%1$s, %2$s]</string>
     <string name="plotter_reset">复位视图</string>
     <string name="plotter_gesture_hint">拖动平移 · 双指缩放 · 双击复位</string>
     <string name="plotter_save">存到对话</string>
