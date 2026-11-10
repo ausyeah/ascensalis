@@ -6,6 +6,7 @@ import com.mistakebook.data.prefs.LlmProfile
 import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.math.VectorMath
 import com.mistakebook.net.ApiResult
+import com.mistakebook.net.displayMessage
 import com.mistakebook.net.llm.EmbeddingClient
 import com.mistakebook.net.llm.EmbeddingConfig
 import com.mistakebook.net.llm.EmbeddingEndpoint
@@ -167,7 +168,7 @@ class LibraryIndexer(
                 ) {
                     is ApiResult.Success -> result.data
                     is ApiResult.Failure -> throw IllegalStateException(
-                        result.error.serverMessage.ifBlank { result.error.kind.name }
+                        result.error.displayMessage
                     )
                 }
                 if (embedded.size != batch.size) {

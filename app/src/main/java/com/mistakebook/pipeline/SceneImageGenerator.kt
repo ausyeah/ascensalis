@@ -2,6 +2,7 @@ package com.mistakebook.pipeline
 
 import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.net.ImageGenClient
+import com.mistakebook.net.displayMessage
 import com.mistakebook.util.ImageDiskCache
 import java.io.File
 
@@ -70,7 +71,7 @@ class SceneImageGenerator(
                     imagePrompt
                 )
                 is com.mistakebook.net.ApiResult.Failure -> SceneImageResult.Failed(
-                    image.error.serverMessage.ifBlank { "生图失败，请检查生图配置" }
+                    image.error.displayMessage.ifBlank { "生图失败，请检查生图配置" }
                 )
             }
         }
@@ -83,7 +84,7 @@ class SceneImageGenerator(
             is com.mistakebook.net.ApiResult.Success -> promptReply.data.trim()
             is com.mistakebook.net.ApiResult.Failure ->
                 return SceneImageResult.Failed(
-                    promptReply.error.serverMessage.ifBlank { "图片描述生成失败" }
+                    promptReply.error.displayMessage.ifBlank { "图片描述生成失败" }
                 )
         }
         if (imagePrompt.isBlank()) {
@@ -101,7 +102,7 @@ class SceneImageGenerator(
             }
             is com.mistakebook.net.ApiResult.Failure ->
                 SceneImageResult.Failed(
-                    image.error.serverMessage.ifBlank { "生图失败，请检查生图配置" }
+                    image.error.displayMessage.ifBlank { "生图失败，请检查生图配置" }
                 )
         }
     }

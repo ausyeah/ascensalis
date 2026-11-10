@@ -68,10 +68,18 @@ object HttpFactory {
             is java.util.concurrent.CancellationException -> ApiErrorKind.CANCELLED
             is SocketTimeoutException -> ApiErrorKind.TIMEOUT
             is UnknownHostException, is ConnectException -> ApiErrorKind.NETWORK
+            // 反序列化失败是「响应结构不符预期」，不是「未知错误」：典型场景是
+            // 代理/VPN 拦截后返回一张 HTML 错误页（HTTP 200 + 非 JSON），用户
+            // 只看到「UNKNOWN」根本猜不到是被出口改写了响应。
+            is kotlinx.serialization.SerializationException -> ApiErrorKind.BAD_RESPONSE
             is IOException -> ApiErrorKind.NETWORK
             else -> ApiErrorKind.UNKNOWN
         }
-        return ApiError(kind = kind, detail = t.message.orEmpty())
+        // detail 带上异常类名：message 常常是空的（如 ConnectException），
+        // 只剩类名也能说明问题；两者都空时由 UI 退回人话标签。
+        val text = t.message?.takeIf { it.isNotBlank() }
+            ?: t.javaClass.simpleName
+        return ApiError(kind = kind, detail = text)
     }
 
     /**

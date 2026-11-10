@@ -87,12 +87,20 @@ object NetworkRouter {
         }
     }
 
-    private fun isDirectHost(host: String): Boolean {
+    /** 供单测用：这个 host 在自动模式下是否直连。 */
+    internal fun isDirectHost(host: String): Boolean {
         if (host.isEmpty()) return true
         if (host == "localhost" || host == "127.0.0.1" || host.startsWith("192.168.") || host.startsWith("10.")) return true
         if (host.endsWith(".cn")) return true
+        // 裸 IP 地址（如自建中转站 http://60.205.247.57:38421）也走直连。
+        // 用户自己部署的服务，走代理反而容易失败：许多代理规则对裸 IP 的
+        // 处理不完善（尤其是非标端口的 http 服务），直接连才是正确姿势。
+        if (host.matches(IPV4_REGEX)) return true
         return DIRECT_HOSTS.any { host == it || host.endsWith(".$it") }
     }
+
+    /** IPv4 地址（不含 CIDR），如 60.205.247.57。 */
+    private val IPV4_REGEX = Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$""")
 
     /**
      * 当前模式的**人话描述**，拼进网络类错误里展示。

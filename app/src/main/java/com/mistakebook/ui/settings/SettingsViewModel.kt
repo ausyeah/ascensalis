@@ -16,6 +16,9 @@ import com.mistakebook.data.prefs.ThemeMode
 import com.mistakebook.di.AppContainer
 import com.mistakebook.net.ApiResult
 import com.mistakebook.net.ApiError
+import com.mistakebook.net.ApiErrorKind
+import com.mistakebook.net.NetworkRouter
+import com.mistakebook.net.displayMessage
 import com.mistakebook.net.errorOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -476,7 +479,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             mineruTestResult.value = if (result is com.mistakebook.net.ApiResult.Success) {
                 SUCCESS
             } else {
-                result.errorOrNull()?.serverMessage ?: FAILED
+                result.errorOrNull()?.displayMessage ?: FAILED
             }
         }
     }
@@ -599,9 +602,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             keys.forEach { entry ->
                 when (val r = container.llmClient.listModels(draft.normalized(), entry.key)) {
                     is ApiResult.Success -> seen[entry.id] = r.data
-                    is ApiResult.Failure ->
-                        failures += describeError(r.error, "").trim().removePrefix("：")
-                        .ifBlank { r.error.kind.name }
+                    is ApiResult.Failure -> failures += describeError(r.error, "")
                 }
             }
 
@@ -615,7 +616,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 modelsError.value = if (failures.isEmpty()) {
                     "接口可达（${elapsedMs(started)}ms）但没返回任何模型"
                 } else {
-                    "获取模型列表失败：${failures.distinct().joinToString("；")}"
+                    "获取模型列表失败：${failures.distinct().joinToString("；")}" +
+                        "（${NetworkRouter.describe()}）"
                 }
                 return@launch
             }
@@ -662,9 +664,34 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         store.setNetworkMode(mode)
     }
 
+    /**
+     * 拼人话错误。失败原因优先服务端 msg、其次异常 detail（见 [displayMessage]）——
+     * 只读 serverMessage 会把「connect refused」「timeout」这类关键信息吞掉、
+     * 只剩「UNKNOWN」，用户无法验证也无处下手。
+     *
+     * 没有任何可展示原因时退回 [errorKindLabel] 的中文标签。
+     */
     private fun describeError(error: ApiError, prefix: String): String {
-        val detail = error.serverMessage.takeIf { it.isNotBlank() }
-        return if (detail != null) "$prefix：$detail" else prefix
+        val detail = error.displayMessage.takeIf {
+            it.isNotBlank() && it != error.kind.name
+        } ?: errorKindLabel(error.kind)
+        return if (prefix.isBlank()) detail else "$prefix：$detail"
+    }
+
+    /**
+     * 错误类型的**人话标签**。枚举名（UNKNOWN / NETWORK…）是给开发者看的，
+     * 用户看不懂；这里翻译成中文，detail 已经在 [describeError] 里带出来了。
+     */
+    private fun errorKindLabel(kind: ApiErrorKind): String = when (kind) {
+        ApiErrorKind.NO_KEY -> "没填 Key"
+        ApiErrorKind.AUTH -> "Key 无效或被拒"
+        ApiErrorKind.RATE_LIMIT -> "额度用尽或被限流"
+        ApiErrorKind.TIMEOUT -> "连接超时"
+        ApiErrorKind.NETWORK -> "连不上（网络/DNS）"
+        ApiErrorKind.SERVER -> "服务端报错"
+        ApiErrorKind.CANCELLED -> "已取消"
+        ApiErrorKind.BAD_RESPONSE -> "返回格式不对"
+        ApiErrorKind.UNKNOWN -> "未知错误"
     }
 
     /**
@@ -851,7 +878,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                 val result = container.mineruClient.testConnection(draft.apiKey.trim())
                 ocrTestingProfileId.value = null
                 val ok = result is com.mistakebook.net.ApiResult.Success
-                val msg = if (ok) "MinerU 连接成功" else (result.errorOrNull()?.serverMessage ?: "连接失败")
+                val msg = if (ok) "MinerU 连接成功" else (result.errorOrNull()?.displayMessage ?: "连接失败")
                 publishOcrResult(draft.id, msg, ok)
             } else {
                 if (draft.model.isBlank()) {

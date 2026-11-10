@@ -7,6 +7,7 @@ import com.mistakebook.data.chat.MemoryMerge
 import com.mistakebook.data.prefs.SettingsStore
 import com.mistakebook.data.prefs.UsageStatsStore
 import com.mistakebook.net.ApiResult
+import com.mistakebook.net.displayMessage
 import com.mistakebook.net.llm.ChatCompletionStream
 import com.mistakebook.net.llm.ChatMessage as LlmChatMessage
 import com.mistakebook.net.llm.ChatRequest
@@ -132,7 +133,7 @@ class MemoryRepository(
 
             is ApiResult.Failure -> RewriteResult(
                 versionNow(),
-                error = result.error.serverMessage.ifBlank { result.error.kind.name }
+                error = result.error.displayMessage
             )
         }
     }

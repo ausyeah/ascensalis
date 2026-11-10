@@ -53,3 +53,17 @@ inline fun <T, R> ApiResult<T>.map(transform: (T) -> R): ApiResult<R> = when (th
 fun <T> ApiResult<T>.dataOrNull(): T? = (this as? ApiResult.Success)?.data
 
 fun ApiResult<*>.errorOrNull(): ApiError? = (this as? ApiResult.Failure)?.error
+
+/**
+ * 失败原因的**人话文本**，给所有要展示错误的地方用。
+ *
+ * 优先服务端 msg（业务错误最有信息量），其次异常 detail（连接被拒、超时、
+ * 反序列化失败这类只有异常里有），最后才退回枚举名。
+ *
+ * 只读 serverMessage 是「UNKNOWN」的根源：异常类失败的 serverMessage 为空，
+ * 真实原因全在 detail 里，被丢掉后用户只剩一个看不懂的枚举名。
+ */
+val ApiError.displayMessage: String
+    get() = serverMessage.takeIf { it.isNotBlank() }
+        ?: detail.takeIf { it.isNotBlank() }
+        ?: kind.name

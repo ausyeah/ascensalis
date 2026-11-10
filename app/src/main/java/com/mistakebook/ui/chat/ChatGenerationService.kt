@@ -18,6 +18,7 @@ import com.mistakebook.data.chat.OutgoingMessage
 import com.mistakebook.domain.ChatRole
 import com.mistakebook.domain.MessageStatus
 import com.mistakebook.net.ApiErrorKind
+import com.mistakebook.net.displayMessage
 import com.mistakebook.net.llm.ChatCompletionStream
 import com.mistakebook.net.llm.ChatContentPart
 import com.mistakebook.net.llm.ChatRequest
@@ -427,7 +428,10 @@ class ChatGenerationService : Service() {
                                 } else {
                                     MessageStatus.FAILED
                                 }
-                                errorText = event.error.serverMessage.takeIf { it.isNotBlank() }
+                                // displayMessage：服端 msg → 异常 detail → 枚举名。
+                                // 只读 serverMessage 会把「连不上/超时/返回非 JSON」
+                                // 全吞成空白，用户只看到一句「失败」。
+                                errorText = event.error.displayMessage.takeIf { it.isNotBlank() }
                             }
                         }
                     }
@@ -1023,7 +1027,7 @@ class ChatGenerationService : Service() {
                 }
 
             is com.mistakebook.net.ApiResult.Failure ->
-                "识图失败：${reply.error.serverMessage.ifBlank { "请检查识图模型配置" }}"
+                "识图失败：${reply.error.displayMessage.ifBlank { "请检查识图模型配置" }}"
         }
     }
 
@@ -1075,7 +1079,7 @@ class ChatGenerationService : Service() {
                 }
 
             is com.mistakebook.net.ApiResult.Failure ->
-                "OCR 失败：${result.error.serverMessage.ifBlank { "请检查 OCR 供应商或网络配置" }}"
+                "OCR 失败：${result.error.displayMessage.ifBlank { "请检查 OCR 供应商或网络配置" }}"
         }
     }
 
