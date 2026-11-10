@@ -250,11 +250,14 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun saveProfile(profile: LlmProfile) = viewModelScope.launch {
         clearLlmTestResult(profile.id)
-        store.upsertProfile(profile)
+        // normalized() 顺带剥掉 Key/模型名里的空白（粘贴带回的换行会让
+        // OkHttp 拒绝 Authorization 头）——不清洗的话脏数据落库，之后
+        // 每次请求都带着它。
+        store.upsertProfile(profile.normalized())
     }
 
     fun addProfile(profile: LlmProfile) = viewModelScope.launch {
-        store.upsertProfile(profile)
+        store.upsertProfile(profile.normalized())
     }
 
     fun deleteProfile(id: String) = viewModelScope.launch {

@@ -204,7 +204,7 @@ class LlmClient(
         val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
-                authorization = "Bearer $key",
+                authorization = HttpFactory.bearer(key),
                 request = request
             )
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -354,7 +354,7 @@ class LlmClient(
         val response = runCatching {
             api.listModels(
                 url = profile.modelsUrl(),
-                authorization = "Bearer $key"
+                authorization = HttpFactory.bearer(key)
             )
         }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
         if (!response.isSuccessful) {
@@ -394,7 +394,7 @@ class LlmClient(
         val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
-                authorization = "Bearer ${profile.resolveKey(profile.model)}",
+                authorization = HttpFactory.bearer(profile.resolveKey(profile.model)),
                 request = request
             )
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -421,7 +421,7 @@ class LlmClient(
         val response = runCatching {
             api.listModels(
                 url = profile.modelsUrl(),
-                authorization = "Bearer ${profile.resolveKey(profile.model)}"
+                authorization = HttpFactory.bearer(profile.resolveKey(profile.model))
             )
         }.getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
         return if (response.isSuccessful) {

@@ -25,6 +25,19 @@ object HttpFactory {
     const val CONNECT_TIMEOUT_SECONDS = 15L
     const val CALL_TIMEOUT_SECONDS = 300L
 
+    /**
+     * 令牌（API Key）里**任何空白字符都非法**。
+     *
+     * 粘贴是最常见的翻车点：从聊天记录/网页复制 key 时带回一个换行或
+     * 空格，OkHttp 拼 Authorization 头直接抛 `Unexpected char 0x0a`，
+     * 用户看到的报错跟「key 填错」毫无关系。key 从不含空白，整串剥掉
+     * 只会救回手滑、绝不会误伤。
+     */
+    fun sanitizedToken(value: String): String = value.filterNot { it.isWhitespace() }
+
+    /** Authorization 头的**统一拼装点**：全 App 的 Bearer 都经这里清洗。 */
+    fun bearer(token: String): String = "Bearer ${sanitizedToken(token)}"
+
     fun createClient(): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)

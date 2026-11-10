@@ -22,6 +22,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -506,7 +507,9 @@ class ChatCompletionStream(
                     source.timeout().timeout(USAGE_TAIL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                     source.readUtf8Line()
                 }.getOrNull()
-            }
+            },
+            // 事件停摆看门狗：只发注释不发事件的假活连接，读超时永远不触发。
+            stallTimeoutMs = STREAM_STALL_TIMEOUT_MS
         )
         // 无论是怎么结束的（[DONE] / EOF / finish_reason），都发一次 Ended。
         // 上层靠它把消息状态从「生成中」翻成完成。
@@ -582,7 +585,7 @@ class ChatCompletionStream(
         val response = try {
             api.chatCompletions(
                 url = profile.chatCompletionsUrl(),
-                authorization = "Bearer $key",
+                authorization = HttpFactory.bearer(key),
                 request = body
             )
         } catch (cancelled: CancellationException) {
@@ -656,7 +659,7 @@ class ChatCompletionStream(
         val payload = json.encodeToString(ChatRequest.serializer(), body)
         return Request.Builder()
             .url(profile.chatCompletionsUrl())
-            .header("Authorization", "Bearer $key")
+            .header("Authorization", HttpFactory.bearer(key))
             .header("Accept", if (streaming) "text/event-stream" else "application/json")
             .header("Cache-Control", "no-cache")
             .post(payload.toRequestBody(JSON_MEDIA_TYPE))
@@ -717,6 +720,16 @@ class ChatCompletionStream(
  * keep-alive 注释行。再多就说明服务端不守规矩，不必等了。
  */
 private const val USAGE_TAIL_LINES = 3
+
+/**
+ * 流式**事件停摆**看门狗：超过这么久没有任何真实事件（delta/thinking/
+ * finish/usage）就放弃本轮。为什么不能靠 OkHttp 的 readTimeout：实测有些
+ * 网关在流里只发 keep-alive 注释行——字节一直在来，读超时被无限续命，
+ * 而 `readUtf8Line()` 永远等不到一个真实事件，界面就永久转圈。
+ * 90 秒是宽裕值：推理模型的 thinking 分片是连续流出的，真实生成中途
+ * 90 秒一个事件都没有只能是连接假活。
+ */
+private const val STREAM_STALL_TIMEOUT_MS = 90_000L
 
 /**
  * 这一帧是否意味着**生成已经结束**。
@@ -812,21 +825,38 @@ data class SseStreamResult(
  *
  * @param readLine 读下一行；返回 `null` 表示 EOF。**不返回**即代表连接挂住。
  * @param afterFinish finish 帧之后的补读。默认 null = 不补读（老行为）。
+ * @param stallTimeoutMs 事件停摆看门狗（v0.0.150）。>0 时：超过这么久**没有
+ *   任何真实事件**（注释行 / 坏帧不算——有些网关挂着连接只发 keep-alive 注释，
+ *   OkHttp 的读超时被这些字节一直续命，永远不会触发），就抛
+ *   [SocketTimeoutException] 让本轮以 TIMEOUT 收场，用户看到的是明确的
+ *   「超时」而不是永久转圈。已吐过帧的失败不会自动重发（防重复输出），
+ *   用户点重试即可。0 = 关闭（旧测试与调用方不传时的行为）。
+ * @param nowMs 时钟，注入以便单测推进时间。
  */
 fun drainSse(
     readLine: () -> String?,
     parser: SseLineParser = SseLineParser(),
     onThinking: (String) -> Unit = {},
     onDelta: (String) -> Unit = {},
-    afterFinish: (() -> String?)? = null
+    afterFinish: (() -> String?)? = null,
+    stallTimeoutMs: Long = 0,
+    nowMs: () -> Long = System::currentTimeMillis
 ): SseStreamResult {
     var finishReason: String? = null
     var promptTokens = 0
     var completionTokens = 0
     var cachedTokens = 0
     var toolCalls: List<AccumulatedToolCall> = emptyList()
+    // 最近一次**真实事件**的时间。注释行（Ignore）与坏帧（Malformed）是
+    // 字节但不是内容——看门狗恰恰要抓「只有它们在来」的假活连接。
+    var lastEventAtMs = nowMs()
 
     while (true) {
+        if (stallTimeoutMs > 0 && nowMs() - lastEventAtMs > stallTimeoutMs) {
+            throw SocketTimeoutException(
+                "流式输出已 ${stallTimeoutMs / 1000} 秒没有任何新内容（连接未关闭）"
+            )
+        }
         val line = readLine() ?: return SseStreamResult(
             promptTokens, completionTokens, finishReason, cachedTokens,
             endedBy = "eof", toolCalls = toolCalls
@@ -834,6 +864,7 @@ fun drainSse(
         val event = parser.accept(line) ?: continue
         when (event) {
             is SseEvent.Chunk -> {
+                lastEventAtMs = nowMs()
                 event.thinking.takeIf { it.isNotEmpty() }?.let(onThinking)
                 event.text.takeIf { it.isNotEmpty() }?.let(onDelta)
                 // 工具调用分片：按 index 累积（一次调用的参数被拆成多片）

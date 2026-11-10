@@ -1,5 +1,6 @@
 package com.mistakebook.net
 
+import com.mistakebook.net.HttpFactory
 import com.mistakebook.data.prefs.ImageProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -80,7 +81,7 @@ class ImageGenClient(
     private fun callOnce(profile: ImageProfile, bodyText: String): ApiResult<ByteArray> {
         val request = Request.Builder()
             .url(profile.generateUrl())
-            .header("Authorization", "Bearer ${profile.apiKey}")
+            .header("Authorization", HttpFactory.bearer(profile.apiKey))
             .post(bodyText.toRequestBody(JSON_MEDIA))
             .build()
         return try {

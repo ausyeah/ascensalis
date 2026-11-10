@@ -1,5 +1,6 @@
 package com.mistakebook.data.chat
 
+import com.mistakebook.net.HttpFactory
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -201,7 +202,7 @@ object TavilySearch {
     ): UsageResult {
         val request = Request.Builder()
             .url("https://api.tavily.com/usage")
-            .header("Authorization", "Bearer $apiKey")
+            .header("Authorization", HttpFactory.bearer(apiKey))
             .get()
             .build()
         return runCatching {
@@ -328,7 +329,7 @@ object DeepSeekSearch {
         ).toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url(ENDPOINT)
-            .header("Authorization", "Bearer $apiKey")
+            .header("Authorization", HttpFactory.bearer(apiKey))
             .post(body)
             .build()
         val response = client.newCall(request).execute()

@@ -1,5 +1,6 @@
 package com.mistakebook.net.llm
 
+import com.mistakebook.net.HttpFactory
 import com.mistakebook.data.prefs.LlmProfile
 
 /**
@@ -52,7 +53,7 @@ object EmbeddingEndpoint {
 
         return Resolved(
             url = endpointUrl(baseUrl),
-            authorization = "Bearer $apiKey",
+            authorization = HttpFactory.bearer(apiKey),
             model = model
         )
     }

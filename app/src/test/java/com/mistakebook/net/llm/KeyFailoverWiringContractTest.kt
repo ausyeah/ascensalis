@@ -35,8 +35,8 @@ class KeyFailoverWiringContractTest {
             stream.contains("profile.resolveKey(")
         )
         assertTrue(
-            "鉴权头必须用传进来的这把 key",
-            stream.contains(".header(\"Authorization\", \"Bearer \$key\")")
+            "鉴权头必须用传进来的这把 key（HttpFactory.bearer 统一拼装并清洗空白）",
+            stream.contains(".header(\"Authorization\", HttpFactory.bearer(key))")
         )
     }
 

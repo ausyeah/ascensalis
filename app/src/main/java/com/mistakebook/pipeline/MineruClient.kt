@@ -101,7 +101,7 @@ class MineruClient(
         if (mineruKey.isBlank()) {
             return@withContext fail(ApiErrorKind.NO_KEY)
         }
-        val auth = "Bearer $mineruKey"
+        val auth = HttpFactory.bearer(mineruKey)
 
         onStage("上传识别请求…")
         val batch = when (val r = requestUploadUrl(auth, fileName, modelVersion, language, forceOcr)) {
@@ -458,7 +458,7 @@ class MineruClient(
     /** 设置页「测试连接」：ping 返回 -60012(task not found) 即视为 Key 有效。 */
     suspend fun testConnection(mineruKey: String): ApiResult<Boolean> {
         if (mineruKey.isBlank()) return fail(ApiErrorKind.NO_KEY)
-        val response = rethrowCancellation { api.extractResults("Bearer $mineruKey", "ping") }
+        val response = rethrowCancellation { api.extractResults(HttpFactory.bearer(mineruKey), "ping") }
             .getOrElse { return ApiResult.Failure(HttpFactory.throwableError(it)) }
         if (!response.isSuccessful) {
             return fail(HttpFactory.httpError(response.code(), response.errorBody()?.string().orEmpty()))

@@ -261,8 +261,13 @@ class LlmMultiKeyTest {
         assertEquals(1, p.keyCandidates("gpt-4o").size)
         // deepseek-chat：绑定的 key-c + 主 key
         assertEquals(2, p.keyCandidates("deepseek-chat").size)
-        // 空模型名：无从判断，不给出任何 key
-        assertTrue(p.keyCandidates("  ").isEmpty())
+        // 空模型名：无从路由，但拉列表/连通性测试只关心「有没有一把能用的
+        // key」——回退整串（主 key 打头）。之前返回空会把探活误报成
+        // 「没填 Key」（v0.0.150：用户明明填了 key，只是还没选模型）。
+        assertEquals(
+            listOf("sk-main", "sk-b", "sk-c"),
+            p.keyCandidates("  ").map { it.key }
+        )
     }
 
     // ------------------------------------------------------------------

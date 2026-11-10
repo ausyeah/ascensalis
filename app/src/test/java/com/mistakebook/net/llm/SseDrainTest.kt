@@ -316,4 +316,84 @@ class SseDrainTest {
         assertTrue(isTerminalFinish("content_filter"))
         assertTrue(isTerminalFinish("tool_calls"))
     }
+
+    // ------------------------------------------------------------------
+    // 八、事件停摆看门狗（v0.0.150）
+    //
+    // 用户实测：流收到 thinking 之后再无任何事件，界面永久转圈。
+    // 网关只发 keep-alive 注释行——**字节一直在来，读超时永远不触发**，
+    // 而 readUtf8Line() 等不到真实事件。看门狗按「最近一次真实事件」
+    // 计时：注释行与坏帧不喂狗。
+    // ------------------------------------------------------------------
+
+    /** 注释行：SSE 规范里以冒号开头，解析成 Ignore——字节在来但不是内容。 */
+    private fun keepAlive(): String = ": keep-alive"
+
+    @Test
+    fun `只有注释行流动时看门狗触发`() {
+        var clock = 0L
+        val err = runCatching {
+            drainSse(
+                readLine = { clock += 30_000; keepAlive() },
+                stallTimeoutMs = 90_000,
+                nowMs = { clock }
+            )
+        }.exceptionOrNull()
+        assertTrue("注释流必须被看门狗掐断", err is java.net.SocketTimeoutException)
+        assertTrue(err!!.message!!.contains("秒"))
+    }
+
+    @Test
+    fun `真实事件持续到来时看门狗不误伤`() {
+        var clock = 0L
+        // 注释与真实事件交替，每读一行时钟走 30 秒：真实事件之间最多隔 60 秒，
+        // 从未超过 90 秒的预算——看门狗必须全程安静，流正常读到 EOF。
+        val lines = Array(50) { i ->
+            if (i % 2 == 0) keepAlive() else deltaFrame("字$i")
+        }
+        var index = 0
+        val result = drainSse(
+            readLine = {
+                clock += 30_000
+                lines.getOrNull(index++)
+            },
+            stallTimeoutMs = 90_000,
+            nowMs = { clock }
+        )
+        assertEquals("eof", result.endedBy)
+    }
+
+    @Test
+    fun `thinking 之后断流也会被掐断`() {
+        var clock = 0L
+        var calls = 0
+        val err = runCatching {
+            drainSse(
+                readLine = {
+                    calls++
+                    clock += 30_000
+                    when (calls) {
+                        1 -> deltaFrame("x")              // 一个真实事件，喂狗
+                        else -> keepAlive()               // 之后只有注释
+                    }
+                },
+                stallTimeoutMs = 90_000,
+                nowMs = { clock }
+            )
+        }.exceptionOrNull()
+        assertTrue("thinking 后只来注释也必须掐断", err is java.net.SocketTimeoutException)
+    }
+
+    @Test
+    fun `看门狗关闭时旧行为不变`() {
+        // stallTimeoutMs = 0：注释流永远读下去，靠 EOF 收尾（老测试与调用方）
+        val lines = listOf(deltaFrame("a"), keepAlive(), keepAlive())
+        var index = 0
+        val result = drainSse(
+            readLine = { lines.getOrNull(index++) },
+            stallTimeoutMs = 0,
+            nowMs = { 0L }
+        )
+        assertEquals("eof", result.endedBy)
+    }
 }

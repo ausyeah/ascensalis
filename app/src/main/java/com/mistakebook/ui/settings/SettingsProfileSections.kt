@@ -308,7 +308,13 @@ internal fun ProfileRow(
                 PasswordField(
                     label = stringResource(R.string.settings_api_key),
                     value = apiKey,
-                    onValueChange = { apiKey = it; onDraftChanged() }
+                    // 输入即剥离空白：从聊天记录/网页粘贴 key 最容易带回换行
+                    // （OkHttp 拒绝带换行的 Authorization 头）。key 从不含
+                    // 空白，剥掉只会救回手滑。normalized() 保存时还会再清一遍。
+                    onValueChange = {
+                        apiKey = it.filterNot { ch -> ch.isWhitespace() }
+                        onDraftChanged()
+                    }
                 )
                 Spacer(Modifier.height(8.dp))
                 // ===== 附加 Key 池 =====
@@ -1104,7 +1110,9 @@ internal fun ExtraKeyRow(
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = entry.key,
-            onValueChange = onChange,
+            // 输入即剥离空白：与主 Key 同一口径（粘贴带回的换行会让
+            // OkHttp 拒绝 Authorization 头）。
+            onValueChange = { onChange(it.filterNot { ch -> ch.isWhitespace() }) },
             label = { Text(stringResource(R.string.settings_api_key)) },
             singleLine = true,
             visualTransformation = if (visible) {

@@ -163,11 +163,14 @@ data class LlmProfile(
      * 查表**大小写不敏感**：/models 回来的模型名与用户手填/芯片上显示的名字
      * 偶尔大小写不一致（DeepSeek-Chat vs deepseek-chat）。
      *
-     * 空模型名无从判断，返回空列表。
+     * 空模型名无从路由——但**拉模型列表 / 连通性测试**只关心「有没有一把
+     * 能用的 key」（v0.0.150：之前返回空，探活被误报成「没填 Key」，用户
+     * 明明填了、只是还没选模型）。回退整串可用 key，主 key 打头——与
+     * [allKeys] 的兜底口径一致。
      */
     fun keyCandidates(model: String): List<LlmKeyEntry> {
         val target = model.trim()
-        if (target.isBlank()) return emptyList()
+        if (target.isBlank()) return allKeys().filter { it.isUsable() }
         chainFor(target)?.let { ids ->
             val chained = ids.mapNotNull { entryFor(it) }
                 .filter { it.isUsable() }
@@ -239,11 +242,23 @@ data class LlmProfile(
     /**
      * 保存前规范化：只填了根域名（如 https://api.example.com）时自动补 /v1，
      * 已经带路径的（如 https://host/api）保持原样。
+     *
+     * 同时**剥掉 Key / 模型名里的空白字符**：从聊天记录、网页复制 key 时
+     * 最容易带回一个换行或空格——存进配置后每次请求都带着它，OkHttp 拼
+     * Authorization 头直接抛 `Unexpected char 0x0a`（v0.0.150 用户实测），
+     * 报错跟「key 填错」毫无关系，肉眼根本查不出来。key 从不含空白，
+     * 剥掉只会救回手滑。模型名同理：尾随换行会让路由表查不到、探活误报。
      */
     override fun normalized(): LlmProfile {
         val raw = baseUrl.trim().trimEnd('/')
         val hasPath = raw.removePrefix("https://").removePrefix("http://").contains('/')
-        return copy(baseUrl = if (hasPath) raw else "$raw/v1")
+        return copy(
+            baseUrl = if (hasPath) raw else "$raw/v1",
+            apiKey = apiKey.filterNot { it.isWhitespace() },
+            model = model.trim(),
+            extraKeys = extraKeys.map { it.copy(key = it.key.filterNot { ch -> ch.isWhitespace() }) },
+            models = models.map { it.trim() }
+        )
     }
 
     fun chatCompletionsUrl(): String = baseUrl.trimEnd('/') + "/chat/completions"
