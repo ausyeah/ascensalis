@@ -83,7 +83,6 @@ fun MainPortalScreen(
     onOpenArchivedTasks: () -> Unit = {},
     /** 记忆库入口（v0.0.108）。 */
     onOpenMemory: () -> Unit = {},
-    onSnapAsk: () -> Unit = {},
     onStartReview: () -> Unit = {},
     /** 资料库管理页（T6）：门户设置 Tab 的内嵌设置页经此进子页面。 */
     onOpenLibrary: () -> Unit = {},
@@ -181,7 +180,6 @@ fun MainPortalScreen(
                         onOpenNotebooks = onOpenNotebooks,
                         onOpenQuestion = onOpenQuestion,
                         onNewChat = onNewChat,
-                        onSnapAsk = onSnapAsk,
                         onStartReview = onStartReview
                     )
                 }

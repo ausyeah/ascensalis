@@ -20,11 +20,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import android.util.Log
 import com.mistakebook.di.AppContainer
-import com.mistakebook.di.PendingTool
 import com.mistakebook.ui.capture.CaptureScreen
-import com.mistakebook.data.chat.ChatToolPrompts
 import com.mistakebook.ui.chat.ChatScreen
-import com.mistakebook.ui.chat.ChatTool
 import com.mistakebook.ui.crop.CropScreen
 import com.mistakebook.ui.detail.DetailScreen
 import com.mistakebook.ui.edit.EditScreen
@@ -251,20 +248,6 @@ fun MistakeBookNavHost(
                         navController.navigate(
                             Routes.chat(null, container.chatRepository.openFreeSession())
                         )
-                    }
-                },
-                onSnapAsk = {
-                    scope.launch {
-                        // 拍题讲解（v0.0.98）：先建会话再拍照——裁切接力需要
-                        // 一个已经存在的会话来落地成果。指令进会话、自动开相机、
-                        // 拍完自动发送，三件事都由对话页按容器标志接管。
-                        val id = container.chatRepository.openFreeSession()
-                        container.pendingTool = PendingTool(
-                            sessionId = id,
-                            tool = ChatTool.PHOTO,
-                            instruction = ChatToolPrompts.ASK
-                        )
-                        navController.navigate(Routes.chat(null, id))
                     }
                 },
                 onOpenQuestion = { id -> navController.navigate(Routes.detail(id)) },

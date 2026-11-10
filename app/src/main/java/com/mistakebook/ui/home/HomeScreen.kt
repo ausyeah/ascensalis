@@ -35,8 +35,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.AddComment
-import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.AccountTree
@@ -166,8 +164,6 @@ fun HomeScreen(
     onOpenQuestion: (Long) -> Unit,
     /** AI 对话：直接开一条新对话（v0.0.96）。历史会话改从对话页左上角进。 */
     onNewChat: () -> Unit = {},
-    /** 拍题讲解（v0.0.98）：拍照 → 裁切 → 直接进对话开讲，不走错题收集。 */
-    onSnapAsk: () -> Unit = {},
     /** 今日有到期题时横幅点击 → 进独立复习页（T1）。 */
     onStartReview: () -> Unit = {}
 ) {
@@ -343,9 +339,10 @@ fun HomeScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            // 搜索栏 + 错题本专属操作（打印/对话列表）同一行：
-            // 这两个入口只服务错题本，从顶栏挪到搜索栏右侧，顶栏四个 Tab
+            // 搜索栏 + 错题本专属操作（打印/周报/导图/统计）同一行：
+            // 这些入口只服务错题本，从顶栏挪到搜索栏右侧，顶栏四个 Tab
             // 从此位置恒定，翻页不抖动；搜索栏让出部分宽度给它们。
+            // 对话与拍题不再放这里：右下角一对胶囊就是它们的唯一快捷入口。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -403,31 +400,10 @@ fun HomeScreen(
                         unfocusedBorderColor = Color.Transparent
                     )
                 )
-                // 拍题讲解（v0.0.98）：紧挨搜索框——「看不懂一道题」和「搜一道题」
-                // 是同一个动作的两个分支，入口就该并排。
-                IconButton(onClick = onSnapAsk, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.PhotoCamera,
-                        contentDescription = stringResource(R.string.home_snap_ask),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
                 IconButton(onClick = onOpenPrint, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.Print,
                         contentDescription = stringResource(R.string.home_action_print),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                // 会话：一颗带加号的对话气泡，点下去直接进新对话（ChatGPT 手机端的做法）。
-                // 以前这颗进的是「对话记录」，用户得先看一页列表再点新对话——
-                // 两步都落不到「我要问点东西」这个唯一目的上。
-                IconButton(onClick = onNewChat, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.AddComment,
-                        contentDescription = stringResource(R.string.chat_new_conversation),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(22.dp)
                     )

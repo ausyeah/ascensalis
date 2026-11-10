@@ -42,10 +42,15 @@ class HomeChatEntryTest {
     fun `按钮说自己是开启新对话`() {
         val home = readSource("src/main/java/com/mistakebook/ui/home/HomeScreen.kt")
         assertTrue("参数名要说清落点是新对话", home.contains("onNewChat: () -> Unit"))
-        assertTrue("图标必须带加号，一眼看出是「新开」", home.contains("Icons.Default.AddComment"))
+        // v0.0.149：顶栏的会话按钮砍掉了（用户拍板「右下角已有，占位置」），
+        // 对话入口只剩右下角那颗胶囊——它必须自己说清是「开启对话」。
         assertTrue(
-            "无障碍标签必须是「开启新对话」",
-            home.contains("contentDescription = stringResource(R.string.chat_new_conversation)")
+            "对话入口（右下角胶囊）必须带无障碍标签「开启对话」",
+            home.contains("contentDescription = stringResource(R.string.home_open_chat)")
+        )
+        assertFalse(
+            "顶栏不许再放重复的会话按钮（AddComment 图标已随按钮删除）",
+            home.contains("Icons.Default.AddComment")
         )
         assertFalse(
             "不许再把标签写成「对话记录」——读屏用户会以为点进去是列表",
