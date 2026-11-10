@@ -574,25 +574,27 @@ internal fun StatusRow(
     /** T13：非空时对完成态助手消息展示「存入题目备注」入口。 */
     onSaveToNote: ((Long) -> Unit)? = null
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        modifier = Modifier.padding(top = 2.dp)
-    ) {
-        when {
-            message.status == MessageStatus.FAILED -> {
-                Text(
-                    text = stringResource(R.string.chat_failed_badge),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-                TextButton(
-                    onClick = { onRetry(message.id) },
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
-                ) {
-                    Text(stringResource(R.string.chat_retry), style = MaterialTheme.typography.labelSmall)
+    // 包一层 Column：失败原因（errorMessage）要另起一行展示，塞进横排里
+    // 长文本会和按钮挤在一行放不下。
+    Column(modifier = Modifier.padding(top = 2.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            when {
+                message.status == MessageStatus.FAILED -> {
+                    Text(
+                        text = stringResource(R.string.chat_failed_badge),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    TextButton(
+                        onClick = { onRetry(message.id) },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                    ) {
+                        Text(stringResource(R.string.chat_retry), style = MaterialTheme.typography.labelSmall)
+                    }
                 }
-            }
 
             // 手动停止（v0.0.109）：和发送失败一样给出口。
             // 「继续」是接着写，「重试」是重答——停止之后用户想要的
@@ -681,8 +683,34 @@ internal fun StatusRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        }
+
+        // 失败原因**持久**显示（此前只走 4 秒即逝的 Snackbar）：真实原因
+        // （连接被拒 / 超时 / 服务端报文）已经落库，气泡上只留一句
+        // 「发送失败」等于白诊断。
+        if (message.status == MessageStatus.FAILED) {
+            val reason = chatFailedReason(message.errorMessage)
+            if (reason != null) {
+                Text(
+                    text = reason,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
     }
 }
+
+/**
+ * 失败气泡上要显示的原因文本：errorMessage 非空白才显示。
+ *
+ * 空白不显示（比如纯取消、无信息的异常），有原因就原样透出——
+ * 上游报错原话往往就是排查的关键（「key 已禁用」「模型不存在」）。
+ * 独立成纯函数才能 JVM 单测。
+ */
+internal fun chatFailedReason(errorMessage: String?): String? =
+    errorMessage?.takeIf { it.isNotBlank() }
 
 
 /**
