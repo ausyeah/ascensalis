@@ -243,6 +243,7 @@
     // （原来是在 renderBatch 结尾设 display:none，但那等于让批量路径抠到空白，
     //   正确做法是在**每条路径的入口**各管各的。）
     var sheet = document.getElementById('sheet');
+    out.style.display = 'block';
     sheet.style.display = 'none';
     // getBoundingClientRect() 是 CSS 像素，而 Android 的 view.draw 画的是设备像素，
     // 高分屏上差一个 devicePixelRatio。必须乘 dpr 再返回，否则抠出来的是公式的一小块。
@@ -319,6 +320,9 @@
     var limit = Math.min((window.innerWidth || 700), (maxDevicePx || 2048) / dpr);
     var maxW = Math.max(120, limit - 8);
 
+    var out = document.getElementById('out');
+    // 两条渲染路径共享同一 WebView，且都从原点抓图；隐藏另一条才不会叠图。
+    out.style.display = 'none';
     var sheet = document.getElementById('sheet');
     sheet.innerHTML = '';
     sheet.style.display = 'block';

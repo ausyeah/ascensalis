@@ -922,7 +922,7 @@
     <string name="richtext_math_label">公式</string>
     <string name="svg_unavailable">示意图无法显示</string>
     <string name="svg_cd">示意图</string>
-    <string name="probe_math_inline_sample">设 $I_R = \oint_L \frac{y\,dx - x\,dy}{(x^2 + y^2)^2}$，其中 $L$ 为 $x^2 + y^2 = \frac{1}{R^2}$，方向为逆时针方向，则 $R \to 0^+$ 时，</string>
+    <string name="probe_math_inline_sample">已知 $f(x)$ 在 $x=0$ 处可导，且 $f^{\\prime}(0)\\neq 0$。当 $x>0$ 时，$\\ln(1+x)>0$。</string>
     <string name="badge_not_initialized">应用尚未初始化，请返回重试</string>
     <string name="home_empty_filter_hint">换个筛选条件试试</string>
     <string name="chat_grading_default_message">请批改我的解题过程，指出从哪一步开始错</string>

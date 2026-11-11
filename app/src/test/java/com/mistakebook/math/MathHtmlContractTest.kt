@@ -84,4 +84,14 @@ class MathHtmlContractTest {
             renderer.contains("fun onFontsReady()")
         )
     }
+    @Test
+    fun `single and batch capture layers are mutually exclusive`() {
+        val single = mathHtml.substringAfter("function render(").substringBefore("function renderBatch(")
+        val batch = mathHtml.substringAfter("function renderBatch(")
+
+        assertTrue("单条渲染必须显示 #out", single.contains("out.style.display = 'block'"))
+        assertTrue("单条渲染必须隐藏旧批量长卷", single.contains("sheet.style.display = 'none'"))
+        assertTrue("批量渲染必须隐藏单条渲染残留，避免与长卷重叠", batch.contains("out.style.display = 'none'"))
+        assertTrue("批量渲染必须显示长卷", batch.contains("sheet.style.display = 'block'"))
+    }
 }

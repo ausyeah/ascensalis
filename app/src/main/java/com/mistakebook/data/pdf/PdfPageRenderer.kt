@@ -25,6 +25,19 @@ import java.io.FileOutputStream
 object PdfPageRenderer {
 
     /**
+     * 使用 Android 系统 PDF 引擎读取真实页数。轻量文本提取器只支持部分 PDF 对象布局，
+     * 遇到压缩对象流时可能返回 0；页数与文本抽取分开判断，确保这类文件仍可走逐页 OCR。
+     */
+    fun pageCount(pdfFile: File): Int {
+        val descriptor = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
+        return try {
+            PdfRenderer(descriptor).use { renderer -> renderer.pageCount }
+        } finally {
+            descriptor.close()
+        }
+    }
+
+    /**
      * 逐页栅格化成 JPEG。
      *
      * @param wanted 页码列表（1 起）；null = 全部页；越界页跳过。

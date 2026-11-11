@@ -29,13 +29,14 @@ class PdfImporter(
         pageRange: List<Int>? = null
     ): Result = withContext(Dispatchers.IO) {
         try {
-            val bytes = pdfFile.readBytes()
-            val totalPages = PdfTextExtractor.pageCount(bytes)
+            val info = PdfTextProbe.probe(pdfFile)
+            val totalPages = info.pageCount
             if (totalPages <= 0) return@withContext Result.Failed("PDF 没有可识别的页面")
             val wanted = pageRange?.filter { it in 1..totalPages }?.ifEmpty { null }
                 ?: (1..totalPages).toList()
 
-            val textPages = if (PdfTextExtractor.isTextPdf(bytes)) {
+            val textPages = if (info.textMode) {
+                val bytes = pdfFile.readBytes()
                 PdfTextExtractor.extractAll(bytes).mapIndexedNotNull { index, text ->
                     val pageNumber = index + 1
                     if (pageNumber in wanted && text.isNotBlank()) text else null
