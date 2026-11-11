@@ -16,8 +16,13 @@ import com.mistakebook.data.prefs.LlmProfile
  */
 class KeyPasteSanitizeTest {
 
-    /** 手机上真实撞到的报文：62 位 key + 「Bearer 」前缀 = 换行正好在第 69 位。 */
-    private val dirtyKey = "sk-magpie-key-5185620dde1bd37f0a8ef44968ab92e57a8988379ecb7869\n"
+    /**
+     * 手机上真实撞到的报文形态：62 位 key + 「Bearer 」前缀 = 换行正好在第 69 位。
+     *
+     * 这里用**等长假 Key**：2026-11-11 发现该文件曾把用户真实 Key 当字面量提交，
+     * 已替换（真实 Key 须在服务商后台吊销，git 历史里的那份改不掉）。
+     */
+    private val dirtyKey = "sk-magpie-TESTEXAMPLE-NOT-A-REAL-KEY00000000000000000000000000\n"
 
     @Test
     fun `bearer 头剥掉换行与空格`() {
