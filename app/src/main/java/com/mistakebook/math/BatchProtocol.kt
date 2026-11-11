@@ -99,6 +99,8 @@ internal object BatchProtocol {
         const val NONE = 0
         const val CORRUPTED_SOURCE = 1
         const val KATEX_PARSE_FAILED = 2
+        /** KaTeX 字体尚未就绪（math.html 字体闸门），瞬时状态，调用方应等待重试。 */
+        const val FONTS_NOT_READY = 3
     }
 
     data class Entry(

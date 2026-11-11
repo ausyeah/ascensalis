@@ -12,6 +12,7 @@ import android.view.View
 import android.webkit.WebView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -736,13 +737,29 @@ class MathRenderer(context: Context) {
                 // 批量路径同样要先推主题色：长卷里每个公式都继承 #sheet 的 color。
                 pushForegroundColor(view, colorCss)
                 val script = buildBatchScript(deduped)
-                val raw = awaitJavascript(view, script)
+                // err=3 = KaTeX 字体尚未就绪（math.html 的字体闸门）。
+                // 这是**瞬时**状态：本地 file:// 字体通常毫秒级完成，
+                // 冷 WebView / 低端机偶发慢一点。直接判失败会把源码
+                // 印到 PDF 或钉死在界面（RichText 的重试轮次有限），
+                // 所以在这里原地等待重跑，最坏等约 8 秒。
+                var raw = awaitJavascript(view, script)
+                var layout = raw?.let { BatchProtocol.parse(it) }
+                var fontGateWaited = 0L
+                while (layout != null && layout.entries.isNotEmpty() &&
+                    layout.entries.all { it.err == BatchProtocol.Err.FONTS_NOT_READY } &&
+                        fontGateWaited < 8_000L
+                ) {
+                    delay(FONT_GATE_RETRY_DELAY_MS)
+                    fontGateWaited += FONT_GATE_RETRY_DELAY_MS
+                    raw = awaitJavascript(view, script)
+                    layout = raw?.let { BatchProtocol.parse(it) }
+                }
                 if (raw == null) {
                     Log.w(TAG, "批量渲染 evaluateJavascript 无返回")
                     deduped.forEach { (key, _) -> results[key] = null }
                     return@withLock
                 }
-                val layout = BatchProtocol.parse(raw) ?: run {
+                layout ?: run {
                     Log.w(TAG, "批量布局解析失败, 原始返回(截断): ${raw.take(200)}")
                     deduped.forEach { (key, _) -> results[key] = null }
                     return@withLock
@@ -937,6 +954,8 @@ class MathRenderer(context: Context) {
         private const val ASSET_URL = "file:///android_asset/katex/math.html"
         private const val MAX_BITMAP_EDGE = 2048
         private const val PAGE_LOAD_TIMEOUT_MS = 8_000L
+        /** 字体闸门（err=3）原地重试间隔。 */
+        private const val FONT_GATE_RETRY_DELAY_MS = 250L
         /**
          * 字体就绪桥的兜底超时（onPageFinished 之后多久没桥回调也放行）。
          * 本地 file:// 字体加载通常 <100ms，3 秒足够；超时只意味着降级到

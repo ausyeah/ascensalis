@@ -177,6 +177,25 @@
   }
 
   /**
+   * 字体**逐面就绪校验**。
+   *
+   * fontsReady() 的 Promise resolve 只说明 load() 调用结束了——
+   * 字体加载失败（reject）会被 catch 吞掉，个别字体族仍处于 unloaded 状态。
+   * 带着「半套字体」渲染的后果：斜体字母（KaTeX_Math）在，
+   * 而括号/等号/数字（KaTeX_Main）、大小分隔符（KaTeX_Size*）不可见——
+   * 用户看到 `f(x)` 变成 `f x`、`x=0` 只剩 `x`，但排版空位还在。
+   *
+   * FontFace.status 只有 loaded/error 才算「尘埃落定」；
+   * error 是资产级故障无法重试，unloaded/loading 必须再触发一轮加载。
+   */
+  var fontsVerified = false;
+  function unloadedFontFaces() {
+    return Array.prototype.filter.call(document.fonts, function (f) {
+      return f.status !== 'loaded' && f.status !== 'error';
+    });
+  }
+
+  /**
    * 页面加载阶段的字体就绪流程：渲染探测公式（把全部 KaTeX 字体族
    * 拉进加载状态）→ 等字体 → 通知 Android。
    *
@@ -196,9 +215,28 @@
     } catch (e) { /* 探测失败不阻塞：fontsReady 仍会尝试直接加载 */ }
     document.getElementById('out').innerHTML = '';
     fontsReady().then(function () {
-      if (window.AndroidMath && window.AndroidMath.onFontsReady) {
-        window.AndroidMath.onFontsReady();
+      var attempt = 0;
+      function verify() {
+        var unloaded = unloadedFontFaces();
+        if (unloaded.length === 0 || attempt >= 3) {
+          // error 状态的字体族重试也不会成功，只能按现状放行（与旧行为一致）；
+          // unloaded 还有救，穷尽重试仍不行则标记未验证——
+          // render()/renderBatch() 会返回 err=3，由 Kotlin 回退源码并重试。
+          fontsVerified = unloaded.every(function (f) { return f.status === 'error'; });
+          if (window.AndroidMath && window.AndroidMath.onFontsReady) {
+            window.AndroidMath.onFontsReady();
+          }
+          return;
+        }
+        attempt++;
+        unloaded.forEach(function (f) {
+          try { f.load(); } catch (e) { /* 单个失败不阻塞整体 */ }
+        });
+        fontsReady().then(function () {
+          setTimeout(verify, 120);
+        });
       }
+      verify();
     });
   }
 
@@ -236,6 +274,14 @@
    * 这个函数曾经是 async 的，导致 v0.0.31~32 全量渲染失败，**不要再改回 async**。
    */
   function render(latex, displayMode, maxDevicePx) {
+    // 字体未验证完成绝不抓图：宁可回退源码让 Kotlin 重试，
+    // 也不画出「斜体在、正体缺」的残缺公式（真机字体竞态的根治闸门）。
+    if (!fontsVerified) {
+      return JSON.stringify({
+        w: 1, h: 1, fs: 0,
+        err: 3, errMsg: 'KaTeX 字体尚未就绪'
+      });
+    }
     var out = document.getElementById('out');
     // 单条路径只抠 #out，所以必须先把 #sheet 藏起来：
     // 两者都是 position:absolute 贴在 (0,0)，不藏会盖在 #out 上，
@@ -316,6 +362,19 @@
    * 导致 v0.0.31~32 批量路径（PDF 导出）全废，**不要再改回 async**。
    */
   function renderBatch(items, maxDevicePx) {
+    if (!fontsVerified) {
+      // 与单条路径同一闸门：字体未就绪时不下卷、不抓图，
+      // 每条公式各自返回 err=3，Kotlin 侧回退源码（打印路径会重试）。
+      return JSON.stringify({
+        w: 1, h: 1,
+        items: items.map(function (item) {
+          return {
+            k: item.k, x: 0, y: 0, w: 1, h: 1, fs: 0,
+            err: 3, errMsg: 'KaTeX 字体尚未就绪'
+          };
+        })
+      });
+    }
     var dpr = window.devicePixelRatio || 1;
     var limit = Math.min((window.innerWidth || 700), (maxDevicePx || 2048) / dpr);
     var maxW = Math.max(120, limit - 8);
