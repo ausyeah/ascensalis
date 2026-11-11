@@ -96,7 +96,7 @@ internal fun AskUserDialog(
                 pending.options.forEach { option ->
                     val checked = option.index in selected
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = MaterialTheme.shapes.medium,
                         color = if (checked) {
                             MaterialTheme.colorScheme.primaryContainer
                         } else {
@@ -138,7 +138,7 @@ internal fun AskUserDialog(
                                             modifier = Modifier
                                                 .background(
                                                     MaterialTheme.colorScheme.primaryContainer,
-                                                    RoundedCornerShape(4.dp)
+                                                    MaterialTheme.shapes.extraSmall
                                                 )
                                                 .padding(horizontal = 4.dp, vertical = 1.dp)
                                         )

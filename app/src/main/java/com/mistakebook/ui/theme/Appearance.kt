@@ -3,12 +3,23 @@ package com.mistakebook.ui.theme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.mistakebook.data.prefs.AppFont
 import com.mistakebook.data.prefs.CornerStyle
+
+/**
+ * 当前圆角倍率（[CornerStyle.scale]）。
+ *
+ * [zincShapes] 只把倍率喂给 M3 的五个形状槽；少数组件需要**自己算 dp**
+ * （聊天气泡的「接缝圆角」要区分 14dp 与 4dp 两种，无法只用一个 Shape 槽
+ * 表达；悬停/按压缩放块同理）。这个 CompositionLocal 让那些组件也能跟随
+ * 「方正↔圆润」设置，而不是被硬编码钉死。
+ */
+val LocalCornerScale = staticCompositionLocalOf { 1f }
 
 /**
  * 全局外观的三个旋钮：字号倍数 + 字体 + 圆角倍数。

@@ -205,7 +205,7 @@ fun DetailScreen(
                                     contentDescription = stringResource(R.string.edit_figures),
                                     modifier = Modifier
                                         .height(120.dp)
-                                        .clip(RoundedCornerShape(8.dp)),
+                                        .clip(MaterialTheme.shapes.extraSmall),
                                     onClick = { showFullImage = true; fullImagePath = ref }
                                 )
                             }
@@ -597,7 +597,7 @@ private fun AuxImageBlock(
                     source = auxState.svg,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(MaterialTheme.shapes.small)
                 )
                 if (!auxState.prompt.isNullOrBlank()) {
                     Spacer(Modifier.height(6.dp))

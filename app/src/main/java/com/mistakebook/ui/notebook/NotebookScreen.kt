@@ -113,7 +113,12 @@ fun NotebookScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showCreate = true }) {
+            // 与首页/Library 的悬浮按钮同色（见 LibraryScreen 的注释）。
+            FloatingActionButton(
+                onClick = { showCreate = true },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ) {
                 Icon(Icons.Default.Add, contentDescription = stringResource(R.string.notebook_create))
             }
         }

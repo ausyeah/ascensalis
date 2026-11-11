@@ -328,7 +328,7 @@ fun EditScreen(
                                             contentDescription = stringResource(R.string.edit_figures),
                                             modifier = Modifier
                                                 .height(96.dp)
-                                                .clip(RoundedCornerShape(6.dp))
+                                                .clip(MaterialTheme.shapes.extraSmall)
                                         )
                                         IconButton(
                                             onClick = { viewModel.removeFigure(ref) },

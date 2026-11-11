@@ -50,7 +50,7 @@ fun NotebookPicker(
             readOnly = true,
             singleLine = true,
             label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-            shape = RoundedCornerShape(8.dp),
+            shape = MaterialTheme.shapes.extraSmall,
             modifier = Modifier.fillMaxWidth()
         )
         Box(

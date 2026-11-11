@@ -251,7 +251,7 @@ private fun PortalTabRow(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(MaterialTheme.shapes.extraSmall)
                     .clickable { onSelectIndex(index) }
                     .padding(vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -276,7 +276,7 @@ private fun PortalTabRow(
                             } else {
                                 Color.Transparent
                             },
-                            shape = RoundedCornerShape(2.dp)
+                            shape = MaterialTheme.shapes.extraSmall
                         )
                 )
             }

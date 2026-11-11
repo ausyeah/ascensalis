@@ -75,12 +75,12 @@ private fun FilterMenuButton(
     }
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(MaterialTheme.shapes.large)
             .background(
                 if (expanded) MaterialTheme.colorScheme.primaryContainer
                 else Color.Transparent
             )
-            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .border(1.dp, borderColor, MaterialTheme.shapes.large)
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically

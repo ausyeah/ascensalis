@@ -164,7 +164,7 @@ private fun ReviewQuestionBody(
                                     contentDescription = stringResource(R.string.edit_figures),
                                     modifier = Modifier
                                         .height(120.dp)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(MaterialTheme.shapes.extraSmall)
                                 )
                             }
                         }
@@ -226,7 +226,7 @@ private fun ReviewQuestionBody(
             } else {
                 // 遮罩：浅色块 + 居中按钮。不透亮背景，防止答案从视觉缝隙里「透」出来
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -315,7 +315,7 @@ private fun ReviewRateButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier.height(46.dp),
-        shape = RoundedCornerShape(10.dp),
+        shape = MaterialTheme.shapes.small,
         colors = ButtonDefaults.buttonColors(
             containerColor = color,
             disabledContainerColor = color.copy(alpha = 0.35f)

@@ -68,13 +68,13 @@ internal fun QuestionContextCard(
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.large,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
-                .clip(RoundedCornerShape(16.dp))
+                .clip(MaterialTheme.shapes.large)
                 .animateContentSize()
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
@@ -164,7 +164,7 @@ internal fun QuestionContextCard(
 private fun MetaChip(text: String) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = RoundedCornerShape(6.dp)
+        shape = MaterialTheme.shapes.extraSmall
     ) {
         Text(
             text = text,

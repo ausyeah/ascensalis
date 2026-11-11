@@ -264,7 +264,7 @@ private fun WallSummaryCard(
     val percent = if (total <= 0) 0 else unlockedCount * 100 / total
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             width = 1.dp,
@@ -351,7 +351,7 @@ private fun BadgeCell(
 ) {
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally

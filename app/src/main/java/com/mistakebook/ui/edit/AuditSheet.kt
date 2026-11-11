@@ -124,7 +124,7 @@ fun AuditSheet(
 @Composable
 private fun AuditIssueRow(issue: TextAudit.Issue) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         modifier = Modifier.fillMaxWidth()
     ) {

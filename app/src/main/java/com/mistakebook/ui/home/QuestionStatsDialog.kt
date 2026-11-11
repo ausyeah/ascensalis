@@ -169,7 +169,7 @@ private fun BarGroup(rows: List<StatBar>, total: Int) {
                             .height(12.dp)
                             .background(
                                 palette[index % palette.size].copy(alpha = 0.85f),
-                                RoundedCornerShape(3.dp)
+                                MaterialTheme.shapes.extraSmall
                             )
                     )
                 }

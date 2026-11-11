@@ -270,7 +270,7 @@ internal fun CaptureDonePlaceholder(label: String, modifier: Modifier = Modifier
     Box(
         modifier = modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(28.dp))
+            .clip(MaterialTheme.shapes.extraLarge)
             .background(Color.White.copy(alpha = 0.08f))
             .semantics(mergeDescendants = true) { disabled() },
         contentAlignment = Alignment.Center
@@ -328,7 +328,7 @@ internal fun CaptureFlightOverlay(
                 clip = true
             }
             .size(width = with(LocalDensity.current) { baseW.toDp() }, height = with(LocalDensity.current) { baseH.toDp() })
-            .border(2.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
+            .border(2.dp, Color.White.copy(alpha = 0.9f), MaterialTheme.shapes.medium)
     ) {
         Image(
             bitmap = flight.bitmap,

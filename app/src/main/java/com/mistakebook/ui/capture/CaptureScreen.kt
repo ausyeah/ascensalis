@@ -530,9 +530,9 @@ fun CaptureScreen(
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(MaterialTheme.shapes.extraLarge)
                     .background(Color.Black)
-                    .border(1.dp, ViewfinderBorder, RoundedCornerShape(24.dp))
+                    .border(1.dp, ViewfinderBorder, MaterialTheme.shapes.extraLarge)
                     // 放在 padding 之后：量到的是卡片本身（不是含外边距的格子），
                     // 飞行动画的起点必须和用户看到的卡片边缘严格重合。
                     .onGloballyPositioned { viewfinderRect = it.boundsInWindow() }
@@ -568,7 +568,7 @@ fun CaptureScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(Color.White.copy(alpha = 0.55f))
-                            .border(width = 3.dp, color = Color.White, shape = RoundedCornerShape(24.dp))
+                            .border(width = 3.dp, color = Color.White, shape = MaterialTheme.shapes.extraLarge)
                     )
                 }
 

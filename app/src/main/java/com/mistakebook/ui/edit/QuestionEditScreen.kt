@@ -153,7 +153,7 @@ fun QuestionEditScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(MaterialTheme.shapes.extraSmall)
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                                 .padding(12.dp)
                         ) {
@@ -169,7 +169,7 @@ fun QuestionEditScreen(
                     // 原图：可预览、可重新裁剪/旋转（复用裁剪页，不重新识别）
                     Card(
                         onClick = { onRecrop(draft.imagePath) },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = MaterialTheme.shapes.extraSmall,
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface
                         )
@@ -224,7 +224,7 @@ fun QuestionEditScreen(
                                         contentDescription = stringResource(R.string.edit_figures),
                                         modifier = Modifier
                                             .height(96.dp)
-                                            .clip(RoundedCornerShape(6.dp))
+                                            .clip(MaterialTheme.shapes.extraSmall)
                                     )
                                     IconButton(
                                         onClick = { viewModel.removeFigure(ref) },

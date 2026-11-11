@@ -70,7 +70,7 @@ fun ExamCountdownCard(container: AppContainer) {
     var showEventManager by remember { mutableStateOf(false) }
 
     Card(
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier
             .fillMaxWidth()
@@ -504,7 +504,7 @@ private fun CustomEventManagerDialog(
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier
                 .fillMaxWidth()

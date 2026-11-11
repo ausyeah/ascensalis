@@ -708,7 +708,7 @@ internal fun OcrProfileCard(
         profile.id == com.mistakebook.data.prefs.OcrProfile.DEFAULT_DEEPSEEK_ID
 
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.medium,
         color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         border = BorderStroke(

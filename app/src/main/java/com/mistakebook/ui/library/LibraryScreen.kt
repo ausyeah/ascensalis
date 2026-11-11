@@ -208,14 +208,23 @@ fun LibraryScreen(
             )
         },
         floatingActionButton = {
+            // 与首页右下一对胶囊**同一视觉族**：primaryContainer 底色 +
+            // onPrimaryContainer 内容色 + 12dp 间距。此前用默认 primary 色、
+            // 10dp 间距，两个页面的悬浮按钮像两套设计。
             Column(horizontalAlignment = Alignment.End) {
                 FloatingActionButton(
                     onClick = { importLauncher.launch(arrayOf("*/*")) },
-                    modifier = Modifier.padding(bottom = 10.dp)
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(bottom = 12.dp)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.library_import))
                 }
-                FloatingActionButton(onClick = { showNewDialog = true }) {
+                FloatingActionButton(
+                    onClick = { showNewDialog = true },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ) {
                     Icon(Icons.Default.Add, contentDescription = stringResource(R.string.library_new))
                 }
             }

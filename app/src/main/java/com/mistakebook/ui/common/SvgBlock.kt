@@ -128,7 +128,7 @@ fun SvgBlock(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.extraSmall)
                 .padding(10.dp)
         )
         return

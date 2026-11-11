@@ -466,7 +466,7 @@ private fun ImageBlock(path: String, alt: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.extraSmall)
                 .padding(8.dp)
         )
         return
@@ -709,9 +709,9 @@ private fun MathImage(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 4.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(MaterialTheme.shapes.extraSmall)
                     .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f))
-                    .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), MaterialTheme.shapes.extraSmall)
                     .padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
                 Row(
@@ -781,7 +781,7 @@ fun NoteEditor(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
+                .clip(MaterialTheme.shapes.extraSmall)
                 .clickable { editing = true; draft = note }
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                 .padding(12.dp)
@@ -1421,7 +1421,7 @@ private fun CodeBlock(
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = MaterialTheme.shapes.extraSmall,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)
@@ -1443,7 +1443,7 @@ private fun CodeBlock(
                 )
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(MaterialTheme.shapes.extraSmall)
                         .clickable {
                             clipboardManager.setText(AnnotatedString(text))
                             Toast.makeText(context, "代码已复制到剪贴板", Toast.LENGTH_SHORT).show()

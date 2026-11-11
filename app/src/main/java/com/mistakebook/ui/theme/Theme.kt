@@ -232,7 +232,10 @@ fun MistakeBookTheme(
         }
     }
 
-    CompositionLocalProvider(LocalDarkTheme provides darkTheme) {
+    CompositionLocalProvider(
+        LocalDarkTheme provides darkTheme,
+        LocalCornerScale provides corner.scale
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = appTypography(fontScale.scale, fontFamilyOf(font)),

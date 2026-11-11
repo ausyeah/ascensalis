@@ -1,5 +1,6 @@
 package com.mistakebook.ui.chat
 
+import com.mistakebook.ui.theme.LocalCornerScale
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -247,8 +248,10 @@ internal fun MessageBubble(
     ) {
         // 连发清角：与同角色相邻的一侧收 4dp（保一丝间隙感不焊死），
         // 悬空侧保持 14dp 大圆角。助手通栏无气泡轮廓，收角只影响 user 分支。
-        val bubbleCorner = 14.dp
-        val joinedCorner = 4.dp
+        // 跟随「方正↔圆润」设置：裸 dp 会让气泡在圆润档下显得突兀。
+        val cornerScale = LocalCornerScale.current
+        val bubbleCorner = 14.dp * cornerScale
+        val joinedCorner = 4.dp * cornerScale
         Surface(
             // v0.0.58：**只有用户消息有气泡**，AI 回复全宽度铺开
             //（对齐 ChatGPT 移动端：用户消息框起来，助手消息通栏）。
@@ -490,7 +493,7 @@ internal fun StreamingDotsIndicator(color: Color) {
                             scaleX = scale
                             scaleY = scale
                         }
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(MaterialTheme.shapes.extraSmall)
                         .background(color)
                 )
             }
@@ -557,7 +560,7 @@ internal fun BubbleImage(path: String, onImageClick: (String) -> Unit = {}) {
         contentDescription = stringResource(R.string.chat_image_content_description),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(MaterialTheme.shapes.extraSmall)
             .clickable { onImageClick(path) }
     )
 }
@@ -840,7 +843,7 @@ internal fun ThinkingBlock(
         modifier = Modifier
             .fillMaxWidth()
             .onSizeChanged { blockHeight = it.height }
-            .clip(RoundedCornerShape(8.dp))
+            .clip(MaterialTheme.shapes.extraSmall)
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
             // 整块不再可点（v0.0.96）：折叠收在一颗固定按钮里。
             // 之前整块都能点，用户想选中/复制思考里的文字却总是把块折叠了。
