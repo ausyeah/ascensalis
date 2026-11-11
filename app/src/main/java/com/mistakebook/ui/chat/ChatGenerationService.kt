@@ -354,6 +354,10 @@ class ChatGenerationService : Service() {
                         // 数学计算器（v0.0.114）：算术外包给确定性求值器。
                         // 大模型心算多步算术错一位就是整题全错；无副作用，始终提供。
                         add(com.mistakebook.data.chat.MathTools.calculatorTool())
+                        // 理科工具链（v0.0.151）：精确分数、方程求解、多项式求导、
+                        // 统计量、数列、单位换算——ToRA/PoT 路线的结论是把计算
+                        // 外包给确定性工具，越弱的模型收益越大。无副作用，始终提供。
+                        addAll(com.mistakebook.data.chat.ScienceTools.all())
                         // 长期记忆写入（v0.0.128，issue #42）：模型可把用户的身份/
                         // 目标/偏好记进记忆库；此前只有用户在设置里手写一条路。
                         addAll(com.mistakebook.data.chat.MemoryTools.all())
@@ -488,6 +492,8 @@ class ChatGenerationService : Service() {
                     val stageLabel = when {
                         call.name == SearchTools.WEB_SEARCH -> "正在联网搜索…"
                         com.mistakebook.data.chat.MathTools.handles(call.name) -> "正在精确计算…"
+                        com.mistakebook.data.chat.ScienceTools.handles(call.name) ->
+                            com.mistakebook.data.chat.ScienceTools.stageLabel(call.name)
                         call.name == com.mistakebook.data.library.LibraryTools.SEARCH -> "正在检索资料库…"
                         com.mistakebook.data.library.LibraryTools.handles(call.name) -> "正在读取资料库…"
                         call.name == MediaTools.DESCRIBE_IMAGE ||
@@ -680,6 +686,11 @@ class ChatGenerationService : Service() {
                                 askId = call.id,
                                 sessionId = sessionId
                             )
+                        }
+
+                        // K2 的 when(call.name) 不收布尔条件分支——用 in + contains
+                        in com.mistakebook.data.chat.ScienceTools -> {
+                            com.mistakebook.data.chat.ScienceTools.execute(call.name, call.arguments)
                         }
 
                         else -> "未识别的工具「${call.name}」，请改用你确定存在的工具。"
