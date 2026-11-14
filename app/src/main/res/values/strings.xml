@@ -693,6 +693,11 @@
     <string name="chat_truncated_title">回答超长被截断</string>
     <string name="chat_truncated_body">回答达到了长度上限。可以让它「简短一点」，或换一个上下文更长的模型。</string>
     <string name="chat_truncated_badge">已截断</string>
+    <string name="chat_content_filter_suffix">（回答被模型安全策略终止，已输出的部分保留）</string>
+    <string name="chat_continue_generate">继续生成</string>
+    <string name="chat_tts_toggle">朗读回答</string>
+    <string name="chat_tts_stop">停止朗读</string>
+    <string name="chat_tts_unavailable">本机没有可用的语音合成引擎</string>
     <string name="chat_dismiss">知道了</string>
     <string name="chat_stopped_badge">已停止</string>
     <string name="chat_failed_badge">发送失败</string>

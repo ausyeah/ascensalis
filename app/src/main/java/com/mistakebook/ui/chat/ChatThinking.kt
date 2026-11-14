@@ -146,7 +146,10 @@ object ChatThinking {
                 }
             }
         }
-        return thinking.toString().trim() to answer.toString().trim()
+        // 结束原因标记（<finish-reason …/>）是控制符不是内容：
+        // 显示 / 复制 / 导出路径都从这里出，统一剥掉。
+        val strip = { text: String -> ChatFinish.strip(text) }
+        return strip(thinking.toString()).trim() to strip(answer.toString()).trim()
     }
 
     /** 标记之间与标记之后各留一个换行，纯粹为了显示时各占一行。 */

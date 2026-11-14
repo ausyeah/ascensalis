@@ -434,6 +434,15 @@ class ChatGenerationService : Service() {
                                 )
                                 wasTruncated = wasTruncated ||
                                     event.finishReason == FINISH_REASON_LENGTH
+                                // 安全策略终止（学 chat-demo 的 refusal 处理）：
+                                // 已流出的内容保留，正文尾部追加一句说明——
+                                // 直接 injectAnswer（不走 onDelta，不回传 API）。
+                                if (event.finishReason == FINISH_REASON_CONTENT_FILTER) {
+                                    rounds.injectAnswer(
+                                        "\n\n" + getString(R.string.chat_content_filter_suffix)
+                                    )
+                                    publishPreview()
+                                }
                             }
 
                             is ChatStreamEvent.Failed -> {
@@ -789,6 +798,16 @@ class ChatGenerationService : Service() {
             // 收尾必须放 finally：取消时 CancellationException 已经抛出去了。
             withContext(NonCancellable) {
                 flush()
+                // 截断标记落库（v0.0.154）：finish_reason=length 的消息持久化
+                // 记号，「继续生成」入口据此常驻——此前徽标只在本次会话内存里，
+                // 重启后用户看到的残缺回答与完整回答一模一样。
+                if (status == MessageStatus.DONE && wasTruncated) {
+                    rounds.injectAnswer(ChatFinish.LENGTH_MARKER)
+                    repository.updateAssistantContent(
+                        assistantId,
+                        joinThinkingAndAnswer(rounds.answer, rounds.thinking, rounds.thinkingMillis)
+                    )
+                }
                 repository.finishAssistantMessage(
                     id = assistantId,
                     status = status,
@@ -1307,6 +1326,9 @@ private const val WRITE_THROTTLE_MS = 500L
         /** 预览节流：与原实现一致，避免每个 token 都让界面重组。 */
 
         private const val FINISH_REASON_LENGTH = "length"
+
+        /** OpenAI 兼容口径的安全策略终止原因。 */
+        private const val FINISH_REASON_CONTENT_FILTER = "content_filter"
 
         /**
          * 启动一次后台生成。

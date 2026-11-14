@@ -273,6 +273,8 @@ internal fun MessageList(
             val visibleMessage = if (preview != null) message.copy(content = preview) else message
             MessageBubble(
                 message = visibleMessage,
+                // reverseLayout：index 0 = 对话最后一条（最新）
+                isLastMessage = index == 0,
                 aboveSameRole = aboveSameRole,
                 belowSameRole = belowSameRole,
                 images = bubbleImages[message.id].orEmpty(),

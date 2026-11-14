@@ -55,6 +55,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
@@ -173,6 +174,8 @@ internal fun MessageBubble(
     aboveSameRole: Boolean = false,
     /** 屏幕下方相邻消息同角色。 */
     belowSameRole: Boolean = false,
+    /** 是否为对话最后一条：「继续生成」入口只在最后一条截断回答上出现。 */
+    isLastMessage: Boolean = false,
     images: List<String>,
     /** 非图片附件（PDF/文档等）。点击交给系统打开，本应用不做阅读器。 */
     files: List<BubbleFile>,
@@ -423,6 +426,7 @@ internal fun MessageBubble(
         StatusRow(
             message = message,
             isUser = isUser,
+            isLastMessage = isLastMessage,
             onCopy = onCopy,
             onRetry = onRetry,
             onContinue = onContinue,
@@ -583,6 +587,8 @@ internal fun BubbleImage(path: String, onImageClick: (String) -> Unit = {}) {
 internal fun StatusRow(
     message: ChatMessage,
     isUser: Boolean,
+    /** 仅对话最后一条：截断的「继续生成」入口不进历史区。 */
+    isLastMessage: Boolean = false,
     onCopy: (String) -> Unit,
     onRetry: (Long) -> Unit,
     onContinue: (Long) -> Unit,
@@ -683,6 +689,49 @@ internal fun StatusRow(
                         Icon(
                             Icons.AutoMirrored.Filled.Note,
                             contentDescription = stringResource(R.string.chat_save_to_note),
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                // 继续生成（chat-demo 的 canContinueReply）：输出预算耗尽的截断
+                // 回答接着写。仅最后一条——历史区里的残缺回答点了也只会往末尾
+                // 追加一轮「继续」，入口留在原位反而误导。
+                if (isLastMessage && ChatFinish.isLengthTruncated(message.content)) {
+                    TextButton(
+                        onClick = { onContinue(message.id) },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.chat_continue_generate),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+                // 朗读（chat-demo 的 ReadAloudButton）：框架自带 TTS，零依赖。
+                // 文本先经 TtsText 清洗——Markdown 记号与公式读出来是噪声。
+                val answerForTts = remember(message.content) {
+                    TtsText.plain(ChatThinking.answerOf(message.content))
+                }
+                if (answerForTts.isNotBlank()) {
+                    val context = LocalContext.current
+                    val speakingId by TtsPlayer.speakingMessageId.collectAsState()
+                    val speakingHere = speakingId == message.id
+                    IconButton(
+                        onClick = {
+                            if (speakingHere) {
+                                TtsPlayer.stop()
+                            } else {
+                                TtsPlayer.toggle(context, message.id, answerForTts)
+                            }
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            if (speakingHere) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = stringResource(
+                                if (speakingHere) R.string.chat_tts_stop else R.string.chat_tts_toggle
+                            ),
                             modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
