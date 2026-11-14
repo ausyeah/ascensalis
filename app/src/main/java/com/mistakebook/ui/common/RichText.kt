@@ -46,6 +46,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import android.os.SystemClock
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -1403,15 +1406,44 @@ fun rememberStreamTextDebounced(key: Any?, text: String, streaming: Boolean): St
         if (state != text) state = text
         return text
     }
+    // 下次允许提交的时刻（uptime ms）。
+    val updatableAt = remember(key) { mutableLongStateOf(0L) }
     LaunchedEffect(key, text) {
-        delay(STREAM_DEBOUNCE_MS)
+        val wait = updatableAt.longValue - SystemClock.uptimeMillis()
+        if (wait > 0) delay(wait)
+        // 提交 → 等重组落帧 → 量出真实渲染耗时 → 下次间隔 = 耗时 × 2。
+        // LaunchedEffect 以 text 为键：新内容到达时挂起的 delay 被取消重启，
+        // 提交的永远是最新文本——连续输入自动合并（chat-demo 同语义）。
+        val started = SystemClock.uptimeMillis()
         state = text
+        withFrameNanos { }
+        val cost = SystemClock.uptimeMillis() - started
+        updatableAt.longValue = SystemClock.uptimeMillis() +
+            streamThrottleIntervalMs(cost)
     }
     return state
 }
 
-/** 流式文本防抖间隔（毫秒）。与生成端 220ms 节流错开，合并近一半的中间帧。 */
-private const val STREAM_DEBOUNCE_MS = 100L
+/**
+ * 流式文本两次提交的间隔（毫秒）——**自适应**节流。
+ *
+ * 移植自 deepseek-ai/chat-demo 的 useThrottleMarkdownRender：
+ * `下次间隔 = 上次渲染耗时 × 2`，封顶 [STREAM_MAX_INTERVAL_MS]。
+ * 与旧实现（固定 100ms，及生成端按长度的 50–150ms 曲线）的本质区别：
+ * 这里量的是**本机真实的渲染成本**——旗舰机渲染快就高频刷新，
+ * 性能一般的设备自动降频，同一个 App 在不同档位的手机上都顺。
+ *
+ * 50ms 下限与生成端发布曲线对齐：短回答必须跟手，不能因为
+ * 「成本×2 算出来 32ms」而在低端机上高频空转。
+ */
+internal fun streamThrottleIntervalMs(costMs: Long): Long =
+    (costMs * 2L).coerceIn(STREAM_MIN_INTERVAL_MS, STREAM_MAX_INTERVAL_MS)
+
+/** 两次提交的最长间隔（chat-demo 的 MAX_WAIT=2000）。 */
+private const val STREAM_MAX_INTERVAL_MS = 2000L
+
+/** 短回答跟手的下限：对齐生成端发布曲线（streamPublishIntervalMs）的下限。 */
+private const val STREAM_MIN_INTERVAL_MS = 50L
 @Composable
 private fun CodeBlock(
     text: String,

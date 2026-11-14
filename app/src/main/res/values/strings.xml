@@ -741,6 +741,7 @@
     <!-- 复制思考过程的提示（v0.0.96）：原来是硬编码在 Kotlin 里的 -->
     <string name="chat_thinking_copied">思考过程已复制</string>
     <string name="chat_thinking_ongoing">正在思考…</string>
+    <string name="chat_thinking_duration">已思考（用时 %1$d 秒）</string>
     <string name="chat_thinking_chars">%1$d 字</string>
 
     <string name="chat_image_unreadable">（图片无法显示）</string>

@@ -15,6 +15,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.view.WindowManager
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -108,6 +109,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.alpha
@@ -321,6 +323,11 @@ internal fun MessageBubble(
                 val (thinking, answer) = remember(message.content, isStreaming) {
                     ChatThinking.split(message.content, isStreaming)
                 }
+                // 思考用时（chat-demo 的「已思考（用时 N 秒）」）：存在开标记
+                // data-ms 属性里，流式结束后的消息才有；流式中显示 shimmer。
+                val thinkingDurationMs = remember(message.content) {
+                    ChatThinking.durationOf(message.content)
+                }
                 // 流式时把尾巴上未闭合的公式先藏起来：半截公式一旦进 RichText
                 // 就会先显示源码、拼完再跳成公式。等配对符到齐再整段渲染滑入。
                 val displayAnswer = rememberStreamTextDebounced(
@@ -334,6 +341,11 @@ internal fun MessageBubble(
                     },
                     streaming = isStreaming
                 )
+                // 等待三点（chat-demo 的 waiting dots）：流式已开始但思考 /
+                // 正文 / 阶段提示都还没有——不放的话用户看到的是一只空气泡。
+                if (isStreaming && answer.isBlank() && thinking.isBlank() && stage == null) {
+                    WaitingDots()
+                }
                 // 阶段提示：联网搜索要几秒到十几秒，没这行就是又一例「点了没反应」。
                 // 不要求内容为空——工具循环里搜索期间气泡**带着已生成的内容**，
                 // 阶段行显示在内容上方，用户知道「还在搜，但没断」。
@@ -360,6 +372,7 @@ internal fun MessageBubble(
                         // v0.0.126（issue #39）：不再锁死，生成全程都可手动折叠；
                         // 结束输出正文时自动折叠（用户手动动过则以用户为准）。
                         mathRenderer = mathRenderer,
+                        durationMs = thinkingDurationMs,
                         // 思考块与正文同属一条消息：共用消息 id 隔离防抖
                         debounceKey = message.id,
                         onThinkingToggleWindow = onThinkingToggleWindow,
@@ -748,6 +761,8 @@ internal fun ThinkingBlock(
     text: String,
     streaming: Boolean,
     mathRenderer: com.mistakebook.math.MathRenderer,
+    /** 思考累计用时（毫秒）。流式中的消息还没有——此时标题走 shimmer。 */
+    durationMs: Long? = null,
     debounceKey: Any? = null,
     /**
      * 折叠状态已翻、布局还没跑的这一刻（新状态已经生效）。
@@ -863,15 +878,20 @@ internal fun ThinkingBlock(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
-            Text(
-                text = if (streaming) {
-                    stringResource(R.string.chat_thinking_ongoing)
-                } else {
-                    stringResource(R.string.chat_thinking_chars, text.length)
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // 右角状态（chat-demo 同款语义）：流式中 shimmer 的「正在思考…」；
+            // 结束后有思考用时给用时，没有（老消息）退回字数。
+            if (streaming) {
+                ShimmerLabel(text = stringResource(R.string.chat_thinking_ongoing))
+            } else {
+                val status = durationMs?.takeIf { it > 0 }
+                    ?.let { stringResource(R.string.chat_thinking_duration, (it / 1000L).toInt() + 1) }
+                    ?: stringResource(R.string.chat_thinking_chars, text.length)
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Spacer(Modifier.width(4.dp))
 
             // 折叠/展开是一颗**固定位置**的按钮（v0.0.96 用户要求）：
@@ -953,5 +973,73 @@ internal fun ThinkingBlock(
             }
         }
     }
+
+
 }
 
+/**
+ * 流式等待三点（学 deepseek-ai/chat-demo 的 waiting dots）：流式已开始
+ * 但思考 / 正文 / 阶段提示都还没有——不放的话用户看到的是一只空气泡，
+ * 「是不是卡了」无从判断。
+ *
+ * 三颗点按相位错开做透明度脉动（整组 900ms 循环），不是逐颗跳跃——
+ * 跳跃的版面会上下抖，脉动高度恒定、不参与锚定补偿。
+ */
+@Composable
+internal fun WaitingDots(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "waitingDots")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
+        label = "waitingPhase"
+    )
+    Row(
+        modifier = modifier.padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        repeat(3) { index ->
+            // 每颗错开 1/3 相位；三角波 0→1→0 控制透明度
+            val t = ((phase * 3f) - index).mod(3f) / 3f
+            val alpha = 0.25f + 0.75f * (1f - kotlin.math.abs(t * 2f - 1f))
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha))
+            )
+        }
+    }
+}
+
+/**
+ * 「正在思考…」的 shimmer（学 chat-demo 的 styles.shimmer）：一道高亮
+ * 沿文字扫过。刷子坐标按固定 96dp 窗口平移，不量文字宽——标签本身
+ * 就几个字，扫过窗口覆盖它绰绰有余。
+ */
+@Composable
+internal fun ShimmerLabel(text: String, modifier: Modifier = Modifier) {
+    val base = MaterialTheme.colorScheme.onSurfaceVariant
+    val highlight = MaterialTheme.colorScheme.primary
+    val transition = rememberInfiniteTransition(label = "thinkingShimmer")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing)),
+        label = "thinkingShimmerShift"
+    )
+    val windowPx = with(LocalDensity.current) { 96.dp.toPx() }
+    val x = shift * windowPx * 2f - windowPx
+    val brush = Brush.linearGradient(
+        0f to base.copy(alpha = 0.4f),
+        0.5f to highlight,
+        1f to base.copy(alpha = 0.4f),
+        start = Offset(x, 0f),
+        end = Offset(x + windowPx, 0f)
+    )
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall.copy(brush = brush),
+        modifier = modifier
+    )
+}

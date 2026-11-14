@@ -27,13 +27,49 @@ package com.mistakebook.net.llm
  *
  * 纯 Kotlin、无 Android 依赖，JVM 单测直接覆盖。
  */
-class ToolRoundState {
+class ToolRoundState(
+    /** 挂钟，注入以便 JVM 单测推进时间。 */
+    private val nowMs: () -> Long = System::currentTimeMillis
+) {
 
     private val answerAll = StringBuilder()
     private val thinkingAll = StringBuilder()
 
     private val answerRound = StringBuilder()
     private val thinkingRound = StringBuilder()
+
+    /**
+     * 思考**累计**用时（毫秒）——学习 deepseek-ai/chat-demo 的
+     * 「已思考（用时 N 秒）」（其 view.ts 的 block.elapsedSeconds）。
+     *
+     * ## 为什么是累计而不是首尾差
+     *
+     * 工具循环里思考与工具交错：思考 → 搜索 → 再思考 → 作答。首尾差会把
+     * 搜索的十几秒也算进「思考」。所以按段累计：第一条思考增量开表
+     * （[markThinkingStart]），正文增量 / 工具调用 / 流结束任意一个先到
+     * 就停表（[markThinkingStop]），下一轮思考再开表。
+     */
+    var thinkingMillis = 0L
+        private set
+
+    private var thinkingActive = false
+    private var thinkingStartedAtMs = 0L
+
+    /** 思考开始（第一条非空思考增量，或工具轮后的新一轮思考）。已在计时不重复开表。 */
+    fun markThinkingStart() {
+        if (!thinkingActive) {
+            thinkingActive = true
+            thinkingStartedAtMs = nowMs()
+        }
+    }
+
+    /** 思考暂停（正文增量 / 工具调用 / 流结束——任何一个先到都算）。 */
+    fun markThinkingStop() {
+        if (thinkingActive) {
+            thinkingMillis += nowMs() - thinkingStartedAtMs
+            thinkingActive = false
+        }
+    }
 
     /** 收到正文增量。两套缓冲同时追加。 */
     fun onDelta(text: String) {

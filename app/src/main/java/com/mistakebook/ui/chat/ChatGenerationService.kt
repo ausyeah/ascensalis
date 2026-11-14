@@ -277,10 +277,14 @@ class ChatGenerationService : Service() {
         val answerLoopDetector = ChatLoopDetector()
         val thinkingLoopDetector = ChatLoopDetector()
 
-        fun joinThinkingAndAnswer(answer: String, thought: String): String = when {
+        fun joinThinkingAndAnswer(
+            answer: String,
+            thought: String,
+            thinkingMillis: Long = 0L
+        ): String = when {
             thought.isBlank() -> answer
-            answer.isBlank() -> ChatThinking.tags(thought)
-            else -> ChatThinking.tags(thought) + "\n\n" + answer
+            answer.isBlank() -> ChatThinking.tags(thought, thinkingMillis)
+            else -> ChatThinking.tags(thought, thinkingMillis) + "\n\n" + answer
         }
 
         suspend fun flush() {
@@ -290,7 +294,7 @@ class ChatGenerationService : Service() {
             lastWriteAt = System.currentTimeMillis()
             repository.updateAssistantContent(
                 assistantId,
-                joinThinkingAndAnswer(rounds.answer, rounds.thinking)
+                joinThinkingAndAnswer(rounds.answer, rounds.thinking, rounds.thinkingMillis)
             )
         }
 
@@ -325,7 +329,7 @@ class ChatGenerationService : Service() {
             ChatGenerationBus.publish(
                 ChatGenerationBus.Snapshot(
                     assistantId = assistantId,
-                    content = joinThinkingAndAnswer(rounds.answer, rounds.thinking),
+                    content = joinThinkingAndAnswer(rounds.answer, rounds.thinking, rounds.thinkingMillis),
                     sessionId = sessionId
                 )
             )
@@ -387,6 +391,8 @@ class ChatGenerationService : Service() {
                         when (event) {
                             is ChatStreamEvent.Thinking -> {
                                 if (event.text.isNotEmpty()) {
+                                    // 思考计时（v0.0.153，学 chat-demo 的「已思考（用时 N 秒）」）
+                                    rounds.markThinkingStart()
                                     thinking.append(event.text)
                                     rounds.onThinking(event.text)
                                     publishPreview()
@@ -399,6 +405,7 @@ class ChatGenerationService : Service() {
                             }
 
                             is ChatStreamEvent.Delta -> {
+                                if (event.text.isNotEmpty()) rounds.markThinkingStop()
                                 buffer.append(event.text)
                                 rounds.onDelta(event.text)
                                 publishPreview()
@@ -410,7 +417,10 @@ class ChatGenerationService : Service() {
                                 }
                             }
 
-                            is ChatStreamEvent.ToolCalls -> pendingCalls = event.calls
+                            is ChatStreamEvent.ToolCalls -> {
+                                rounds.markThinkingStop()
+                                pendingCalls = event.calls
+                            }
 
                             is ChatStreamEvent.Done -> {
                                 // 工具循环里每轮是一次独立 API 调用，用量要**累加**；
@@ -486,7 +496,7 @@ class ChatGenerationService : Service() {
                     // 而界面是整体替换语义（ChatViewModel: streamingContent = snap.content）
                     // ——正在流的回答瞬间清空、只剩一行「正在联网搜索…」，
                     // 用户看到的就是「调用搜索之后断输出」。内容一直在，只是去搜了个索。
-                    val currentText = joinThinkingAndAnswer(rounds.answer, rounds.thinking)
+                    val currentText = joinThinkingAndAnswer(rounds.answer, rounds.thinking, rounds.thinkingMillis)
                     // stage 文案按工具类型给：早先固定写「正在联网搜索…」，
                     // 传图 / 生图 / 读资料时也这么显示，用户会以为在搜网页。
                     val stageLabel = when {
@@ -704,7 +714,7 @@ class ChatGenerationService : Service() {
                     ChatGenerationBus.publish(
                         ChatGenerationBus.Snapshot(
                             assistantId = assistantId,
-                            content = joinThinkingAndAnswer(rounds.answer, rounds.thinking),
+                            content = joinThinkingAndAnswer(rounds.answer, rounds.thinking, rounds.thinkingMillis),
                             sessionId = sessionId
                         )
                     )
@@ -751,7 +761,7 @@ class ChatGenerationService : Service() {
                     runCatching {
                         container.memoryExtractor.maybeExtract(
                             userText = extractUserText,
-                            answer = joinThinkingAndAnswer(rounds.answer, rounds.thinking),
+                            answer = joinThinkingAndAnswer(rounds.answer, rounds.thinking, rounds.thinkingMillis),
                             profile = profile,
                             memoryWrittenThisTurn = alreadyWritten
                         )
@@ -789,7 +799,7 @@ class ChatGenerationService : Service() {
                 ChatGenerationBus.publish(
                     ChatGenerationBus.Snapshot(
                         assistantId = assistantId,
-                        content = joinThinkingAndAnswer(rounds.answer, rounds.thinking),
+                        content = joinThinkingAndAnswer(rounds.answer, rounds.thinking, rounds.thinkingMillis),
                         finished = true,
                         promptTokens = promptTokens,
                         truncated = wasTruncated,

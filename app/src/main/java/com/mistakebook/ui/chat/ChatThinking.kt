@@ -31,8 +31,17 @@ object ChatThinking {
     const val OPEN = "<think>"
     const val CLOSE = "</think>"
 
+    /**
+     * 开标记（带可选属性）。v0.0.153（学 deepseek-ai/chat-demo）：思考用时
+     * 存进开标记的 `data-ms` 属性——`<think data-ms="12345">`。零迁移拿到
+     * 「已思考（用时 N 秒）」这个界面要素；无属性的老消息继续用普通 `<think>`。
+     */
+    private val OPEN_TAG = Regex("""<think(\s[^>]*)?>""")
+
+    private val DURATION_ATTR = Regex("""data-ms="(\d+)"""")
+
     /** 内容里是否已经带了标记。 */
-    fun isWrapped(text: String): Boolean = text.contains(OPEN)
+    fun isWrapped(text: String): Boolean = OPEN_TAG.containsMatchIn(text)
 
     /**
      * 把一条消息拆成「思考 / 正文」。
@@ -74,9 +83,13 @@ object ChatThinking {
         // 当前是否处于标记内。未闭合的标记会一直是 true——
         // 那时剩余内容全算思考，与「宁可多显示」的原意一致。
         var inThinking = false
+        // 开标记 data-ms 属性里的思考用时（毫秒）。只有第一个带属性的
+        // 开标记生效——多对标记只记第一份（时长已经覆盖全程）。
+        var durationMs: Long? = null
 
         while (cursor < raw.length) {
-            val open = raw.indexOf(OPEN, cursor)
+            val openMatch = OPEN_TAG.find(raw, cursor)
+            val open = openMatch?.range?.first ?: -1
             val close = raw.indexOf(CLOSE, cursor)
 
             when {
@@ -85,8 +98,13 @@ object ChatThinking {
                     if (!inThinking) {
                         answer.append(raw, cursor, open)
                         inThinking = true
+                        if (durationMs == null) {
+                            durationMs = openMatch?.let { match ->
+                                DURATION_ATTR.find(match.value)?.groupValues?.get(1)?.toLongOrNull()
+                            }
+                        }
                     }
-                    cursor = open + OPEN.length
+                    cursor = openMatch!!.range.last + 1
                 }
 
                 // 下一个是结束标记
@@ -132,7 +150,28 @@ object ChatThinking {
     }
 
     /** 标记之间与标记之后各留一个换行，纯粹为了显示时各占一行。 */
-    fun tags(text: String): String = if (isWrapped(text)) text else "\n$OPEN$text$CLOSE"
+    fun tags(text: String): String = tags(text, durationMs = null)
+
+    /**
+     * 带用时的包裹：时长写进开标记的 `data-ms` 属性（见 [durationOf]）。
+     */
+    fun tags(text: String, durationMs: Long?): String {
+        if (isWrapped(text)) return text
+        return if (durationMs != null && durationMs > 0) {
+            "\n<think data-ms=\"$durationMs\">$text$CLOSE"
+        } else {
+            "\n$OPEN$text$CLOSE"
+        }
+    }
+
+    /**
+     * 思考用时（毫秒）：从第一个开标记的 `data-ms` 属性读。
+     * 老消息（无属性）返回 null——界面退回字数展示。
+     */
+    fun durationOf(raw: String): Long? =
+        OPEN_TAG.find(raw)?.let { match ->
+            DURATION_ATTR.find(match.value)?.groupValues?.get(1)?.toLongOrNull()
+        }
 
     /** 供界面显示的思考过程，纯文本。 */
     fun thinkingOf(raw: String): String = split(raw).first

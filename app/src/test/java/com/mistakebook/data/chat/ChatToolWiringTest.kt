@@ -73,7 +73,7 @@ class ChatToolWiringTest {
     fun `工具跑完后的快照必须重新取内容`() {
         assertTrue(
             "界面是整体替换语义：拿工具执行前那份内容发一次，会把刚注入的图从屏幕上抹掉",
-            service.contains("content = joinThinkingAndAnswer(rounds.answer, rounds.thinking),\n                            sessionId = sessionId\n                        )\n                    )\n                    llmMessages +=")
+            service.contains("content = joinThinkingAndAnswer(rounds.answer, rounds.thinking, rounds.thinkingMillis),\n                            sessionId = sessionId\n                        )\n                    )\n                    llmMessages +=")
         )
     }
 

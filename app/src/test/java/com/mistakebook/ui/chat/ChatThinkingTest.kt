@@ -1,5 +1,6 @@
 package com.mistakebook.ui.chat
 
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -133,5 +134,36 @@ class ChatThinkingTest {
         assertTrue(ChatThinking.isWrapped("\n<think>x</think>"))
         assertTrue(ChatThinking.isWrapped("<think>x</think>"))
         assertFalse(ChatThinking.isWrapped("普通文本"))
+    }
+
+    // ---- v0.0.153：思考用时存进开标记 data-ms 属性 ----
+
+    @Test
+    fun `带用时的包裹能读回用时`() {
+        val raw = ChatThinking.tags("想一想", durationMs = 12_345L)
+        assertEquals(12_345L, ChatThinking.durationOf(raw))
+        // 拆分语义不受属性影响
+        assertEquals("想一想", ChatThinking.thinkingOf(raw))
+        assertEquals("", ChatThinking.answerOf(raw))
+    }
+
+    @Test
+    fun `普通包裹读不到用时返回 null`() {
+        val raw = ChatThinking.tags("想一想")
+        assertNull(ChatThinking.durationOf(raw))
+    }
+
+    @Test
+    fun `已有标记的内容加时长不重复包裹`() {
+        val raw = ChatThinking.tags("想一想")
+        assertEquals(raw, ChatThinking.tags(raw, durationMs = 500L))
+        assertNull(ChatThinking.durationOf(raw))
+    }
+
+    @Test
+    fun `thinking 与正文混排时用时仍可读`() {
+        val raw = ChatThinking.tags("想一想", durationMs = 12_000L) + "\n\n答案"
+        assertEquals(12_000L, ChatThinking.durationOf(raw))
+        assertEquals("答案", ChatThinking.answerOf(raw))
     }
 }
