@@ -346,7 +346,15 @@ internal fun MessageBubble(
                 )
                 // 等待三点（chat-demo 的 waiting dots）：流式已开始但思考 /
                 // 正文 / 阶段提示都还没有——不放的话用户看到的是一只空气泡。
-                if (isStreaming && answer.isBlank() && thinking.isBlank() && stage == null) {
+                // 纯等待态里底部的 StreamingDotsIndicator 要让位（v0.0.155
+                // 用户截图：两个「生成中」指示器上下重复）。
+                val waitingBeforeContent = waitingBeforeContent(
+                    streaming = isStreaming,
+                    thinkingBlank = thinking.isBlank(),
+                    answerBlank = answer.isBlank(),
+                    stage = stage
+                )
+                if (waitingBeforeContent) {
                     WaitingDots()
                 }
                 // 阶段提示：联网搜索要几秒到十几秒，没这行就是又一例「点了没反应」。
@@ -415,9 +423,10 @@ internal fun MessageBubble(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
-                if (message.status == MessageStatus.STREAMING) {
+                // 流式输出指示器：三点弹性跳动 + 整体呼吸（原来是 6dp 静态蓝点）。
+                // 纯等待态由上面的 WaitingDots 负责——两个指示器不重复渲染。
+                if (message.status == MessageStatus.STREAMING && !waitingBeforeContent) {
                     Spacer(Modifier.height(6.dp))
-                    // 流式输出指示器：三点弹性跳动 + 整体呼吸（原来是 6dp 静态蓝点）
                     StreamingDotsIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -1034,6 +1043,20 @@ internal fun ThinkingBlock(
  * 三颗点按相位错开做透明度脉动（整组 900ms 循环），不是逐颗跳跃——
  * 跳跃的版面会上下抖，脉动高度恒定、不参与锚定补偿。
  */
+/**
+ * 纯等待态判定：流式已开始、思考 / 正文 / 阶段提示都还没有。
+ *
+ * 此时气泡是空的，用 [WaitingDots] 顶替——而气泡底部的
+ * [StreamingDotsIndicator] 必须让位，否则两个「生成中」指示器
+ * 上下重复（v0.0.155 用户截图）。独立成纯函数才能 JVM 单测。
+ */
+internal fun waitingBeforeContent(
+    streaming: Boolean,
+    thinkingBlank: Boolean,
+    answerBlank: Boolean,
+    stage: String?
+): Boolean = streaming && thinkingBlank && answerBlank && stage == null
+
 @Composable
 internal fun WaitingDots(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "waitingDots")
